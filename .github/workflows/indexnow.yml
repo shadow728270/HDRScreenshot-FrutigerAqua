@@ -1,0 +1,59 @@
+name: Notify IndexNow of website updates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: indexnow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Wait for the IndexNow key to be available on GitHub Pages
+        shell: bash
+        env:
+          KEY_URL: https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/indexnow-key.txt
+        run: |
+          KEY="$(tr -d '\r\n' < docs/indexnow-key.txt)"
+          for attempt in $(seq 1 36); do
+            REMOTE="$(curl -fsSL --max-time 12 "$KEY_URL" 2>/dev/null || true)"
+            if [ "$REMOTE" = "$KEY" ]; then
+              echo "Published verification key is available."
+              exit 0
+            fi
+            echo "Waiting for GitHub Pages to publish the verification key ($attempt/36)."
+            sleep 10
+          done
+          echo "IndexNow key file is not live; not submitting a URL yet."
+          exit 1
+
+      - name: Notify IndexNow of updated homepage
+        shell: bash
+        env:
+          SITE_URL: https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/
+          KEY_URL: https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/indexnow-key.txt
+        run: |
+          KEY="$(tr -d '\r\n' < docs/indexnow-key.txt)"
+          HTTP_STATUS="$(curl -sS -L --get \
+            --data-urlencode "url=$SITE_URL" \
+            --data-urlencode "key=$KEY" \
+            --data-urlencode "keyLocation=$KEY_URL" \
+            -o indexnow-response.txt -w '%{http_code}' \
+            'https://api.indexnow.org/indexnow')"
+          echo "IndexNow responded with HTTP $HTTP_STATUS"
+          case "$HTTP_STATUS" in
+            200|202) echo "IndexNow received the homepage update." ;;
+            *) cat indexnow-response.txt; exit 1 ;;
+          esac
