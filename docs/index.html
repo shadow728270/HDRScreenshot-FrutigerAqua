@@ -14,8 +14,11 @@
   <meta property="og:description" content="Free, open-source HDR and Auto HDR screenshot capture, annotation tools, and a Frutiger Aqua-inspired interface for Windows.">
   <meta property="og:url" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
   <meta property="og:site_name" content="HDRSnip Fusion">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
+  <meta property="og:image:alt" content="HDRSnip Fusion HDR screenshot selection overlay with Aqua toolbar and editing tools">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="HDRSnip Fusion | Free HDR Screenshot Tool">
+  <meta name="twitter:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
   <meta name="twitter:description" content="HDR/Auto HDR screenshots, annotations and a Frutiger Aqua interface for Windows.">
   <link rel="sitemap" type="application/xml" href="sitemap.xml">
   <script type="application/ld+json">
@@ -68,6 +71,11 @@
     .orb::after { content:""; display:block; position:absolute; inset:13% -30% auto; border-radius:50%; border-top:4px solid rgba(255,255,255,.76); height:70%; transform:rotate(-24deg); box-shadow:0 -22px 50px rgba(255,255,255,.25); }
     .glasslabel { position:absolute; bottom:8%; left:-2%; right:-2%; text-align:center; padding:14px; border:1px solid rgba(225,255,255,.55); border-radius:99px; background:linear-gradient(110deg,rgba(197,255,252,.40),rgba(23,151,173,.22)); backdrop-filter:blur(16px); box-shadow:inset 0 2px 0 rgba(255,255,255,.44),0 13px 26px rgba(0,0,0,.24); font-size:.8rem; letter-spacing:.16em; font-weight:800; text-transform:uppercase; }
     section { padding:52px 0; }
+    .screenshots-grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(250px,.7fr); gap:18px; align-items:start; }
+    figure.shot { margin:0; padding:14px; border:1px solid var(--line); border-radius:19px; background:rgba(4,40,62,.54); }
+    .shot img { display:block; max-width:100%; height:auto; border-radius:12px; border:1px solid rgba(156,245,245,.25); }
+    .shot figcaption { margin-top:14px; color:#c2dce1; font-size:.9rem; }
+    .shot.settings img { max-height:570px; margin:0 auto; }
     h2 { font-size:clamp(1.7rem,3vw,2.3rem); line-height:1.2; letter-spacing:-.04em; margin:0 0 16px; }
     .section-intro { color:var(--muted); max-width:720px; margin:0 0 28px; }
     .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
@@ -88,7 +96,7 @@
     footer { border-top:1px solid var(--line); padding:28px 0 55px; color:var(--muted); font-size:.89rem; }
     footer .foot { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; }
     footer a { margin-right:18px; }
-    @media (max-width:760px) { .hero{grid-template-columns:1fr; padding:50px 0 40px} .art{max-width:310px; margin:14px auto 0; width:80%} .grid,.steps{grid-template-columns:1fr} .nav{align-items:flex-start;flex-direction:column} }
+    @media (max-width:760px) { .screenshots-grid{grid-template-columns:1fr} .hero{grid-template-columns:1fr; padding:50px 0 40px} .art{max-width:310px; margin:14px auto 0; width:80%} .grid,.steps{grid-template-columns:1fr} .nav{align-items:flex-start;flex-direction:column} }
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }
   </style>
 </head>
@@ -98,6 +106,7 @@
       <a class="brand" href="./">HDR<span>Snip</span> Fusion</a>
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#features">Features</a>
+        <a href="#screenshots">Screenshots</a>
         <a href="#download">Download</a>
         <a href="#questions">FAQ</a>
         <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">Source on GitHub ↗</a>
@@ -130,6 +139,20 @@
           <div class="panel"><h3>Frutiger Aqua interface</h3><p>Transparent glass, water caustics, and soft glossy jelly-like controls with adjustable animation intensity.</p></div>
           <div class="panel"><h3>Hotkey &amp; system tray</h3><p>Press Ctrl + Shift + X by default, customize your shortcut, and optionally start minimized to the tray when you sign in.</p></div>
           <div class="panel"><h3>Multi-monitor awareness</h3><p>Targets the monitor under your cursor, including mixed DPI/scaling setups. Capture behavior can depend on drivers and display settings.</p></div>
+        </div>
+      </section>
+      <section id="screenshots" aria-labelledby="screenshots-title">
+        <h2 id="screenshots-title">See HDRSnip Fusion in action</h2>
+        <p class="section-intro">Real screenshots from the application, including the HDR-aware selection overlay and the Frutiger Aqua settings window.</p>
+        <div class="screenshots-grid">
+          <figure class="shot">
+            <img src="assets/hdrsnip-capture-overlay.webp" alt="HDRSnip Fusion selecting an HDR region on a Windows desktop, with Aqua glass annotation toolbar and save, copy and drawing controls" width="1600" height="757" loading="lazy" decoding="async">
+            <figcaption><strong>HDR screenshot selection.</strong> Drag a region, adjust the selection, use the drawing toolbar, and copy or save the screenshot.</figcaption>
+          </figure>
+          <figure class="shot settings">
+            <img src="assets/hdrsnip-settings.webp" alt="HDRSnip Fusion Settings showing custom capture hotkey, Frutiger Aqua animation intensity, HDR tone mapping and safety controls" width="706" height="817" loading="lazy" decoding="async">
+            <figcaption><strong>Customizable Aqua settings.</strong> This screenshot shows a user-set Ctrl+X shortcut; the default for new installations is <strong>Ctrl+Shift+X</strong>.</figcaption>
+          </figure>
         </div>
       </section>
       <section id="download" aria-labelledby="download-title">
