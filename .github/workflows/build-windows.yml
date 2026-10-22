@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "HDRSnipFusion.py"
+      - "RELEASE_NOTES.md"
       - "requirements.txt"
       - ".github/workflows/build-windows.yml"
   release:
@@ -28,6 +29,12 @@ jobs:
         with:
           name: HDRSnipFusion-Windows
           path: dist/HDRSnipFusion.exe
+      - name: Publish v0.1.0 preview release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'Publish v0.1.0 preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release create "v0.1.0" "dist/HDRSnipFusion.exe" --title "HDRScreenshot FrutigerAqua v0.1.0" --notes-file RELEASE_NOTES.md --prerelease --target "${{ github.sha }}"
       - name: Attach executable to release
         if: github.event_name == 'release'
         env:
