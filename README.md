@@ -8,6 +8,20 @@
 
 HDRSnip Fusion is designed for people who want to capture a selected area of their Windows screen, including HDR or Windows Auto HDR content, without relying solely on an ordinary SDR screen grab. It captures through **DXGI Desktop Duplication**, maps HDR screen data for viewable PNG output, and provides a lightweight screenshot editor and tray hotkey.
 
+## Screenshots
+
+### HDR screenshot selection and annotation
+
+![HDRSnip Fusion screenshot overlay with a selectable HDR region, annotation tools, and Frutiger Aqua floating toolbar](docs/assets/hdrsnip-capture-overlay.webp)
+
+*HDR-aware region selection with the translucent Aqua toolbar, annotation controls, and a draggable selection frame.*
+
+### Frutiger Aqua Settings
+
+<img src="docs/assets/hdrsnip-settings.webp" width="420" alt="HDRSnip Fusion translucent settings window showing capture hotkey, animation and glass settings, HDR tone mapping and diagnostics">
+
+*Settings for capture, liquid-glass animation, HDR tone mapping, and diagnostics. This example shows a user-configured `Ctrl+X` shortcut; **the built-in default for new installations is `Ctrl+Shift+X`**.*
+
 ## Features
 
 - **HDR-aware screenshots:** DXGI Desktop Duplication with scRGB capture and adjustable HDR-to-SDR tone mapping for HDR, Auto HDR, and SDR displays.
@@ -93,10 +107,6 @@ Check the tray icon for errors, whether another application registered the short
 
 The default save folder is `Pictures\HDRSnip Fusion` under your Windows user profile. Diagnostic logs, when enabled, are written under `%APPDATA%\HDRSnip Fusion`.
 </details>
-
-## Screenshots and demo
-
-**Screenshots and a short capture demo are coming soon.** If you'd like to contribute authentic screenshots of the app's toolbar, editor, or Settings page, open a [discussion or issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues).
 
 ## Feedback and contributions
 
