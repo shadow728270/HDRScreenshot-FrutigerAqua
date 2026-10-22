@@ -2,7 +2,7 @@
 
 **Free, open-source Windows screenshot and annotation tool with HDR and Auto HDR capture, a global hotkey, and a Frutiger Aqua-inspired interface.**
 
-[**⬇ Download for Windows (v0.1.0)**](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe) · [Releases](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases) · [Project website](https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/) · [Report an issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues)
+[**⬇ Download for Windows (v0.1.1)**](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe) · [Releases](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases) · [Project website](https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/) · [Report an issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues)
 
 **Windows 10 / 11 · 64-bit · MIT licensed · No Python required for the EXE**
 
@@ -26,6 +26,8 @@ HDRSnip Fusion is designed for people who want to capture a selected area of the
 
 - **HDR-aware screenshots:** DXGI Desktop Duplication with scRGB capture and adjustable HDR-to-SDR tone mapping for HDR, Auto HDR, and SDR displays.
 - **Region selection & annotation:** select or resize a capture region; use pen, rectangle, ellipse, line, arrow, and text tools.
+- **One-click saving (v0.1.1):** choose a default screenshot folder in Settings, then save PNGs with the green Save button or Ctrl+S. Ctrl+Alt+S opens Save As.
+- **Built-in update checks (v0.1.1):** check GitHub Releases for newer stable versions, verify downloaded updates, and install with confirmation. Automatic checks are enabled by default.
 - **Save or copy:** save PNG screenshots or send captures to the Windows clipboard.
 - **Windows global hotkey:** press **Ctrl + Shift + X** by default; customize the shortcut in Settings.
 - **Multi-monitor & DPI awareness:** designed to target the display under your cursor, including different display scales.
@@ -33,7 +35,7 @@ HDRSnip Fusion is designed for people who want to capture a selected area of the
 - **System tray workflow:** keep it running in the notification area and optionally launch when signing into Windows.
 - **Diagnostics & safety controls:** optional diagnostic logging and Safe Mode settings for troubleshooting.
 
-> **Early release:** v0.1.0 has been built successfully for Windows, but compatibility across hardware and HDR configurations is still being evaluated. The executable is **unsigned**; Windows may display a SmartScreen warning. Only download it from this repository's Releases page.
+> **Current version: v0.1.1.** This release adds configurable one-click saving and GitHub update checks. The EXE is still **unsigned**, so Windows SmartScreen may display a warning. Download from the [official Releases page](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases). [Read the v0.1.1 changelog](RELEASE_NOTES_v0.1.1.md).
 
 ## Download and use
 

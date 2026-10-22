@@ -1,0 +1,88 @@
+name: Finalize v0.1.1 release and remove temporary updater test
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-v011.yml'
+permissions:
+  contents: write
+concurrency:
+  group: permanent-release-v011
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Download previously verified v0.1.1 EXE from successful Windows CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^APP_VERSION: str = "0.1.1"$' HDRSnipFusion.py
+          mkdir -p dist
+          gh run download 39853848981 -n HDRSnipFusion-Windows-x64-v0.1.1 -D dist -R "$REPO"
+          test -s dist/HDRSnipFusion.exe
+          test -s dist/HDRSnipFusion.exe.sha256
+          ( cd dist && sha256sum -c HDRSnipFusion.exe.sha256 )
+          test -s RELEASE_NOTES_v0.1.1.md
+          echo "Verified the exact v0.1.1 build tested on Windows."
+      - name: Create permanent tag at approved v0.1.1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin refs/tags/v0.1.1 >/dev/null 2>&1; then
+            echo "v0.1.1 tag already exists; refusing to retag."
+            exit 1
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' tag -a v0.1.1 -m 'HDRSnip Fusion v0.1.1'
+          git push origin refs/tags/v0.1.1
+      - name: Publish permanent v0.1.1 release with formatted changelog and verified assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create v0.1.1 dist/HDRSnipFusion.exe dist/HDRSnipFusion.exe.sha256 \
+            --repo "$REPO" \
+            --title 'HDRSnip Fusion v0.1.1 · One-Click Saving + Updates' \
+            --notes-file RELEASE_NOTES_v0.1.1.md \
+            --verify-tag \
+            --latest
+      - name: Verify official release assets and digests before cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(sha256sum dist/HDRSnipFusion.exe | cut -d' ' -f1)"
+          release="$(gh api "repos/$REPO/releases/tags/v0.1.1")"
+          tag="$(echo "$release" | jq -r '.tag_name')"
+          state="$(echo "$release" | jq -r '.assets[] | select(.name=="HDRSnipFusion.exe") | .state')"
+          digest="$(echo "$release" | jq -r '.assets[] | select(.name=="HDRSnipFusion.exe") | .digest')"
+          asset_count="$(echo "$release" | jq -r '[.assets[] | select(.name=="HDRSnipFusion.exe" or .name=="HDRSnipFusion.exe.sha256")] | length')"
+          test "$tag" = v0.1.1
+          test "$state" = uploaded
+          test "$digest" = "sha256:$expected"
+          test "$asset_count" = 2
+          echo "Permanent v0.1.1 release verified. Removing temporary test release."
+      - name: Delete temporary v0.1.2 release, tag and test branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete v0.1.2 --repo "$REPO" --yes --cleanup-tag
+          git push origin --delete updater-test-v0.1.2
+          gh release edit v0.1.1 --repo "$REPO" --latest
+      - name: Verify latest release is permanent v0.1.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(gh api "repos/$REPO/releases/latest" --jq '.tag_name')"
+          test "$latest" = "v0.1.1"
+          if gh release view v0.1.2 --repo "$REPO" >/dev/null 2>&1; then
+            echo "Temporary test release still exists"
+            exit 1
+          fi
+          echo "Latest release is v0.1.1; temporary v0.1.2 release removed."
