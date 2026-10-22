@@ -1,0 +1,18 @@
+name: Promote v0.1.0 release to Latest
+on:
+  push:
+    paths:
+      - ".github/workflows/promote-release-v010.yml"
+permissions:
+  contents: write
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit v0.1.0 --prerelease=false --latest
+          gh release list --limit 3 --json tagName,isLatest,isPrerelease --jq '.[] | select(.tagName=="v0.1.0")'
