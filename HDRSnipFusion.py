@@ -40,17 +40,28 @@ import ctypes
 from ctypes import wintypes
 from datetime import datetime
 import gc
+import hashlib
+import hmac
 import json
 import math
 import os
 from pathlib import Path
+import re
+import secrets
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import weakref
+import webbrowser
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -107,15 +118,19 @@ try:
         QInputDialog,
         QKeySequenceEdit,
         QLabel,
+        QLineEdit,
         QMenu,
         QMessageBox,
+        QProgressBar,
         QPushButton,
+        QScrollArea,
         QSizePolicy,
         QSlider,
         QSpinBox,
         QStyle,
         QStyleOptionSlider,
         QSystemTrayIcon,
+        QTextEdit,
         QVBoxLayout,
         QWidget,
     )
@@ -130,11 +145,39 @@ except ImportError:
 
 import traceback
 
+APP_VERSION: str = "0.1.1"
+GITHUB_REPO_OWNER: str = "shadow728270"
+GITHUB_REPO_NAME: str = "HDRScreenshot-FrutigerAqua"
+GITHUB_REPO_URL: str = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
+GITHUB_RELEASES_PAGE_URL: str = f"{GITHUB_REPO_URL}/releases"
+GITHUB_LATEST_RELEASE_API_URL: str = (
+    f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
+)
+EXPECTED_RELEASE_ASSET_NAME: str = "HDRSnipFusion.exe"
+UPDATE_CHECK_INTERVAL_SEC: float = 86400.0  # Check roughly once per 24 hours
+UPDATE_STARTUP_DELAY_MS: int = 4500         # Delay first background check until tray is ready
+MIN_EXE_SIZE_BYTES: int = 1_048_576         # 1 MB minimum sanity bound for packaged EXE
+MAX_EXE_SIZE_BYTES: int = 367_001_600       # 350 MB maximum sanity bound
+MAX_API_RESPONSE_BYTES: int = 2_097_152     # 2 MB cap for GitHub JSON metadata
+REQUIRE_AUTHENTICODE_SIGNATURE: bool = False
+ALLOWED_GITHUB_HOSTS: Tuple[str, ...] = (
+    "api.github.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "codeload.github.com",
+)
+
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "HDRSnip Fusion"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 DIAGNOSTIC_LOG_FILE = CONFIG_DIR / "diagnostics.log"
 DIAGNOSTIC_LOG_BACKUP_FILE = CONFIG_DIR / "diagnostics.log.1"
 DEFAULT_SAVE_DIR = Path.home() / "Pictures" / "HDRSnip Fusion"
+LOCAL_UPDATE_ROOT_DIR = (
+    Path(os.environ.get("LOCALAPPDATA", os.environ.get("APPDATA", Path.home())))
+    / "HDRSnip Fusion"
+    / "updates"
+)
 
 # Developer / environment overrides for Diagnostic Safe Mode and persistent logging
 ENV_SAFE_MODE: bool = os.environ.get("HDRSNIP_SAFE_MODE", "").strip().lower() in (
@@ -813,6 +856,14 @@ class AppConfig:
     default_color: str = "#00E5FF"
     default_thickness: int = 3
     save_directory: str = str(DEFAULT_SAVE_DIR)
+    # GitHub Automatic Updater preferences (v0.1.1+)
+    auto_check_updates: bool = True
+    auto_install_updates: bool = False
+    last_update_check_epoch: float = 0.0
+    declined_update_version: str = ""
+    staged_update_version: str = ""
+    staged_update_path: str = ""
+    staged_update_sha256: str = ""
     # Stability & Diagnostic Safe Mode settings (Phase 1 Stability Investigation)
     enable_diagnostic_logging: bool = True
     diagnostic_safe_mode: bool = False
@@ -875,6 +926,32 @@ class AppConfig:
                         )
                     except Exception:
                         filtered["glass_transparency"] = 72
+                if "save_directory" in filtered:
+                    raw_dir = str(filtered["save_directory"] or "").strip()
+                    filtered["save_directory"] = (
+                        raw_dir if raw_dir else str(DEFAULT_SAVE_DIR)
+                    )
+                if "auto_check_updates" in filtered:
+                    filtered["auto_check_updates"] = bool(filtered["auto_check_updates"])
+                if "auto_install_updates" in filtered:
+                    filtered["auto_install_updates"] = bool(
+                        filtered["auto_install_updates"]
+                    )
+                if "last_update_check_epoch" in filtered:
+                    try:
+                        filtered["last_update_check_epoch"] = max(
+                            0.0, float(filtered["last_update_check_epoch"])
+                        )
+                    except Exception:
+                        filtered["last_update_check_epoch"] = 0.0
+                for str_key in (
+                    "declined_update_version",
+                    "staged_update_version",
+                    "staged_update_path",
+                    "staged_update_sha256",
+                ):
+                    if str_key in filtered:
+                        filtered[str_key] = str(filtered[str_key] or "").strip()
                 cfg = cls(**filtered)
         except Exception as exc:
             print(f"[HDRSnip Fusion] Warning: Failed to load config: {exc}")
@@ -7819,16 +7896,202 @@ class AnnotationItem:
     text: str = ""
 
 
+_SCREENSHOT_PATH_LOCK = threading.Lock()
+_RESERVED_SCREENSHOT_PATHS: set = set()
+_ATOMIC_TMP_SEQ: int = 0
+
+
 def _unique_screenshot_path(save_dir: Path, prefix: str = "HDRSnipFusion") -> Path:
-    """Generates a collision-proof millisecond filename so rapid quick-saves never overwrite."""
+    """
+    Generates a collision-proof millisecond filename and reserves it in-memory under
+    `_SCREENSHOT_PATH_LOCK` so concurrent or same-millisecond calls never return the
+    same path even before the file is flushed to disk.
+    """
+    if not str(save_dir).strip():
+        raise OSError("Configured screenshot save directory path is empty.")
+    save_dir = Path(save_dir).expanduser()
+    if save_dir.exists() and not save_dir.is_dir():
+        raise NotADirectoryError(
+            f"Save location '{save_dir}' exists but is a file, not a directory."
+        )
     save_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")[:-3]
-    candidate = save_dir / f"{prefix}_{stamp}.png"
+    with _SCREENSHOT_PATH_LOCK:
+        if len(_RESERVED_SCREENSHOT_PATHS) > 4096:
+            _RESERVED_SCREENSHOT_PATHS.clear()
+        counter = 0
+        while True:
+            name = (
+                f"{prefix}_{stamp}.png"
+                if counter == 0
+                else f"{prefix}_{stamp}_{counter}.png"
+            )
+            candidate = save_dir / name
+            norm_key = os.path.normcase(str(candidate.resolve()))
+            if not candidate.exists() and norm_key not in _RESERVED_SCREENSHOT_PATHS:
+                _RESERVED_SCREENSHOT_PATHS.add(norm_key)
+                return candidate
+            counter += 1
+
+
+def _claim_non_overwriting_destination(preferred_dest: Path) -> Path:
+    """
+    Atomically claims a destination file path on disk using `os.O_CREAT | os.O_EXCL`
+    so two concurrent threads or processes can NEVER overwrite an existing screenshot.
+    If `preferred_dest` already exists on disk, increments `_1`, `_2`, ... until an
+    exclusive slot is atomically created.
+    """
+    parent_dir = preferred_dest.parent
+    stem = preferred_dest.stem
+    suffix = preferred_dest.suffix
+    # Strip trailing _<digits> if preferred_dest already had a collision counter from _unique_screenshot_path
+    base_stem = stem
     counter = 1
-    while candidate.exists():
-        candidate = save_dir / f"{prefix}_{stamp}_{counter}.png"
-        counter += 1
-    return candidate
+    candidate = preferred_dest
+    while True:
+        try:
+            fd = os.open(
+                str(candidate),
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o666,
+            )
+            os.close(fd)
+            with _SCREENSHOT_PATH_LOCK:
+                _RESERVED_SCREENSHOT_PATHS.add(
+                    os.path.normcase(str(candidate.resolve()))
+                )
+            return candidate
+        except FileExistsError:
+            candidate = parent_dir / f"{base_stem}_{counter}{suffix}"
+            counter += 1
+
+
+def save_pixmap_or_image_atomically(
+    image_obj: Any,
+    target_path: Path,
+    fmt: Optional[str] = None,
+    *,
+    allow_overwrite: bool = False,
+) -> Path:
+    """
+    Writes a QPixmap, QImage, PIL.Image, or RGB NumPy array to `target_path` via a
+    temporary sibling file in the destination directory and atomically replaces the target.
+    When `allow_overwrite=False` (the default for all automatic/hotkey saves), uses
+    `os.O_CREAT | os.O_EXCL` reservation via `_claim_non_overwriting_destination()` so
+    concurrent or closely spaced saves can NEVER overwrite an existing screenshot file.
+    When `allow_overwrite=True` (used only after explicit user confirmation in Save As),
+    replaces `target_path` atomically.
+    """
+    global _ATOMIC_TMP_SEQ
+    dest = Path(target_path).expanduser()
+    parent_dir = dest.parent
+    if not str(parent_dir).strip():
+        raise OSError("Target save directory is empty.")
+    if parent_dir.exists() and not parent_dir.is_dir():
+        raise NotADirectoryError(
+            f"Save path parent '{parent_dir}' is not a valid directory."
+        )
+    parent_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = dest.suffix.lower()
+    if fmt is None:
+        if ext in (".jpg", ".jpeg"):
+            fmt = "JPEG"
+        elif ext == ".bmp":
+            fmt = "BMP"
+        else:
+            fmt = "PNG"
+            if not ext:
+                dest = dest.with_suffix(".png")
+
+    with _SCREENSHOT_PATH_LOCK:
+        _ATOMIC_TMP_SEQ += 1
+        seq = _ATOMIC_TMP_SEQ
+
+    tmp_name = (
+        f".{dest.name}.{os.getpid()}.{threading.get_ident()}."
+        f"{time.perf_counter_ns()}.{seq}.tmp"
+    )
+    tmp_path = parent_dir / tmp_name
+    claimed_dest: Optional[Path] = None
+    try:
+        if HAS_QT and isinstance(image_obj, (QPixmap, QImage)):
+            if image_obj.isNull():
+                raise RuntimeError("Rendered screenshot image is empty (null QPixmap/QImage).")
+            qimg = (
+                image_obj.toImage()
+                if isinstance(image_obj, QPixmap)
+                else image_obj
+            )
+            ok = qimg.save(str(tmp_path), fmt)
+            if not ok:
+                with open(tmp_path, "wb") as fh:
+                    fh.write(b"")
+                raise OSError(
+                    f"Qt image encoder failed to write {fmt} image to '{dest}'."
+                )
+        elif isinstance(image_obj, Image.Image):
+            image_obj.save(str(tmp_path), format=fmt)
+        elif isinstance(image_obj, np.ndarray):
+            pil_img = Image.fromarray(np.ascontiguousarray(image_obj, dtype=np.uint8))
+            pil_img.save(str(tmp_path), format=fmt)
+        else:
+            raise TypeError(f"Unsupported image object type for saving: {type(image_obj)!r}")
+
+        if not tmp_path.exists() or tmp_path.stat().st_size <= 0:
+            raise OSError(f"Saved file at '{tmp_path}' was empty or not created on disk.")
+
+        try:
+            with open(tmp_path, "r+b") as fh:
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError:
+            pass
+
+        if allow_overwrite:
+            final_dest = dest
+        else:
+            claimed_dest = _claim_non_overwriting_destination(dest)
+            final_dest = claimed_dest
+
+        os.replace(str(tmp_path), str(final_dest))
+        return final_dest
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        if claimed_dest is not None:
+            try:
+                if claimed_dest.exists() and claimed_dest.stat().st_size == 0:
+                    claimed_dest.unlink()
+            except OSError:
+                pass
+        raise
+
+
+def save_screenshot_to_directory(
+    image_obj: Any,
+    save_dir_str: str,
+    prefix: str = "HDRSnipFusion",
+) -> Path:
+    """
+    Shared one-click screenshot saving implementation used by both ordinary Save (Ctrl+S)
+    and Quick Save (Ctrl+Shift+S). Validates the configured folder, generates a unique
+    collision-safe PNG filename via `_unique_screenshot_path()`, and writes atomically
+    with `allow_overwrite=False` so existing files are never overwritten.
+    """
+    cleaned = str(save_dir_str or "").strip()
+    if not cleaned:
+        raise OSError("Default screenshot save location is not configured.")
+    if "\x00" in cleaned:
+        raise OSError("Default screenshot save location contains invalid characters.")
+    save_dir = Path(cleaned).expanduser()
+    out_path = _unique_screenshot_path(save_dir, prefix=prefix)
+    return save_pixmap_or_image_atomically(
+        image_obj, out_path, fmt="PNG", allow_overwrite=False
+    )
 
 
 if HAS_QT:
@@ -8266,13 +8529,13 @@ if HAS_QT:
             layout.addWidget(undo_btn)
 
             # Save (Frutiger Emerald Gel Pill)
-            save_btn = AeroGelButton("Save", variant="emerald", parent=self.toolbar)
-            save_btn.setToolTip(
-                "Save As PNG (Ctrl+S) • Quick-Save to folder without dialog (Ctrl+Shift+S)"
+            self.save_btn = AeroGelButton("Save", variant="emerald", parent=self.toolbar)
+            self.save_btn.setToolTip(
+                "Save to default folder (Ctrl+S) • Quick Save + Copy (Ctrl+Shift+S) • Save As... (Ctrl+Alt+S)"
             )
-            save_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            save_btn.clicked.connect(self.save_snip)
-            layout.addWidget(save_btn)
+            self.save_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.save_btn.clicked.connect(self.save_snip)
+            layout.addWidget(self.save_btn)
 
             # Copy (Frutiger Sapphire Gel Pill)
             copy_btn = AeroGelButton("Copy", variant="sapphire", parent=self.toolbar)
@@ -9017,6 +9280,12 @@ if HAS_QT:
             elif (
                 key == Qt.Key.Key_S
                 and (mods & Qt.KeyboardModifier.ControlModifier)
+                and (mods & Qt.KeyboardModifier.AltModifier)
+            ):
+                self.save_snip_as()
+            elif (
+                key == Qt.Key.Key_S
+                and (mods & Qt.KeyboardModifier.ControlModifier)
                 and (mods & Qt.KeyboardModifier.ShiftModifier)
             ):
                 self.quick_save_snip()
@@ -9116,33 +9385,157 @@ if HAS_QT:
             QApplication.clipboard().setPixmap(pix)
             self.close()
 
-        def quick_save_snip(self) -> None:
-            """Saves directly to the configured folder using collision-safe millisecond filenames."""
-            pix = self.render_final_cropped_pixmap()
-            out_path = _unique_screenshot_path(Path(self.config.save_directory))
-            if not pix.save(str(out_path)):
-                DIAG_LOG.warning("SAVE_SNIP", f"Quick-save failed for path: {out_path}")
-            QApplication.clipboard().setPixmap(pix)
-            self.close()
-
-        def save_snip(self) -> None:
-            pix = self.render_final_cropped_pixmap()
-            default_path = str(
-                _unique_screenshot_path(Path(self.config.save_directory))
+        def _handle_save_error(
+            self,
+            target_desc: str,
+            exc: BaseException,
+            rendered_pixmap: QPixmap,
+        ) -> Optional[Path]:
+            """
+            Handles screenshot save failures without closing the overlay or losing the
+            user's selected crop region or annotations. Offers Retry, Save As..., or Cancel.
+            """
+            DIAG_LOG.error("SAVE_SNIP", f"Failed to save screenshot to '{target_desc}'", exc)
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("HDRSnip Fusion — Screenshot Save Failed")
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setText(
+                f"Could not save the screenshot to:\n{target_desc}\n\n"
+                f"Reason: {exc}\n\n"
+                "Your screenshot selection and annotations are still preserved."
             )
-
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save HDR-Corrected Screenshot",
-                default_path,
-                "PNG Image (*.png);;JPEG Image (*.jpg)",
+            retry_btn = msg_box.addButton(
+                "Retry", QMessageBox.ButtonRole.AcceptRole
             )
-            if file_path:
-                if not pix.save(file_path):
-                    DIAG_LOG.warning("SAVE_SNIP", f"Save failed for path: {file_path}")
-                self.close()
-            else:
-                self.setFocus()
+            save_as_btn = msg_box.addButton(
+                "Choose Another Folder (Save As...)", QMessageBox.ButtonRole.ActionRole
+            )
+            msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            msg_box.exec()
+
+            clicked = msg_box.clickedButton()
+            if clicked == retry_btn:
+                return Path("__RETRY__")
+            if clicked == save_as_btn:
+                return self.save_snip_as(pre_rendered_pixmap=rendered_pixmap)
+            self.setFocus()
+            return None
+
+        def _save_to_default_directory(
+            self, *, copy_to_clipboard: bool = False
+        ) -> Optional[Path]:
+            """
+            Shared implementation for ordinary Save (Ctrl+S / green Save button) and
+            Quick Save (Ctrl+Shift+S). Writes directly into `config.save_directory`
+            using `_unique_screenshot_path()` and closes the overlay ONLY after saving succeeds.
+            """
+            pix = self.render_final_cropped_pixmap()
+            while True:
+                target_dir_str = str(self.config.save_directory or "").strip()
+                try:
+                    out_path = save_screenshot_to_directory(
+                        pix, target_dir_str, prefix="HDRSnipFusion"
+                    )
+                    if copy_to_clipboard:
+                        QApplication.clipboard().setPixmap(pix)
+                    DIAG_LOG.milestone(
+                        "SAVE_SNIP",
+                        f"Saved full-resolution screenshot to '{out_path}' "
+                        f"(copy_to_clipboard={copy_to_clipboard})",
+                    )
+                    self.close()
+                    return out_path
+                except Exception as exc:
+                    recovery = self._handle_save_error(
+                        target_dir_str or "<empty path>", exc, pix
+                    )
+                    if recovery is not None and str(recovery) == "__RETRY__":
+                        continue
+                    return recovery
+
+        def save_snip(self) -> Optional[Path]:
+            """Saves directly to the configured default folder (Ctrl+S or green Save button)."""
+            return self._save_to_default_directory(copy_to_clipboard=False)
+
+        def quick_save_snip(self) -> Optional[Path]:
+            """Saves directly to the configured default folder AND copies to clipboard (Ctrl+Shift+S)."""
+            return self._save_to_default_directory(copy_to_clipboard=True)
+
+        def save_snip_as(
+            self, pre_rendered_pixmap: Optional[QPixmap] = None
+        ) -> Optional[Path]:
+            """
+            Opens a Save As dialog (Ctrl+Alt+S or fallback from failed save) allowing the
+            user to choose a custom folder, filename, and format (PNG or JPEG).
+            Closes the overlay only after the file is verified written to disk.
+            """
+            pix = (
+                pre_rendered_pixmap
+                if pre_rendered_pixmap is not None
+                else self.render_final_cropped_pixmap()
+            )
+            stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")[:-3]
+            fallback_name = f"HDRSnipFusion_{stamp}.png"
+            try:
+                cfg_dir = Path(self.config.save_directory).expanduser()
+                if cfg_dir.exists() and cfg_dir.is_dir():
+                    default_path = str(cfg_dir / fallback_name)
+                elif cfg_dir.parent.exists() and cfg_dir.parent.is_dir():
+                    default_path = str(cfg_dir.parent / fallback_name)
+                else:
+                    default_path = str(Path.home() / fallback_name)
+            except Exception:
+                default_path = str(Path.home() / fallback_name)
+
+            while True:
+                file_path, selected_filter = QFileDialog.getSaveFileName(
+                    self,
+                    "Save HDR-Corrected Screenshot As",
+                    default_path,
+                    "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)",
+                )
+                if not file_path:
+                    self.setFocus()
+                    return None
+
+                chosen_path = Path(file_path)
+                if not chosen_path.suffix:
+                    if "JPEG" in str(selected_filter).upper():
+                        chosen_path = chosen_path.with_suffix(".jpg")
+                    else:
+                        chosen_path = chosen_path.with_suffix(".png")
+
+                try:
+                    saved_path = save_pixmap_or_image_atomically(pix, chosen_path, allow_overwrite=True)
+                    # Update default directory in memory if user had an invalid directory?
+                    # No: keep configured default save_directory unchanged unless changed in Settings.
+                    DIAG_LOG.milestone(
+                        "SAVE_SNIP_AS",
+                        f"Saved screenshot via Save As dialog to '{saved_path}'",
+                    )
+                    self.close()
+                    return saved_path
+                except Exception as exc:
+                    DIAG_LOG.error(
+                        "SAVE_SNIP_AS",
+                        f"Save As failed for path '{chosen_path}'",
+                        exc,
+                    )
+                    retry_ans = QMessageBox.warning(
+                        self,
+                        "HDRSnip Fusion — Save As Failed",
+                        f"Could not write screenshot to:\n{chosen_path}\n\n"
+                        f"Reason: {exc}\n\n"
+                        "Would you like to choose a different location?",
+                        QMessageBox.StandardButton.Retry
+                        | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Retry,
+                    )
+                    if retry_ans == QMessageBox.StandardButton.Retry:
+                        default_path = str(Path.home() / chosen_path.name)
+                        continue
+                    self.setFocus()
+                    return None
 
         def cleanup_resources(self) -> int:
             """
@@ -9229,31 +9622,2854 @@ def set_windows_autostart(enabled: bool) -> None:
 
 
 # =============================================================================
+# 8B. GITHUB AUTOMATIC UPDATER, INTEGRITY VALIDATOR & SAFE EXE REPLACEMENT
+# =============================================================================
+
+_PACKAGED_EXE_OVERRIDE: Optional[bool] = None
+_CURRENT_EXE_PATH_OVERRIDE: Optional[Path] = None
+_ALLOW_LOCALHOST_UPDATE_URLS: bool = False
+_UPDATE_TRANSACTION_LOCK = threading.Lock()
+_SEVEN_DAYS_SEC: float = 7.0 * 86400.0
+
+
+class UpdateVerificationError(RuntimeError):
+    """Raised when a release asset or staged update fails security or integrity validation."""
+
+
+@dataclass
+class UpdateCheckResult:
+    """Structured result from checking the official GitHub Releases API."""
+
+    status: str  # "up_to_date", "update_available", "asset_pending", "offline", "rate_limited", "error"
+    current_version: str = APP_VERSION
+    latest_version: str = APP_VERSION
+    release_title: str = ""
+    release_notes: str = ""
+    release_url: str = GITHUB_RELEASES_PAGE_URL
+    download_url: str = ""
+    asset_name: str = ""
+    asset_size: int = 0
+    expected_sha256: str = ""
+    published_at: str = ""
+    message: str = ""
+    checked_at_epoch: float = field(default_factory=time.time)
+
+    @property
+    def is_update_ready(self) -> bool:
+        return (
+            self.status == "update_available"
+            and bool(self.download_url)
+            and len(self.expected_sha256) == 64
+            and self.asset_size > 0
+        )
+
+
+def parse_semver(version_str: str) -> Optional[Tuple[int, ...]]:
+    """
+    Parses a stable semantic version string such as '0.1.1' or 'v0.1.2' into an
+    integer tuple `(major, minor, patch)`.
+    Strictly rejects pre-release tags (e.g. 'v0.1.2-beta.1', 'v0.1.2-rc1'), build
+    metadata suffixes, or non-numeric components so unstable tags are never installed.
+    """
+    if not isinstance(version_str, str):
+        return None
+    cleaned = version_str.strip()
+    if cleaned.startswith(("v", "V")):
+        cleaned = cleaned[1:].strip()
+    if not cleaned or "-" in cleaned or "+" in cleaned:
+        return None
+    parts = cleaned.split(".")
+    if len(parts) < 2 or len(parts) > 4:
+        return None
+    nums: List[int] = []
+    for p in parts:
+        if not p.isdigit():
+            return None
+        nums.append(int(p))
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
+
+
+def format_semver(version_str: str) -> str:
+    """Normalizes a version string into 'X.Y.Z' format (without leading 'v')."""
+    parsed = parse_semver(version_str)
+    if parsed is None:
+        return str(version_str).strip().lstrip("vV")
+    return ".".join(str(x) for x in parsed)
+
+
+def is_newer_semver(
+    candidate_version: str, current_version: str = APP_VERSION
+) -> bool:
+    """
+    Compares two semantic version strings numerically.
+    Examples:
+      - is_newer_semver('0.1.2', '0.1.1') -> True
+      - is_newer_semver('0.2.0', '0.1.9') -> True
+      - is_newer_semver('1.0.0', '0.9.9') -> True
+      - is_newer_semver('0.1.1', '0.1.1') -> False
+    """
+    cand = parse_semver(candidate_version)
+    curr = parse_semver(current_version)
+    if cand is None or curr is None:
+        return False
+    max_len = max(len(cand), len(curr))
+    cand_pad = cand + (0,) * (max_len - len(cand))
+    curr_pad = curr + (0,) * (max_len - len(curr))
+    return cand_pad > curr_pad
+
+
+def is_packaged_exe() -> bool:
+    """
+    Returns True only when running as a packaged PyInstaller Windows executable
+    (never True when running from Python source `.py` with `python.exe` / `pythonw.exe`).
+    """
+    if _PACKAGED_EXE_OVERRIDE is not None:
+        return bool(_PACKAGED_EXE_OVERRIDE)
+    if not getattr(sys, "frozen", False):
+        return False
+    exe_name = Path(sys.executable).name.lower()
+    if exe_name in ("python.exe", "pythonw.exe", "python", "python3"):
+        return False
+    return True
+
+
+def get_current_executable_path() -> Path:
+    """Returns the resolved filesystem path of the currently running executable."""
+    if _CURRENT_EXE_PATH_OVERRIDE is not None:
+        return Path(_CURRENT_EXE_PATH_OVERRIDE).resolve()
+    return Path(sys.executable).resolve()
+
+
+def is_protected_install_location(
+    exe_path: Optional[Path] = None,
+) -> Tuple[bool, str]:
+    """
+    Checks whether `exe_path` resides in a directory that requires Administrator
+    elevation (such as `Program Files`, `Program Files (x86)`, or `Windows`) or
+    is not writable by the current user.
+    Never attempts privilege escalation or UAC bypass.
+    """
+    target = Path(exe_path or get_current_executable_path()).resolve()
+    parent_dir = target.parent
+
+    # Check standard Windows protected system roots
+    protected_roots: List[Path] = []
+    for env_key in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "SystemRoot", "WINDIR"):
+        val = os.environ.get(env_key, "").strip()
+        if val:
+            try:
+                protected_roots.append(Path(val).resolve())
+            except Exception:
+                pass
+
+    target_str_norm = str(parent_dir).replace("/", "\\").casefold()
+    for p_root in protected_roots:
+        root_norm = str(p_root).replace("/", "\\").casefold()
+        if root_norm and (
+            target_str_norm == root_norm
+            or target_str_norm.startswith(root_norm + "\\")
+        ):
+            return (
+                True,
+                f"Installation folder '{parent_dir}' is inside a protected Windows system directory ({p_root}).",
+            )
+
+    # Also check common protected folder names if path contains 'Program Files'
+    raw_exe_str = str(exe_path or get_current_executable_path())
+    lower_parts = [
+        pt.strip().casefold()
+        for pt in raw_exe_str.replace("\\", "/").split("/")[:-1]
+        if pt.strip()
+    ] + [pt.casefold() for pt in parent_dir.parts]
+    if "program files" in lower_parts or "program files (x86)" in lower_parts:
+        return (
+            True,
+            f"Installation folder '{parent_dir}' is inside Program Files and requires administrator permissions.",
+        )
+
+    if not parent_dir.exists():
+        return (True, f"Installation folder '{parent_dir}' does not exist.")
+
+    # Perform a safe non-destructive write probe in the installation directory
+    probe_name = f".hdrsnip_write_probe_{os.getpid()}_{int(time.perf_counter() * 1e6) % 1000000}.tmp"
+    probe_path = parent_dir / probe_name
+    try:
+        with open(probe_path, "wb") as fh:
+            fh.write(b"ok")
+        probe_path.unlink()
+    except Exception as exc:
+        try:
+            if probe_path.exists():
+                probe_path.unlink()
+        except OSError:
+            pass
+        return (
+            True,
+            f"Installation folder '{parent_dir}' is not writable by the current user ({exc}).",
+        )
+
+    return (False, "writable")
+
+
+def compute_file_sha256(file_path: Path) -> str:
+    """Computes the lowercase 64-character hexadecimal SHA-256 digest of a file on disk."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as fh:
+        while True:
+            chunk = fh.read(131072)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest().lower()
+
+
+def validate_windows_pe_executable(
+    file_path: Path,
+    min_size: int = MIN_EXE_SIZE_BYTES,
+    max_size: int = MAX_EXE_SIZE_BYTES,
+) -> Tuple[bool, str]:
+    """
+    Validates that `file_path` is a structurally valid 64-bit Windows Portable Executable
+    (PE32+ / AMD64 `.exe`, not a DLL, HTML error page, ZIP archive, or truncated file).
+    """
+    try:
+        p = Path(file_path)
+        if not p.exists() or not p.is_file():
+            return (False, f"File does not exist: {p}")
+        file_size = p.stat().st_size
+        if file_size < min_size:
+            return (
+                False,
+                f"Executable size ({file_size:,} bytes) is smaller than minimum expected ({min_size:,} bytes).",
+            )
+        if file_size > max_size:
+            return (
+                False,
+                f"Executable size ({file_size:,} bytes) exceeds maximum allowed ({max_size:,} bytes).",
+            )
+
+        with open(p, "rb") as fh:
+            dos_hdr = fh.read(64)
+            if len(dos_hdr) < 64 or dos_hdr[:2] != b"MZ":
+                return (False, "Missing Windows MZ DOS header signature.")
+            e_lfanew = struct.unpack_from("<I", dos_hdr, 0x3C)[0]
+            if e_lfanew < 64 or e_lfanew + 264 > file_size:
+                return (
+                    False,
+                    f"Invalid PE header offset e_lfanew=0x{e_lfanew:X} for file size {file_size}.",
+                )
+            fh.seek(e_lfanew)
+            pe_block = fh.read(264)
+            if len(pe_block) < 120 or pe_block[:4] != b"PE\x00\x00":
+                return (False, "Missing PE\\0\\0 signature at e_lfanew offset.")
+
+            (
+                machine,
+                num_sections,
+                _timestamp,
+                _ptr_sym,
+                _num_sym,
+                size_opt_hdr,
+                characteristics,
+            ) = struct.unpack_from("<HHIIIHH", pe_block, 4)
+
+            # 0x8664 = IMAGE_FILE_MACHINE_AMD64 (x86_64 Windows)
+            if machine != 0x8664:
+                return (
+                    False,
+                    f"Unsupported PE target architecture 0x{machine:04X} (expected x86_64 AMD64 0x8664).",
+                )
+            if num_sections < 1:
+                return (False, "PE executable contains zero sections.")
+            # 0x0002 = IMAGE_FILE_EXECUTABLE_IMAGE, 0x2000 = IMAGE_FILE_DLL
+            if not (characteristics & 0x0002):
+                return (False, "PE image is not marked as executable.")
+            if characteristics & 0x2000:
+                return (False, "PE image is a DLL, not a standalone EXE.")
+            if size_opt_hdr < 112:
+                return (False, f"PE Optional Header is too small ({size_opt_hdr} bytes).")
+
+            opt_magic = struct.unpack_from("<H", pe_block, 24)[0]
+            # 0x020B = PE32+ (64-bit executable)
+            if opt_magic != 0x020B:
+                return (
+                    False,
+                    f"PE Optional Header magic 0x{opt_magic:04X} is not 64-bit PE32+ (0x020B).",
+                )
+            subsystem = struct.unpack_from("<H", pe_block, 24 + 68)[0]
+            # 2 = IMAGE_SUBSYSTEM_WINDOWS_GUI, 3 = IMAGE_SUBSYSTEM_WINDOWS_CUI
+            if subsystem not in (2, 3):
+                return (
+                    False,
+                    f"Unexpected Windows PE subsystem {subsystem} (expected GUI=2 or CUI=3).",
+                )
+
+        return (True, "valid_pe64_exe")
+    except Exception as exc:
+        return (False, f"PE validation exception: {exc}")
+
+
+class _WINTRUST_FILE_INFO(ctypes.Structure):
+    _fields_ = [
+        ("cbStruct", wintypes.DWORD),
+        ("pcwszFilePath", wintypes.LPCWSTR),
+        ("hFile", wintypes.HANDLE),
+        ("pgKnownSubject", ctypes.c_void_p),
+    ]
+
+
+class _WINTRUST_DATA(ctypes.Structure):
+    _fields_ = [
+        ("cbStruct", wintypes.DWORD),
+        ("pPolicyCallbackData", ctypes.c_void_p),
+        ("pSIPClientData", ctypes.c_void_p),
+        ("dwUIChoice", wintypes.DWORD),
+        ("fdwRevocationChecks", wintypes.DWORD),
+        ("dwUnionChoice", wintypes.DWORD),
+        ("pFile", ctypes.POINTER(_WINTRUST_FILE_INFO)),
+        ("dwStateAction", wintypes.DWORD),
+        ("hWVTStateData", wintypes.HANDLE),
+        ("pwszURLReference", wintypes.LPCWSTR),
+        ("dwProvFlags", wintypes.DWORD),
+        ("dwUIContext", wintypes.DWORD),
+        ("pSignatureSettings", ctypes.c_void_p),
+    ]
+
+
+def verify_authenticode_signature(
+    file_path: Path,
+    require_signature: bool = REQUIRE_AUTHENTICODE_SIGNATURE,
+) -> Tuple[bool, str]:
+    """
+    Extension point for Windows Authenticode code-signing verification via `WinVerifyTrust`.
+    Currently `REQUIRE_AUTHENTICODE_SIGNATURE` is False because official builds are unsigned
+    and verified via GitHub Release asset SHA-256 digests. If the project adopts a code-signing
+    certificate in the future, setting `REQUIRE_AUTHENTICODE_SIGNATURE = True` enforces OS-level
+    Authenticode chain trust before staging or replacing any executable.
+    """
+    if not require_signature:
+        return (
+            True,
+            "Authenticode enforcement not required for unsigned release (verified via SHA-256).",
+        )
+    if sys.platform != "win32":
+        return (False, "Authenticode verification requires Windows WinVerifyTrust.")
+    try:
+        wintrust = ctypes.WinDLL("wintrust", use_last_error=True)
+        # WINTRUST_ACTION_GENERIC_VERIFY_V2 = {00AAC56B-CD44-11d0-8CC2-00C04FC295EE}
+        action_guid = GUID.from_str("00aac56b-cd44-11d0-8cc2-00c04fc295ee")
+
+        file_info = _WINTRUST_FILE_INFO()
+        file_info.cbStruct = ctypes.sizeof(_WINTRUST_FILE_INFO)
+        file_info.pcwszFilePath = str(Path(file_path).resolve())
+        file_info.hFile = None
+        file_info.pgKnownSubject = None
+
+        wt_data = _WINTRUST_DATA()
+        wt_data.cbStruct = ctypes.sizeof(_WINTRUST_DATA)
+        wt_data.dwUIChoice = 2          # WTD_UI_NONE
+        wt_data.fdwRevocationChecks = 0 # WTD_REVOKE_NONE
+        wt_data.dwUnionChoice = 1       # WTD_CHOICE_FILE
+        wt_data.pFile = ctypes.pointer(file_info)
+        wt_data.dwStateAction = 0       # WTD_STATEACTION_IGNORE
+        wt_data.dwProvFlags = 0x00000010  # WTD_CACHE_ONLY_URL_RETRIEVAL
+
+        wintrust.WinVerifyTrust.argtypes = [
+            wintypes.HWND,
+            ctypes.POINTER(GUID),
+            ctypes.POINTER(_WINTRUST_DATA),
+        ]
+        wintrust.WinVerifyTrust.restype = wintypes.LONG
+        status = wintrust.WinVerifyTrust(
+            None, ctypes.byref(action_guid), ctypes.byref(wt_data)
+        )
+        if status == 0:
+            return (True, "Valid trusted Windows Authenticode signature.")
+        return (
+            False,
+            f"WinVerifyTrust rejected Authenticode signature (status=0x{int(status) & 0xFFFFFFFF:08X}).",
+        )
+    except Exception as exc:
+        return (False, f"Authenticode verification error: {exc}")
+
+
+def is_valid_github_url(
+    url: str,
+    *,
+    require_repo_prefix: bool = False,
+) -> bool:
+    """
+    Validates that `url` uses HTTPS and points to an allowed official GitHub host
+    (and optionally belongs to `shadow728270/HDRScreenshot-FrutigerAqua`).
+    """
+    if not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+    except Exception:
+        return False
+
+    if _ALLOW_LOCALHOST_UPDATE_URLS and parsed.hostname in ("127.0.0.1", "localhost"):
+        return parsed.scheme in ("http", "https")
+
+    if parsed.scheme.lower() != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    host_ok = host in ALLOWED_GITHUB_HOSTS or host.endswith(".githubusercontent.com")
+    if not host_ok:
+        return False
+
+    if require_repo_prefix:
+        expected_prefix = f"/{GITHUB_REPO_OWNER.lower()}/{GITHUB_REPO_NAME.lower()}/"
+        if not parsed.path.lower().startswith(expected_prefix):
+            return False
+    return True
+
+
+class _SafeGitHubRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Ensures HTTP redirects during GitHub API queries or release asset downloads
+    only follow HTTPS URLs on official GitHub / GitHubusercontent domains.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        resolved_url = urllib.parse.urljoin(req.full_url, newurl)
+        if not is_valid_github_url(resolved_url, require_repo_prefix=False):
+            raise urllib.error.URLError(
+                f"Blocked unsafe redirect to untrusted URL: {resolved_url}"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, resolved_url)
+
+
+def _extract_asset_sha256(
+    asset_dict: Dict[str, Any],
+    release_body: str = "",
+    asset_name: str = EXPECTED_RELEASE_ASSET_NAME,
+) -> Tuple[Optional[str], str]:
+    """
+    Extracts and validates the expected 64-character hex SHA-256 digest for `HDRSnipFusion.exe`.
+    Checks GitHub's native `asset["digest"]` field (`"sha256:<hex>"`) and cross-checks
+    against any SHA-256 checksum listed in the release notes body.
+    """
+    api_sha256: Optional[str] = None
+    raw_digest = str(asset_dict.get("digest") or "").strip()
+    if raw_digest:
+        if raw_digest.lower().startswith("sha256:"):
+            cand = raw_digest[7:].strip().lower()
+        else:
+            cand = raw_digest.strip().lower()
+        if len(cand) == 64 and all(c in "0123456789abcdef" for c in cand):
+            api_sha256 = cand
+        else:
+            return (
+                None,
+                f"Invalid SHA-256 digest format in GitHub asset metadata: '{raw_digest}'",
+            )
+
+    body_sha256: Optional[str] = None
+    if release_body:
+        # Match patterns like: `<64-hex>  HDRSnipFusion.exe` or `SHA-256: <64-hex>`
+        pat_named = re.search(
+            r"\b([0-9a-fA-F]{64})\b[^\n\r]{0,40}" + re.escape(asset_name),
+            release_body,
+            re.IGNORECASE,
+        )
+        if pat_named:
+            body_sha256 = pat_named.group(1).lower()
+        else:
+            pat_label = re.search(
+                r"(?:sha-?256|digest)[:\s=`*]+([0-9a-fA-F]{64})\b",
+                release_body,
+                re.IGNORECASE,
+            )
+            if pat_label:
+                body_sha256 = pat_label.group(1).lower()
+
+    if api_sha256 and body_sha256 and not hmac.compare_digest(api_sha256, body_sha256):
+        return (
+            None,
+            "SHA-256 digest mismatch between GitHub asset metadata and release notes.",
+        )
+
+    final_sha = api_sha256 or body_sha256
+    if not final_sha:
+        return (
+            None,
+            f"Release asset '{asset_name}' is missing required SHA-256 digest metadata.",
+        )
+    return (final_sha, "ok")
+
+
+def parse_github_release_payload(
+    payload: Any,
+    current_version: str = APP_VERSION,
+) -> UpdateCheckResult:
+    """
+    Validates a parsed JSON object from `/repos/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest`
+    and returns a structured `UpdateCheckResult`.
+    Strictly ignores draft releases, pre-releases, releases from other repositories,
+    source archives, and releases where `HDRSnipFusion.exe` is not yet uploaded.
+    """
+    if not isinstance(payload, dict):
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            message="Invalid release metadata format from GitHub API.",
+        )
+
+    if bool(payload.get("draft")) or bool(payload.get("prerelease")):
+        return UpdateCheckResult(
+            status="up_to_date",
+            current_version=current_version,
+            latest_version=current_version,
+            message="You're running the latest stable version (ignoring draft/pre-release).",
+        )
+
+    html_url = str(payload.get("html_url") or GITHUB_RELEASES_PAGE_URL).strip()
+    if not is_valid_github_url(html_url, require_repo_prefix=True):
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            message=f"Rejected release metadata from unexpected repository URL: {html_url}",
+        )
+
+    raw_tag = str(payload.get("tag_name") or "").strip()
+    parsed_ver = parse_semver(raw_tag)
+    if parsed_ver is None:
+        return UpdateCheckResult(
+            status="up_to_date",
+            current_version=current_version,
+            latest_version=current_version,
+            release_url=html_url,
+            message=f"You're running the latest stable version (v{current_version}).",
+        )
+
+    clean_latest = format_semver(raw_tag)
+    release_title = str(payload.get("name") or f"HDRSnip Fusion v{clean_latest}").strip()
+    release_body = str(payload.get("body") or "").strip()
+    published_at = str(payload.get("published_at") or "").strip()
+
+    if not is_newer_semver(clean_latest, current_version):
+        return UpdateCheckResult(
+            status="up_to_date",
+            current_version=current_version,
+            latest_version=clean_latest,
+            release_title=release_title,
+            release_notes=release_body,
+            release_url=html_url,
+            published_at=published_at,
+            message=f"You're running the latest version (v{current_version}).",
+        )
+
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        assets = []
+
+    matched_asset: Optional[Dict[str, Any]] = None
+    for item in assets:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name == EXPECTED_RELEASE_ASSET_NAME:
+            matched_asset = item
+            break
+
+    if matched_asset is None:
+        return UpdateCheckResult(
+            status="asset_pending",
+            current_version=current_version,
+            latest_version=clean_latest,
+            release_title=release_title,
+            release_notes=release_body,
+            release_url=html_url,
+            published_at=published_at,
+            message=(
+                f"Release v{clean_latest} is published, but {EXPECTED_RELEASE_ASSET_NAME} "
+                "is still being built and attached by GitHub Actions."
+            ),
+        )
+
+    asset_state = str(matched_asset.get("state") or "uploaded").strip().lower()
+    if asset_state != "uploaded":
+        return UpdateCheckResult(
+            status="asset_pending",
+            current_version=current_version,
+            latest_version=clean_latest,
+            release_title=release_title,
+            release_notes=release_body,
+            release_url=html_url,
+            published_at=published_at,
+            message=(
+                f"Release v{clean_latest} asset {EXPECTED_RELEASE_ASSET_NAME} is still uploading "
+                f"(state='{asset_state}')."
+            ),
+        )
+
+    dl_url = str(matched_asset.get("browser_download_url") or "").strip()
+    if not is_valid_github_url(dl_url, require_repo_prefix=True) or not dl_url.endswith(
+        "/" + EXPECTED_RELEASE_ASSET_NAME
+    ):
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            latest_version=clean_latest,
+            release_url=html_url,
+            message=f"Rejected invalid download URL for {EXPECTED_RELEASE_ASSET_NAME}: {dl_url}",
+        )
+
+    try:
+        asset_size = int(matched_asset.get("size") or 0)
+    except Exception:
+        asset_size = 0
+
+    if asset_size < MIN_EXE_SIZE_BYTES or asset_size > MAX_EXE_SIZE_BYTES:
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            latest_version=clean_latest,
+            release_url=html_url,
+            message=(
+                f"Release asset {EXPECTED_RELEASE_ASSET_NAME} has invalid size "
+                f"({asset_size:,} bytes)."
+            ),
+        )
+
+    sha256_hex, sha_reason = _extract_asset_sha256(
+        matched_asset, release_body=release_body, asset_name=EXPECTED_RELEASE_ASSET_NAME
+    )
+    if not sha256_hex:
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            latest_version=clean_latest,
+            release_url=html_url,
+            message=sha_reason,
+        )
+
+    return UpdateCheckResult(
+        status="update_available",
+        current_version=current_version,
+        latest_version=clean_latest,
+        release_title=release_title,
+        release_notes=release_body,
+        release_url=html_url,
+        download_url=dl_url,
+        asset_name=EXPECTED_RELEASE_ASSET_NAME,
+        asset_size=asset_size,
+        expected_sha256=sha256_hex,
+        published_at=published_at,
+        message=f"HDRSnip Fusion v{clean_latest} is available.",
+    )
+
+
+def fetch_latest_github_release(
+    api_url: str = GITHUB_LATEST_RELEASE_API_URL,
+    current_version: str = APP_VERSION,
+    timeout: float = 12.0,
+) -> UpdateCheckResult:
+    """
+    Queries the official GitHub Releases API over HTTPS with bounded timeout and response size.
+    Handles offline networks, DNS failures, and HTTP 403/429 rate limits gracefully.
+    """
+    if not is_valid_github_url(api_url, require_repo_prefix=False):
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            message=f"Refusing to query untrusted update URL: {api_url}",
+        )
+
+    opener = urllib.request.build_opener(_SafeGitHubRedirectHandler())
+    req = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": f"HDRSnipFusion/{current_version} (Windows; +https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME})",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="GET",
+    )
+
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            raw_bytes = resp.read(MAX_API_RESPONSE_BYTES + 1)
+            if len(raw_bytes) > MAX_API_RESPONSE_BYTES:
+                return UpdateCheckResult(
+                    status="error",
+                    current_version=current_version,
+                    message="GitHub API response exceeded maximum allowed size (2 MB).",
+                )
+            data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
+            return parse_github_release_payload(data, current_version=current_version)
+    except urllib.error.HTTPError as http_err:
+        code = int(getattr(http_err, "code", 0) or 0)
+        if code == 404:
+            return UpdateCheckResult(
+                status="up_to_date",
+                current_version=current_version,
+                latest_version=current_version,
+                message=f"You're running the latest version (v{current_version}).",
+            )
+        if code in (403, 429):
+            return UpdateCheckResult(
+                status="rate_limited",
+                current_version=current_version,
+                message="GitHub API rate limit reached. Please try again later.",
+            )
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            message=f"GitHub API returned HTTP {code}.",
+        )
+    except urllib.error.URLError as url_err:
+        return UpdateCheckResult(
+            status="offline",
+            current_version=current_version,
+            message=f"Unable to reach GitHub Releases ({url_err.reason}).",
+        )
+    except Exception as exc:
+        return UpdateCheckResult(
+            status="error",
+            current_version=current_version,
+            message=f"Update check failed: {exc}",
+        )
+
+
+def download_and_stage_release_asset(
+    check_result: UpdateCheckResult,
+    staging_root: Path = LOCAL_UPDATE_ROOT_DIR,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
+    timeout: float = 25.0,
+    min_exe_size: int = MIN_EXE_SIZE_BYTES,
+) -> Path:
+    r"""
+    Downloads `HDRSnipFusion.exe` over HTTPS into `%LOCALAPPDATA%\HDRSnip Fusion\updates\v<ver>\`:
+      1. Uses a temporary `.part` file during streaming.
+      2. Enforces expected file size and maximum byte bounds.
+      3. Computes SHA-256 while streaming and re-verifies the finished file on disk.
+      4. Validates 64-bit Windows PE executable headers (`MZ`, `PE\0\0`, `AMD64`, `PE32+`).
+      5. Calls `verify_authenticode_signature()`.
+      6. Atomically renames `.part` -> `HDRSnipFusion.exe` and writes `staged_metadata.json`
+         only after every check passes. Rejects and deletes partial files on any failure.
+    """
+    if not check_result.is_update_ready:
+        raise UpdateVerificationError("UpdateCheckResult does not contain a downloadable verified release.")
+    if check_result.asset_name != EXPECTED_RELEASE_ASSET_NAME:
+        raise UpdateVerificationError(
+            f"Unexpected release asset name '{check_result.asset_name}' (expected '{EXPECTED_RELEASE_ASSET_NAME}')."
+        )
+    if not is_valid_github_url(check_result.download_url, require_repo_prefix=True):
+        raise UpdateVerificationError(
+            f"Refusing to download from untrusted URL: {check_result.download_url}"
+        )
+
+    expected_sha = check_result.expected_sha256.strip().lower()
+    if len(expected_sha) != 64 or not all(c in "0123456789abcdef" for c in expected_sha):
+        raise UpdateVerificationError("Missing or malformed expected SHA-256 digest.")
+
+    clean_ver = format_semver(check_result.latest_version)
+    version_dir = Path(staging_root).resolve() / f"v{clean_ver}"
+    version_dir.mkdir(parents=True, exist_ok=True)
+
+    final_staged_exe = version_dir / EXPECTED_RELEASE_ASSET_NAME
+    part_path = version_dir / f"{EXPECTED_RELEASE_ASSET_NAME}.{os.getpid()}.part"
+
+    # If already staged and verified on disk with exact SHA-256 and valid PE64 structure, reuse it
+    if final_staged_exe.exists():
+        try:
+            existing_sha = compute_file_sha256(final_staged_exe)
+            pe_ok, _ = validate_windows_pe_executable(
+                final_staged_exe, min_size=min_exe_size, max_size=MAX_EXE_SIZE_BYTES
+            )
+            if hmac.compare_digest(existing_sha, expected_sha) and pe_ok:
+                if progress_callback is not None:
+                    sz = final_staged_exe.stat().st_size
+                    progress_callback(sz, sz)
+                return final_staged_exe
+        except Exception:
+            pass
+        try:
+            final_staged_exe.unlink()
+        except OSError:
+            pass
+
+    opener = urllib.request.build_opener(_SafeGitHubRedirectHandler())
+    req = urllib.request.Request(
+        check_result.download_url,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": f"HDRSnipFusion/{APP_VERSION} (+https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME})",
+        },
+        method="GET",
+    )
+
+    hasher = hashlib.sha256()
+    bytes_read = 0
+    expected_total = int(check_result.asset_size)
+
+    try:
+        with opener.open(req, timeout=timeout) as resp, open(part_path, "wb") as out_fh:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise UpdateVerificationError("Update download was cancelled.")
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                bytes_read += len(chunk)
+                if bytes_read > MAX_EXE_SIZE_BYTES or (
+                    expected_total > 0 and bytes_read > expected_total
+                ):
+                    raise UpdateVerificationError(
+                        f"Downloaded data ({bytes_read:,} bytes) exceeded expected asset size ({expected_total:,} bytes)."
+                    )
+                hasher.update(chunk)
+                out_fh.write(chunk)
+                if progress_callback is not None:
+                    progress_callback(bytes_read, expected_total)
+
+            out_fh.flush()
+            try:
+                os.fsync(out_fh.fileno())
+            except OSError:
+                pass
+
+        if expected_total > 0 and bytes_read != expected_total:
+            raise UpdateVerificationError(
+                f"Incomplete download: received {bytes_read:,} of {expected_total:,} bytes."
+            )
+
+        stream_sha = hasher.hexdigest().lower()
+        if not hmac.compare_digest(stream_sha, expected_sha):
+            raise UpdateVerificationError(
+                f"SHA-256 verification failed (expected {expected_sha[:16]}..., got {stream_sha[:16]}...)."
+            )
+
+        disk_sha = compute_file_sha256(part_path)
+        if not hmac.compare_digest(disk_sha, expected_sha):
+            raise UpdateVerificationError(
+                "On-disk SHA-256 verification failed after writing staging file."
+            )
+
+        pe_ok, pe_reason = validate_windows_pe_executable(
+            part_path, min_size=min_exe_size, max_size=MAX_EXE_SIZE_BYTES
+        )
+        if not pe_ok:
+            raise UpdateVerificationError(
+                f"Downloaded file failed Windows PE executable validation: {pe_reason}"
+            )
+
+        auth_ok, auth_reason = verify_authenticode_signature(part_path)
+        if not auth_ok:
+            raise UpdateVerificationError(
+                f"Authenticode signature verification failed: {auth_reason}"
+            )
+
+        os.replace(str(part_path), str(final_staged_exe))
+
+        meta_path = version_dir / "staged_metadata.json"
+        meta_payload = {
+            "version": clean_ver,
+            "asset_name": EXPECTED_RELEASE_ASSET_NAME,
+            "asset_size": bytes_read,
+            "sha256": expected_sha,
+            "release_url": check_result.release_url,
+            "download_url": check_result.download_url,
+            "staged_at_epoch": time.time(),
+        }
+        meta_path.write_text(json.dumps(meta_payload, indent=2), encoding="utf-8")
+        DIAG_LOG.milestone(
+            "UPDATE_STAGE",
+            f"Staged and verified HDRSnip Fusion v{clean_ver} at '{final_staged_exe}' "
+            f"(size={bytes_read:,} bytes, sha256={expected_sha})",
+        )
+        return final_staged_exe
+    except Exception:
+        try:
+            if part_path.exists():
+                part_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+ACTIVE_TRANSACTION_LOCK_FILENAME: str = ".active_update_transaction.lock"
+ACTIVE_TRANSACTION_MAX_AGE_SEC: float = 1800.0  # 30 minutes protection window
+
+
+def _is_updater_transaction_mutex_active() -> bool:
+    """
+    Returns True if a Windows `Local\HDRSnipFusion_UpdaterTransaction` mutex
+    is currently held by an active updater helper process.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        _ensure_win32_ctypes_signatures()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        SYNCHRONIZE = 0x00100000
+        kernel32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel32.OpenMutexW.restype = ctypes.c_void_p
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        h_mutex = kernel32.OpenMutexW(
+            SYNCHRONIZE, False, r"Local\HDRSnipFusion_UpdaterTransaction"
+        )
+        if h_mutex:
+            kernel32.CloseHandle(ctypes.c_void_p(h_mutex))
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _directory_has_active_update_transaction(
+    version_dir: Path,
+    now_epoch: Optional[float] = None,
+    max_age_sec: float = ACTIVE_TRANSACTION_MAX_AGE_SEC,
+) -> bool:
+    """
+    Returns True if `version_dir` contains an active update transaction lock,
+    a recent `update_manifest.json`, or any pending `startup_confirm_*.json` file.
+    Prevents premature staging cleanup while the updater helper or restarted child
+    is still completing startup verification or rollback.
+    """
+    now = time.time() if now_epoch is None else float(now_epoch)
+    try:
+        if not version_dir.exists() or not version_dir.is_dir():
+            return False
+
+        lock_file = version_dir / ACTIVE_TRANSACTION_LOCK_FILENAME
+        if lock_file.exists():
+            try:
+                age = now - lock_file.stat().st_mtime
+                if age <= max_age_sec:
+                    try:
+                        lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+                        helper_pid = int(lock_data.get("helper_pid") or lock_data.get("pid") or 0)
+                        if helper_pid <= 0 or _is_process_alive(helper_pid) or age <= 60.0:
+                            return True
+                    except Exception:
+                        return True
+            except OSError:
+                return True
+
+        manifest_file = version_dir / "update_manifest.json"
+        if manifest_file.exists():
+            try:
+                if (now - manifest_file.stat().st_mtime) <= max_age_sec:
+                    return True
+            except OSError:
+                return True
+
+        for confirm_candidate in version_dir.glob("startup_confirm_*.json"):
+            try:
+                if (now - confirm_candidate.stat().st_mtime) <= max_age_sec:
+                    return True
+            except OSError:
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def cleanup_stale_update_staging(
+    current_version: str = APP_VERSION,
+    staging_root: Path = LOCAL_UPDATE_ROOT_DIR,
+    protect_confirm_file: Optional[Path] = None,
+) -> None:
+    r"""
+    Removes staging subdirectories for versions `<= current_version`, leftover `.part`
+    files, or stale helper binaries so `%LOCALAPPDATA%\HDRSnip Fusion\updates` stays clean.
+    Strictly protects any staging directory that has an active update transaction
+    (`.active_update_transaction.lock`, `update_manifest.json`, `startup_confirm_*.json`,
+    or `Local\HDRSnipFusion_UpdaterTransaction` mutex) so active verification or rollback
+    files are never deleted mid-transaction.
+    """
+    try:
+        root = Path(staging_root)
+        if not root.exists() or not root.is_dir():
+            return
+        if _is_updater_transaction_mutex_active():
+            DIAG_LOG.log(
+                "UPDATE_CLEANUP",
+                "Skipping staging cleanup because Local\HDRSnipFusion_UpdaterTransaction is active.",
+            )
+            return
+
+        protected_dir: Optional[Path] = None
+        if protect_confirm_file is not None:
+            try:
+                protected_dir = Path(protect_confirm_file).resolve().parent
+            except Exception:
+                protected_dir = None
+
+        now = time.time()
+        for child in list(root.iterdir()):
+            try:
+                if child.is_dir() and child.name.lower().startswith("v"):
+                    child_resolved = child.resolve()
+                    if protected_dir is not None and child_resolved == protected_dir:
+                        continue
+                    if _directory_has_active_update_transaction(child_resolved, now_epoch=now):
+                        DIAG_LOG.log(
+                            "UPDATE_CLEANUP",
+                            f"Preserving active update transaction directory '{child_resolved}'.",
+                        )
+                        continue
+
+                    ver_str = child.name[1:]
+                    if not is_newer_semver(ver_str, current_version):
+                        shutil.rmtree(child, ignore_errors=True)
+                        continue
+                    # Clean up any leftover helper copy inside newer staging dirs only when idle
+                    helper_copy = child / "HDRSnipFusion_UpdaterHelper.exe"
+                    if helper_copy.exists():
+                        try:
+                            helper_copy.unlink()
+                        except OSError:
+                            pass
+                elif child.is_file():
+                    if (
+                        child.suffix.lower() in (".part", ".tmp")
+                        and (now - child.stat().st_mtime) > 300.0
+                    ) or (now - child.stat().st_mtime) > _SEVEN_DAYS_SEC:
+                        child.unlink()
+            except Exception:
+                pass
+    except Exception as exc:
+        DIAG_LOG.warning("UPDATE_CLEANUP", f"Staging cleanup note: {exc}")
+
+
+def prepare_staged_update_transaction(
+    staged_exe: Path,
+    target_version: str,
+    expected_sha256: str,
+    target_exe: Optional[Path] = None,
+    restart_after_update: bool = True,
+    staging_root: Path = LOCAL_UPDATE_ROOT_DIR,
+    min_exe_size: int = MIN_EXE_SIZE_BYTES,
+) -> Tuple[Path, Path]:
+    """
+    Prepares a safe, self-contained update replacement transaction:
+      1. Re-verifies `staged_exe` SHA-256 and 64-bit Windows PE headers.
+      2. Verifies `target_exe` is not in a protected / read-only directory.
+      3. Creates an independent helper executable copy (`HDRSnipFusion_UpdaterHelper.exe`)
+         from the currently installed, known-good `target_exe` (whenever it exists on disk,
+         falling back to `staged_exe` only if `target_exe` does not yet exist) so the helper
+         process is guaranteed to boot Python and perform rollback even if `staged_exe` is
+         corrupt or fails to start Python.
+      4. Writes `.active_update_transaction.lock` and `update_manifest.json` inside the
+         staging folder to protect all transaction files from premature cleanup.
+    Returns `(helper_exe_path, manifest_path)`.
+    """
+    staged_resolved = Path(staged_exe).resolve()
+    root_resolved = Path(staging_root).resolve()
+    try:
+        staged_resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        raise UpdateVerificationError(
+            f"Staged executable '{staged_resolved}' is outside staging root '{root_resolved}'."
+        ) from exc
+
+    expected_sha = str(expected_sha256 or "").strip().lower()
+    if len(expected_sha) != 64 or not all(c in "0123456789abcdef" for c in expected_sha):
+        raise UpdateVerificationError("Invalid expected SHA-256 for staged transaction.")
+
+    actual_sha = compute_file_sha256(staged_resolved)
+    if not hmac.compare_digest(actual_sha, expected_sha):
+        raise UpdateVerificationError(
+            "Staged executable SHA-256 does not match expected digest."
+        )
+
+    pe_ok, pe_reason = validate_windows_pe_executable(
+        staged_resolved, min_size=min_exe_size, max_size=MAX_EXE_SIZE_BYTES
+    )
+    if not pe_ok:
+        raise UpdateVerificationError(
+            f"Staged executable failed PE validation: {pe_reason}"
+        )
+
+    dest_exe = Path(target_exe or get_current_executable_path()).resolve()
+    if dest_exe.suffix.lower() != ".exe":
+        raise UpdateVerificationError(
+            f"Refusing to replace non-EXE target path: '{dest_exe}'"
+        )
+
+    is_prot, prot_reason = is_protected_install_location(dest_exe)
+    if is_prot:
+        raise PermissionError(prot_reason)
+
+    version_dir = staged_resolved.parent
+    lock_path = version_dir / ACTIVE_TRANSACTION_LOCK_FILENAME
+    write_atomic_json_file(
+        lock_path,
+        {
+            "status": "preparing",
+            "source_version": APP_VERSION,
+            "target_version": format_semver(target_version),
+            "pid": os.getpid(),
+            "created_at_epoch": time.time(),
+        },
+    )
+
+    # Copy the updater helper from the currently running, known-good executable (`dest_exe`)
+    # whenever available so recovery/rollback never depends on the untested `staged_resolved`
+    # being able to start Python!
+    helper_source = dest_exe if dest_exe.exists() else staged_resolved
+    expected_helper_sha = compute_file_sha256(helper_source)
+    helper_exe = version_dir / "HDRSnipFusion_UpdaterHelper.exe"
+    shutil.copy2(helper_source, helper_exe)
+    helper_sha = compute_file_sha256(helper_exe)
+    if not hmac.compare_digest(helper_sha, expected_helper_sha):
+        raise UpdateVerificationError("Failed to verify helper executable copy.")
+
+    manifest_path = version_dir / "update_manifest.json"
+    manifest_data = {
+        "schema_version": 2,
+        "source_version": APP_VERSION,
+        "target_version": format_semver(target_version),
+        "target_exe": str(dest_exe),
+        "staged_exe": str(staged_resolved),
+        "helper_exe": str(helper_exe),
+        "helper_source_exe": str(helper_source),
+        "helper_sha256": helper_sha,
+        "expected_sha256": expected_sha,
+        "min_exe_size": int(min_exe_size),
+        "parent_pid": os.getpid(),
+        "restart_after_update": bool(restart_after_update),
+        "created_at_epoch": time.time(),
+    }
+    write_atomic_json_file(manifest_path, manifest_data)
+    return (helper_exe, manifest_path)
+
+
+def _build_clean_pyinstaller_env() -> Dict[str, str]:
+    """
+    Constructs a clean environment dictionary for spawning an independent PyInstaller
+    `--onefile` process. Sets `PYINSTALLER_RESET_ENVIRONMENT=1` and removes inherited
+    `_MEIPASS2` variables so the child bootloader creates its own temporary extraction
+    directory instead of colliding with the exiting parent's `_MEIxxxxxx` folder.
+    """
+    env = dict(os.environ)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    for k in list(env.keys()):
+        if k.upper().startswith("_MEI"):
+            env.pop(k, None)
+    return env
+
+
+def launch_staged_update_helper(
+    helper_exe: Path,
+    manifest_path: Path,
+) -> subprocess.Popen:
+    """
+    Launches the independent updater helper process with `shell=False` and clean
+    PyInstaller environment reset flags.
+    """
+    env = _build_clean_pyinstaller_env()
+    creationflags = 0
+    if sys.platform == "win32":
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_NO_WINDOW = 0x08000000
+        creationflags = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+
+    cmd = [
+        str(Path(helper_exe).resolve()),
+        "--apply-staged-update",
+        str(Path(manifest_path).resolve()),
+    ]
+    DIAG_LOG.milestone(
+        "UPDATE_LAUNCH_HELPER",
+        f"Spawning updater helper: {cmd}",
+        flush_disk=True,
+    )
+    return subprocess.Popen(
+        cmd,
+        env=env,
+        cwd=str(Path(helper_exe).resolve().parent),
+        close_fds=True,
+        creationflags=creationflags,
+        shell=False,
+    )
+
+
+class _PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ctypes.c_size_t),
+        ("th32ModuleID", wintypes.DWORD),
+        ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD),
+        ("pcPriClassBase", wintypes.LONG),
+        ("dwFlags", wintypes.DWORD),
+        ("szExeFile", ctypes.c_wchar * 260),
+    ]
+
+
+def _enumerate_process_parent_map() -> Dict[int, int]:
+    """
+    Returns a snapshot mapping `{pid: parent_pid}` for active OS processes.
+    Uses Win32 `CreateToolhelp32Snapshot` on Windows and `/proc/<pid>/stat` (with `ps`
+    fallback) on POSIX systems. Used to verify PyInstaller `--onefile` bootloader->child
+    process ancestry and to terminate entire process trees on rollback.
+    """
+    parent_map: Dict[int, int] = {}
+    if sys.platform == "win32":
+        TH32CS_SNAPPROCESS = 0x00000002
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+            kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+            kernel32.Process32FirstW.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(_PROCESSENTRY32W),
+            ]
+            kernel32.Process32FirstW.restype = wintypes.BOOL
+            kernel32.Process32NextW.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(_PROCESSENTRY32W),
+            ]
+            kernel32.Process32NextW.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
+            h_snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            if not h_snap or h_snap == INVALID_HANDLE_VALUE:
+                return parent_map
+            try:
+                pe = _PROCESSENTRY32W()
+                pe.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+                if kernel32.Process32FirstW(ctypes.c_void_p(h_snap), ctypes.byref(pe)):
+                    while True:
+                        parent_map[int(pe.th32ProcessID)] = int(pe.th32ParentProcessID)
+                        if not kernel32.Process32NextW(
+                            ctypes.c_void_p(h_snap), ctypes.byref(pe)
+                        ):
+                            break
+            finally:
+                kernel32.CloseHandle(ctypes.c_void_p(h_snap))
+        except Exception:
+            pass
+        return parent_map
+
+    proc_root = Path("/proc")
+    if proc_root.exists():
+        for entry in proc_root.iterdir():
+            if entry.name.isdigit():
+                try:
+                    stat_text = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+                    rpar = stat_text.rfind(")")
+                    if rpar != -1:
+                        fields = stat_text[rpar + 2 :].split()
+                        state = fields[0] if fields else ""
+                        if state != "Z" and len(fields) >= 2:
+                            parent_map[int(entry.name)] = int(fields[1])
+                except Exception:
+                    pass
+    return parent_map
+
+
+def _is_pid_descendant_of(
+    child_pid: int,
+    ancestor_pid: int,
+    parent_map: Optional[Dict[int, int]] = None,
+    max_depth: int = 12,
+) -> bool:
+    """
+    Returns True if `child_pid == ancestor_pid` or `child_pid` is a child/descendant
+    of `ancestor_pid` in `parent_map` (such as a PyInstaller `--onefile` Python child
+    spawned by the `ancestor_pid` native bootloader process).
+    """
+    if child_pid <= 0 or ancestor_pid <= 0:
+        return False
+    if int(child_pid) == int(ancestor_pid):
+        return True
+    pmap = _enumerate_process_parent_map() if parent_map is None else parent_map
+    curr = int(child_pid)
+    visited = set()
+    for _ in range(max_depth):
+        if curr in visited:
+            break
+        visited.add(curr)
+        parent = pmap.get(curr)
+        if parent is None or parent <= 0:
+            break
+        if int(parent) == int(ancestor_pid):
+            return True
+        curr = int(parent)
+    return False
+
+
+def _query_process_executable_path(pid: int) -> Optional[Path]:
+    """
+    Queries the OS for the executable image path of `pid`.
+    Uses `QueryFullProcessImageNameW` on Windows and `/proc/<pid>/exe` on Linux.
+    Returns `None` if the process has already exited or cannot be queried.
+    """
+    if pid <= 0:
+        return None
+    if sys.platform == "win32":
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.QueryFullProcessImageNameW.argtypes = [
+                ctypes.c_void_p,
+                wintypes.DWORD,
+                wintypes.LPWSTR,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
+            h_proc = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid)
+            )
+            if not h_proc:
+                return None
+            try:
+                buf_len = wintypes.DWORD(1024)
+                buf = ctypes.create_unicode_buffer(1024)
+                if kernel32.QueryFullProcessImageNameW(
+                    ctypes.c_void_p(h_proc), 0, buf, ctypes.byref(buf_len)
+                ):
+                    raw_path = buf.value.strip()
+                    if raw_path:
+                        return Path(raw_path).resolve()
+            finally:
+                kernel32.CloseHandle(ctypes.c_void_p(h_proc))
+        except Exception:
+            pass
+        return None
+
+    proc_exe = Path(f"/proc/{int(pid)}/exe")
+    try:
+        if proc_exe.exists():
+            return proc_exe.resolve()
+    except Exception:
+        pass
+    return None
+
+
+def _is_process_alive(pid: int) -> bool:
+    """Returns True if process `pid` is currently running (and not a zombie on POSIX)."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        SYNCHRONIZE = 0x00100000
+        WAIT_TIMEOUT = 0x00000102
+        try:
+            kernel32 = ctypes.windll.kernel32
+            h_proc = kernel32.OpenProcess(SYNCHRONIZE, False, int(pid))
+            if not h_proc:
+                return False
+            try:
+                res = kernel32.WaitForSingleObject(ctypes.c_void_p(h_proc), 0)
+                return res == WAIT_TIMEOUT
+            finally:
+                kernel32.CloseHandle(ctypes.c_void_p(h_proc))
+        except Exception:
+            return False
+
+    stat_path = Path(f"/proc/{int(pid)}/stat")
+    if stat_path.exists():
+        try:
+            txt = stat_path.read_text(encoding="utf-8", errors="replace")
+            rpar = txt.rfind(")")
+            if rpar != -1:
+                fields = txt[rpar + 2 :].split()
+                if fields and fields[0] == "Z":
+                    return False
+        except Exception:
+            pass
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _collect_process_tree_pids(
+    root_pid: int,
+    extra_pids: Optional[Sequence[int]] = None,
+) -> List[int]:
+    """
+    Discovers all child and descendant PIDs of `root_pid` (plus any `extra_pids`,
+    such as the child Python PID reported in `startup_confirm_*.json`) in bottom-up
+    order (deepest descendants first, `root_pid` last).
+    """
+    pmap = _enumerate_process_parent_map()
+    children_of: Dict[int, List[int]] = {}
+    for pid, ppid in pmap.items():
+        children_of.setdefault(ppid, []).append(pid)
+
+    seeds: List[int] = []
+    if root_pid and root_pid > 0:
+        seeds.append(int(root_pid))
+    if extra_pids:
+        for ep in extra_pids:
+            if ep and int(ep) > 0 and int(ep) not in seeds:
+                seeds.append(int(ep))
+
+    ordered: List[int] = []
+    visited = set()
+
+    def _dfs(pid: int) -> None:
+        if pid in visited or pid <= 0 or pid == os.getpid():
+            return
+        visited.add(pid)
+        for ch in children_of.get(pid, []):
+            _dfs(ch)
+        ordered.append(pid)
+
+    for s_pid in seeds:
+        _dfs(s_pid)
+    return ordered
+
+
+def _terminate_Single_pid(pid: int, force: bool = False) -> None:
+    """Sends a termination signal to a single `pid` (excluding our own process)."""
+    if pid <= 0 or pid == os.getpid():
+        return
+    if sys.platform == "win32":
+        PROCESS_TERMINATE = 0x0001
+        try:
+            kernel32 = ctypes.windll.kernel32
+            h_proc = kernel32.OpenProcess(PROCESS_TERMINATE, False, int(pid))
+            if h_proc:
+                try:
+                    kernel32.TerminateProcess(ctypes.c_void_p(h_proc), 1)
+                finally:
+                    kernel32.CloseHandle(ctypes.c_void_p(h_proc))
+        except Exception:
+            pass
+    else:
+        import signal as _signal
+
+        sig = _signal.SIGKILL if force else _signal.SIGTERM
+        try:
+            os.kill(int(pid), sig)
+        except OSError:
+            pass
+
+
+def _terminate_process_tree_safely(
+    proc: Optional[subprocess.Popen],
+    timeout_sec: float = 5.0,
+    extra_pids: Optional[Sequence[int]] = None,
+) -> List[int]:
+    """
+    Terminates an entire PyInstaller `--onefile` process tree—including the separate
+    Python child process and any grandchildren as well as the bootloader parent `proc`—
+    and waits for all of them to exit so all file locks on `target_exe` and `_MEIxxxxxx`
+    are released before rollback.
+    """
+    root_pid = int(proc.pid) if (proc is not None and proc.pid) else 0
+    tree_pids = _collect_process_tree_pids(root_pid, extra_pids=extra_pids)
+    if not tree_pids and proc is None:
+        return []
+
+    # 1. Terminate all descendant/child processes first, then the root bootloader
+    for pid in tree_pids:
+        _terminate_Single_pid(pid, force=False)
+    if proc is not None:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except Exception:
+            pass
+
+    deadline = time.monotonic() + max(0.5, float(timeout_sec))
+    while time.monotonic() < deadline:
+        # Re-scan in case the bootloader spawned a child just as we were terminating
+        current_tree = _collect_process_tree_pids(root_pid, extra_pids=tree_pids)
+        for pid in current_tree:
+            if pid not in tree_pids:
+                tree_pids.append(pid)
+                _terminate_Single_pid(pid, force=False)
+        alive = [pid for pid in tree_pids if _is_process_alive(pid)]
+        if not alive and (proc is None or proc.poll() is not None):
+            break
+        time.sleep(0.05)
+
+    # 2. Force-kill any remaining processes in the tree
+    for pid in tree_pids:
+        if _is_process_alive(pid):
+            _terminate_Single_pid(pid, force=True)
+    if proc is not None:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=1.5)
+        except Exception:
+            pass
+
+    for pid in tree_pids:
+        if _is_process_alive(pid):
+            _wait_for_process_exit(pid, timeout_sec=1.5)
+
+    return tree_pids
+
+
+def _terminate_process_safely(
+    proc: Optional[subprocess.Popen],
+    timeout_sec: float = 4.0,
+    extra_pids: Optional[Sequence[int]] = None,
+) -> List[int]:
+    """Alias for `_terminate_process_tree_safely` ensuring child + bootloader termination."""
+    return _terminate_process_tree_safely(
+        proc, timeout_sec=timeout_sec, extra_pids=extra_pids
+    )
+
+
+def _wait_for_process_exit(pid: int, timeout_sec: float = 25.0) -> bool:
+    """Waits for process `pid` to terminate."""
+    if pid <= 0 or pid == os.getpid():
+        return True
+    deadline = time.monotonic() + max(0.5, float(timeout_sec))
+    if sys.platform == "win32":
+        SYNCHRONIZE = 0x00100000
+        WAIT_OBJECT_0 = 0x00000000
+        kernel32 = ctypes.windll.kernel32
+        h_proc = kernel32.OpenProcess(SYNCHRONIZE, False, int(pid))
+        if h_proc:
+            try:
+                wait_ms = int(max(100.0, (deadline - time.monotonic()) * 1000.0))
+                res = kernel32.WaitForSingleObject(ctypes.c_void_p(h_proc), wait_ms)
+                return res == WAIT_OBJECT_0
+            finally:
+                kernel32.CloseHandle(ctypes.c_void_p(h_proc))
+        return True
+
+    while time.monotonic() < deadline:
+        if not _is_process_alive(pid):
+            return True
+        time.sleep(0.06)
+    return False
+
+
+def _wait_for_file_unlocked(target_exe: Path, timeout_sec: float = 30.0) -> bool:
+    """
+    Polls until `target_exe` is no longer locked by the exiting application or its
+    PyInstaller `--onefile` parent bootloader.
+    """
+    deadline = time.monotonic() + max(0.5, float(timeout_sec))
+    while time.monotonic() < deadline:
+        if not target_exe.exists():
+            return True
+        try:
+            with open(target_exe, "r+b"):
+                return True
+        except OSError:
+            time.sleep(0.12)
+    return False
+
+
+STARTUP_CONFIRM_TIMEOUT_SEC: float = 15.0
+
+
+def get_backup_executable_path(target_exe: Optional[Path] = None) -> Path:
+    """Returns the sibling `.bak` path for `target_exe`."""
+    t = Path(target_exe or get_current_executable_path()).resolve()
+    return t.with_name(t.name + ".bak")
+
+
+def get_pending_update_marker_path(target_exe: Optional[Path] = None) -> Path:
+    """
+    Returns the sibling `.pending_verify.json` marker path used by the independent
+    updater helper while startup verification is in progress.
+    """
+    t = Path(target_exe or get_current_executable_path()).resolve()
+    return t.with_name(t.name + ".pending_verify.json")
+
+
+def write_atomic_json_file(target_file: Path, payload: Dict[str, Any]) -> None:
+    """Writes `payload` as UTF-8 JSON to a `.tmp` sibling, flushes + fsyncs, and atomically replaces `target_file`."""
+    dest = Path(target_file).resolve()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.{time.perf_counter_ns()}.tmp")
+    try:
+        raw = json.dumps(payload, indent=2)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(raw)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(str(tmp), str(dest))
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def write_startup_confirmation_file(
+    confirm_file_path: Path,
+    version: str = APP_VERSION,
+    pid: Optional[int] = None,
+    ppid: Optional[int] = None,
+    token: str = "",
+    executable_path: Optional[Path] = None,
+) -> None:
+    """
+    Writes an explicit startup readiness confirmation payload to `confirm_file_path`
+    after the application has initialized its Qt event loop, tray icon, and hotkey listener.
+    Includes the per-update cryptographic `token`, `pid` (`os.getpid()`), `ppid`
+    (`os.getppid()`, which equals the PyInstaller `--onefile` bootloader PID), and
+    resolved `executable` path.
+    """
+    eff_token = str(
+        token or os.environ.get("HDRSNIP_STARTUP_CONFIRM_TOKEN", "")
+    ).strip()
+    exe_resolved = str(
+        Path(executable_path or get_current_executable_path()).resolve()
+    )
+    payload = {
+        "status": "ready",
+        "app": "HDRSnip Fusion",
+        "version": format_semver(version),
+        "tag": f"v{format_semver(version)}",
+        "token": eff_token,
+        "pid": int(os.getpid() if pid is None else pid),
+        "ppid": int(os.getppid() if ppid is None else ppid),
+        "executable": exe_resolved,
+        "packaged": is_packaged_exe(),
+        "timestamp": time.time(),
+    }
+    write_atomic_json_file(Path(confirm_file_path), payload)
+
+
+def _restore_backup_executable(target_exe: Path, backup_exe: Path) -> bool:
+    """
+    Restores `backup_exe` -> `target_exe` safely via an atomic temporary copy so
+    `backup_exe` is never lost if the restore itself is interrupted.
+    """
+    target_exe = Path(target_exe).resolve()
+    backup_exe = Path(backup_exe).resolve()
+    if not backup_exe.exists():
+        return False
+    restore_tmp = target_exe.with_name(f".{target_exe.name}.restore.{os.getpid()}.tmp")
+    try:
+        shutil.copy2(backup_exe, restore_tmp)
+        with open(restore_tmp, "r+b") as fh:
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(str(restore_tmp), str(target_exe))
+        return True
+    except Exception as exc:
+        DIAG_LOG.error(
+            "UPDATE_RESTORE",
+            f"Failed to restore backup '{backup_exe}' -> '{target_exe}'",
+            exc,
+        )
+        try:
+            if restore_tmp.exists():
+                restore_tmp.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def recover_interrupted_update_if_needed(
+    target_exe: Optional[Path] = None,
+    current_version: str = APP_VERSION,
+) -> bool:
+    """
+    Checks whether `target_exe` is missing while `backup_exe` exists (for example,
+    when invoked by an external tool or test).
+    Note: Actual update verification and automatic rollback are ALWAYS performed
+    out-of-process by the independent `HDRSnipFusion_UpdaterHelper.exe` (copied from
+    the known-good previous version), never by relying on a potentially broken updated
+    EXE starting Python or replacing itself while running.
+    """
+    dest = Path(target_exe or get_current_executable_path()).resolve()
+    backup_exe = get_backup_executable_path(dest)
+    if not dest.exists() and backup_exe.exists():
+        if _restore_backup_executable(dest, backup_exe):
+            DIAG_LOG.milestone(
+                "UPDATE_RECOVERY",
+                f"Restored missing executable '{dest}' from backup '{backup_exe}'",
+                flush_disk=True,
+            )
+            return True
+    return False
+
+
+def finalize_pending_update_verification(
+    target_exe: Optional[Path] = None,
+    current_version: str = APP_VERSION,
+) -> bool:
+    """
+    Cleans up any leftover `.pending_verify.json` or `.bak` sibling files once startup
+    confirmation has completed and no updater helper transaction is active.
+    """
+    if _is_updater_transaction_mutex_active():
+        return False
+    dest = Path(target_exe or get_current_executable_path()).resolve()
+    backup_exe = get_backup_executable_path(dest)
+    marker_path = get_pending_update_marker_path(dest)
+    cleaned_any = False
+
+    if marker_path.exists():
+        try:
+            marker_path.unlink()
+            cleaned_any = True
+        except OSError:
+            pass
+
+    if backup_exe.exists():
+        try:
+            backup_exe.unlink()
+            cleaned_any = True
+        except OSError:
+            pass
+
+    if cleaned_any:
+        DIAG_LOG.milestone(
+            "UPDATE_VERIFIED_HEALTHY",
+            f"Cleaned residual update backup/marker files for v{current_version} at '{dest}'.",
+            flush_disk=True,
+        )
+    return cleaned_any
+
+
+def perform_atomic_exe_replacement(
+    target_exe: Path,
+    staged_exe: Path,
+    expected_sha256: str,
+    min_exe_size: int = MIN_EXE_SIZE_BYTES,
+) -> Tuple[bool, str, Optional[Path]]:
+    """
+    Safely backs up `target_exe` to `target_exe.bak` and atomically replaces `target_exe`
+    with a verified copy of `staged_exe`:
+      1. If `target_exe` is missing while `target_exe.bak` exists from an interrupted update,
+         restores `target_exe` from `target_exe.bak` first.
+      2. Preserves the previous working version in `target_exe.bak` via atomic copy
+         (`.bak.tmp` -> `fsync` -> `os.replace` to `.bak`) BEFORE modifying `target_exe`,
+         so `target_exe` is never missing on disk even if power is lost mid-update, and
+         an existing valid `.bak` is never destroyed if `target_exe` already holds an
+         unverified retry binary.
+      3. Copies and verifies `staged_exe` into `target_exe.new` (`fsync` + SHA-256 readback).
+      4. Atomically replaces `target_exe.new` -> `target_exe` via `os.replace` and verifies
+         the post-swap SHA-256 of `target_exe`.
+      5. Never deletes `target_exe.bak` — the caller preserves `target_exe.bak` until the
+         newly installed executable explicitly confirms healthy startup!
+    Returns `(success, message, backup_path)`.
+    """
+    target_exe = Path(target_exe).resolve()
+    staged_exe = Path(staged_exe).resolve()
+    expected_sha = str(expected_sha256 or "").strip().lower()
+
+    if not staged_exe.exists():
+        return (False, f"Staged executable not found: {staged_exe}", None)
+    if not hmac.compare_digest(compute_file_sha256(staged_exe), expected_sha):
+        return (
+            False,
+            "Staged executable failed SHA-256 verification before replacement.",
+            None,
+        )
+    pe_ok, pe_reason = validate_windows_pe_executable(
+        staged_exe, min_size=min_exe_size, max_size=MAX_EXE_SIZE_BYTES
+    )
+    if not pe_ok:
+        return (False, f"Staged executable failed PE check: {pe_reason}", None)
+
+    backup_exe = get_backup_executable_path(target_exe)
+    backup_tmp = target_exe.with_name(target_exe.name + ".bak.tmp")
+    temp_new_exe = target_exe.with_name(target_exe.name + ".new")
+
+    # 0. If target_exe is missing due to a previously interrupted swap, restore from backup_exe first
+    if not target_exe.exists() and backup_exe.exists():
+        _restore_backup_executable(target_exe, backup_exe)
+
+    # 1. Stage and verify `.new` alongside target_exe before touching target_exe or backup_exe
+    try:
+        shutil.copy2(staged_exe, temp_new_exe)
+        with open(temp_new_exe, "r+b") as fh:
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        if not hmac.compare_digest(compute_file_sha256(temp_new_exe), expected_sha):
+            raise UpdateVerificationError(
+                "Copied .new executable failed SHA-256 readback check."
+            )
+    except Exception as exc:
+        try:
+            if temp_new_exe.exists():
+                temp_new_exe.unlink()
+        except OSError:
+            pass
+        return (
+            False,
+            f"Failed to stage temporary .new executable in target folder: {exc}",
+            backup_exe if backup_exe.exists() else None,
+        )
+
+    # 2. Create or preserve a verified backup of the previous working executable in `backup_exe`
+    has_backup = backup_exe.exists()
+    try:
+        if target_exe.exists():
+            current_target_sha = compute_file_sha256(target_exe)
+            # Only overwrite backup_exe if target_exe is not already the staged target binary
+            # OR if no backup_exe exists yet. This prevents a retry from clobbering the good backup!
+            if not has_backup or not hmac.compare_digest(
+                current_target_sha, expected_sha
+            ):
+                shutil.copy2(target_exe, backup_tmp)
+                with open(backup_tmp, "r+b") as fh:
+                    fh.flush()
+                    try:
+                        os.fsync(fh.fileno())
+                    except OSError:
+                        pass
+                if not hmac.compare_digest(
+                    compute_file_sha256(backup_tmp), current_target_sha
+                ):
+                    raise UpdateVerificationError(
+                        "Backup .bak.tmp copy failed SHA-256 verification."
+                    )
+                os.replace(str(backup_tmp), str(backup_exe))
+                has_backup = True
+    except Exception as exc:
+        try:
+            if backup_tmp.exists():
+                backup_tmp.unlink()
+        except OSError:
+            pass
+        try:
+            if temp_new_exe.exists():
+                temp_new_exe.unlink()
+        except OSError:
+            pass
+        return (
+            False,
+            f"Failed to create verified backup executable '{backup_exe}': {exc}",
+            backup_exe if has_backup else None,
+        )
+
+    # 3. Atomically replace target_exe with temp_new_exe (target_exe is never missing on disk)
+    try:
+        os.replace(str(temp_new_exe), str(target_exe))
+        if not hmac.compare_digest(compute_file_sha256(target_exe), expected_sha):
+            raise UpdateVerificationError(
+                "Replaced target executable failed post-swap SHA-256 check."
+            )
+        return (
+            True,
+            "Executable replaced and verified.",
+            backup_exe if has_backup else None,
+        )
+    except Exception as exc:
+        try:
+            if temp_new_exe.exists():
+                temp_new_exe.unlink()
+        except OSError:
+            pass
+        if has_backup and backup_exe.exists():
+            if _restore_backup_executable(target_exe, backup_exe):
+                return (
+                    False,
+                    f"Executable replacement failed and was rolled back to previous version: {exc}",
+                    backup_exe,
+                )
+            return (
+                False,
+                f"Replacement failed ({exc}) AND rollback encountered an error. Backup remains at {backup_exe}.",
+                backup_exe,
+            )
+        return (
+            False,
+            f"Executable replacement failed: {exc}",
+            None,
+        )
+
+
+def _read_reported_pid_from_confirm_file(confirm_file: Path) -> int:
+    """Reads the child `pid` field from `confirm_file` if present, or returns 0."""
+    try:
+        if confirm_file.exists():
+            data = json.loads(confirm_file.read_text(encoding="utf-8"))
+            return int(data.get("pid") or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _wait_for_startup_confirmation(
+    proc: subprocess.Popen,
+    confirm_file: Path,
+    expected_version: str,
+    expected_token: str = "",
+    expected_executable: Optional[Path] = None,
+    timeout_sec: float = STARTUP_CONFIRM_TIMEOUT_SEC,
+    verify_executable_path: bool = True,
+    allow_clean_exit_after_confirm: bool = False,
+) -> Tuple[bool, str]:
+    """
+    Waits up to `timeout_sec` for the newly launched executable `proc` (or its
+    PyInstaller `--onefile` Python child process) to write a valid JSON startup
+    confirmation payload to `confirm_file`:
+      1. Cryptographic per-update token validation (`hmac.compare_digest(rep_token, expected_token)`).
+      2. Semantic version validation (`rep_ver == format_semver(expected_version)`).
+      3. PyInstaller `--onefile` Process Ancestry validation:
+         - In PyInstaller `--onefile`, `proc.pid` is the native C bootloader parent while
+           Python executes in a child process (`rep_pid != proc.pid`, `rep_ppid == proc.pid`).
+         - Accepts `rep_pid == proc.pid` (single-process mode) OR `rep_ppid == proc.pid`
+           (verified against the OS process parent table when `rep_pid` is alive) OR
+           `_is_pid_descendant_of(rep_pid, proc.pid, parent_map)`.
+      4. Executable Identity validation:
+         - When `verify_executable_path=True` and `expected_executable` is provided, verifies
+           that the reported `executable` path (and the OS image path of `rep_pid` when
+           queryable via Win32 `QueryFullProcessImageNameW`) matches `expected_executable`.
+      5. Liveness check:
+         - Verifies the process did not crash immediately after writing the confirmation file.
+    Returns `(confirmed_ok, reason_message)`.
+    """
+    clean_expected = format_semver(expected_version)
+    clean_token = str(expected_token or "").strip()
+    expected_exe_norm: Optional[str] = None
+    if verify_executable_path and expected_executable is not None:
+        try:
+            expected_exe_norm = os.path.normcase(str(Path(expected_executable).resolve()))
+        except Exception:
+            expected_exe_norm = None
+
+    deadline = time.monotonic() + max(0.15, float(timeout_sec))
+    last_reported_pid: int = 0
+
+    while time.monotonic() < deadline:
+        if confirm_file.exists():
+            try:
+                raw = confirm_file.read_text(encoding="utf-8").strip()
+                if raw:
+                    data = json.loads(raw)
+                    status = str(data.get("status") or "").strip().lower()
+                    rep_ver = format_semver(str(data.get("version") or ""))
+                    rep_token = str(data.get("token") or "").strip()
+                    rep_pid = int(data.get("pid") or 0)
+                    rep_ppid = int(data.get("ppid") or 0)
+                    rep_exe = str(data.get("executable") or "").strip()
+                    last_reported_pid = rep_pid
+
+                    if status == "ready":
+                        # 1. Verify per-update cryptographic confirmation token
+                        if clean_token:
+                            if not rep_token or not hmac.compare_digest(rep_token, clean_token):
+                                return (
+                                    False,
+                                    "Startup confirmation token mismatch or missing token.",
+                                )
+
+                        # 2. Verify reported version matches expected target_version
+                        if clean_expected and rep_ver != clean_expected:
+                            return (
+                                False,
+                                f"Updated executable reported version '{rep_ver}' instead of expected '{clean_expected}'.",
+                            )
+
+                        # 3. Verify PyInstaller --onefile process ancestry (bootloader parent -> Python child)
+                        if rep_pid <= 0:
+                            return (
+                                False,
+                                f"Startup confirmation reported invalid PID ({rep_pid}).",
+                            )
+                        if proc.pid:
+                            boot_pid = int(proc.pid)
+                            pmap = _enumerate_process_parent_map()
+                            is_direct = rep_pid == boot_pid
+                            is_os_descendant = _is_pid_descendant_of(
+                                rep_pid, boot_pid, parent_map=pmap
+                            )
+                            # If rep_pid is still in the OS process table, its actual OS parent chain
+                            # MUST lead to boot_pid. If rep_pid already exited cleanly (only allowed in
+                            # allow_clean_exit_after_confirm mode), accept rep_ppid == boot_pid.
+                            if rep_pid in pmap:
+                                ancestry_ok = is_direct or is_os_descendant
+                            else:
+                                ancestry_ok = (
+                                    is_direct
+                                    or is_os_descendant
+                                    or (rep_ppid == boot_pid)
+                                )
+                            if not ancestry_ok:
+                                return (
+                                    False,
+                                    f"Startup confirmation process ancestry mismatch: reported pid={rep_pid} "
+                                    f"(ppid={rep_ppid}) is neither bootloader pid={boot_pid} nor its child/descendant.",
+                                )
+
+                        # 4. Verify executable identity (reported executable + OS process image path)
+                        if expected_exe_norm is not None:
+                            if rep_exe:
+                                try:
+                                    rep_exe_norm = os.path.normcase(
+                                        str(Path(rep_exe).resolve())
+                                    )
+                                except Exception:
+                                    rep_exe_norm = os.path.normcase(rep_exe)
+                                if rep_exe_norm != expected_exe_norm:
+                                    return (
+                                        False,
+                                        f"Startup confirmation executable mismatch: expected '{expected_exe_norm}', got '{rep_exe_norm}'.",
+                                    )
+                            os_img = _query_process_executable_path(rep_pid)
+                            if os_img is not None and sys.platform == "win32":
+                                os_img_norm = os.path.normcase(str(os_img))
+                                if os_img_norm != expected_exe_norm:
+                                    return (
+                                        False,
+                                        f"OS process image path '{os_img_norm}' for PID {rep_pid} does not match expected '{expected_exe_norm}'.",
+                                    )
+
+                        # 5. Verify process liveness
+                        if not allow_clean_exit_after_confirm:
+                            if proc.poll() is not None:
+                                return (
+                                    False,
+                                    f"Updated executable exited immediately after writing startup signal (exit code {proc.poll()}).",
+                                )
+                            if not _is_process_alive(rep_pid):
+                                return (
+                                    False,
+                                    f"Updated Python child process (PID {rep_pid}) exited immediately after writing startup signal.",
+                                )
+
+                        rel_desc = (
+                            f"child_pid={rep_pid}, bootloader_pid={proc.pid}"
+                            if (proc.pid and rep_pid != int(proc.pid))
+                            else f"pid={rep_pid}"
+                        )
+                        return (
+                            True,
+                            f"Confirmed healthy startup of v{rep_ver} ({rel_desc}).",
+                        )
+            except (json.JSONDecodeError, OSError, ValueError):
+                # File may still be mid-write if not yet replaced; poll again briefly
+                pass
+
+        exit_code = proc.poll()
+        if exit_code is not None and not confirm_file.exists():
+            return (
+                False,
+                f"Updated executable exited prematurely before confirming startup (exit code {exit_code}).",
+            )
+        time.sleep(0.05)
+
+    return (
+        False,
+        f"Timed out after {timeout_sec:.1f}s waiting for explicit startup confirmation signal from updated executable.",
+    )
+
+
+def run_staged_update_helper(
+    manifest_path_str: str,
+    allowed_staging_root: Optional[Path] = None,
+    post_launch_verify_sec: float = STARTUP_CONFIRM_TIMEOUT_SEC,
+    launch_command_override: Optional[Callable[..., subprocess.Popen]] = None,
+) -> int:
+    r"""
+    Executes the out-of-process `--apply-staged-update <manifest>` helper workflow BEFORE
+    Qt, hotkeys, or the single-instance mutex are initialized:
+      1. Acquires `Local\HDRSnipFusion_UpdaterTransaction` mutex and refreshes
+         `.active_update_transaction.lock` inside the staging directory so staging files
+         are protected until verification or rollback completes.
+      2. Validates that `manifest_path` resides inside the trusted update staging directory.
+      3. Waits for `parent_pid` and PyInstaller bootloader file locks on `target_exe` to release.
+      4. Writes `.pending_verify.json` and performs non-destructive atomic replacement
+         (`target_exe` copied to `.bak`, `.new` swapped into `target_exe`).
+      5. Generates a cryptographic per-update confirmation token (`secrets.token_hex(32)`)
+         and launches the updated executable to verify startup health:
+         - When `restart_after_update=True`, launches the normal tray app with
+           `--restarted-after-update --confirm-startup-file <path> --confirm-startup-token <token>`.
+         - When `restart_after_update=False`, launches with `--verify-startup-only` so the
+           independent helper STILL verifies that the new binary boots Python + Qt cleanly
+           before letting it exit (never leaving an unverified binary installed on disk).
+      6. Validates the cryptographic token, target version, PyInstaller `--onefile`
+         bootloader->child process ancestry, and executable identity.
+      7. If startup confirmation fails or times out, terminates the ENTIRE PyInstaller
+         process tree (both the Python child process and the bootloader parent) via
+         `_terminate_process_tree_safely()`, waits for file locks to release, restores
+         `.bak` -> `target_exe`, and (if `restart_after_update=True`) relaunches the
+         restored previous version!
+      8. Only removes `.bak`, `.pending_verify.json`, `update_manifest.json`, and
+         `.active_update_transaction.lock` AFTER verification or rollback is complete.
+    """
+    updater_mutex = None
+    kernel32_err = None
+    lock_file: Optional[Path] = None
+    if sys.platform == "win32":
+        try:
+            _ensure_win32_ctypes_signatures()
+            kernel32_err = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32_err.CreateMutexW.argtypes = [
+                ctypes.c_void_p,
+                wintypes.BOOL,
+                ctypes.c_wchar_p,
+            ]
+            kernel32_err.CreateMutexW.restype = ctypes.c_void_p
+            kernel32_err.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32_err.CloseHandle.restype = wintypes.BOOL
+            updater_mutex = kernel32_err.CreateMutexW(
+                None, False, r"Local\HDRSnipFusion_UpdaterTransaction"
+            )
+            if ctypes.get_last_error() == 183:
+                DIAG_LOG.warning(
+                    "UPDATE_HELPER",
+                    "Another updater helper transaction is already active; exiting.",
+                )
+                if updater_mutex:
+                    kernel32_err.CloseHandle(ctypes.c_void_p(updater_mutex))
+                return 1
+        except Exception:
+            pass
+
+    try:
+        m_path = Path(manifest_path_str).resolve()
+        trusted_root = Path(allowed_staging_root or LOCAL_UPDATE_ROOT_DIR).resolve()
+        try:
+            m_path.relative_to(trusted_root)
+        except ValueError:
+            DIAG_LOG.error(
+                "UPDATE_HELPER",
+                f"Rejected manifest path outside trusted staging directory: '{m_path}'",
+            )
+            return 2
+
+        if m_path.name != "update_manifest.json" or not m_path.exists():
+            DIAG_LOG.error(
+                "UPDATE_HELPER", f"Manifest file missing or invalid name: '{m_path}'"
+            )
+            return 2
+
+        lock_file = m_path.parent / ACTIVE_TRANSACTION_LOCK_FILENAME
+        try:
+            write_atomic_json_file(
+                lock_file,
+                {
+                    "status": "running_helper",
+                    "helper_pid": os.getpid(),
+                    "manifest": str(m_path),
+                    "updated_at_epoch": time.time(),
+                },
+            )
+        except Exception:
+            pass
+
+        manifest = json.loads(m_path.read_text(encoding="utf-8"))
+        target_exe = Path(manifest["target_exe"]).resolve()
+        staged_exe = Path(manifest["staged_exe"]).resolve()
+        expected_sha = str(manifest["expected_sha256"]).strip().lower()
+        target_version = format_semver(
+            str(manifest.get("target_version") or APP_VERSION)
+        )
+        source_version = format_semver(
+            str(manifest.get("source_version") or APP_VERSION)
+        )
+        min_exe_size = int(manifest.get("min_exe_size", MIN_EXE_SIZE_BYTES))
+        parent_pid = int(manifest.get("parent_pid", 0))
+        restart_after = bool(manifest.get("restart_after_update", True))
+        created_at = float(manifest.get("created_at_epoch", 0.0))
+
+        # Reject stale manifests older than 15 minutes
+        if abs(time.time() - created_at) > 900.0:
+            DIAG_LOG.error("UPDATE_HELPER", "Rejected expired update_manifest.json.")
+            return 3
+
+        # Ensure staged_exe is inside the same staging folder
+        if staged_exe.parent != m_path.parent:
+            DIAG_LOG.error(
+                "UPDATE_HELPER",
+                f"Staged executable '{staged_exe}' does not match manifest directory '{m_path.parent}'.",
+            )
+            return 3
+
+        if target_exe.suffix.lower() != ".exe":
+            DIAG_LOG.error(
+                "UPDATE_HELPER", f"Rejected non-EXE target path: '{target_exe}'"
+            )
+            return 3
+
+        DIAG_LOG.milestone(
+            "UPDATE_HELPER_START",
+            f"Waiting for parent PID {parent_pid} and file lock on '{target_exe}'",
+            flush_disk=True,
+        )
+        _wait_for_process_exit(parent_pid, timeout_sec=25.0)
+        if not _wait_for_file_unlocked(target_exe, timeout_sec=30.0):
+            DIAG_LOG.error(
+                "UPDATE_HELPER",
+                f"Timed out waiting for '{target_exe}' file lock to release.",
+            )
+            return 4
+
+        ok, msg, backup_exe = perform_atomic_exe_replacement(
+            target_exe,
+            staged_exe,
+            expected_sha,
+            min_exe_size=min_exe_size,
+        )
+        if not ok:
+            DIAG_LOG.error("UPDATE_HELPER", f"Replacement failed: {msg}")
+            return 5
+
+        pending_marker = get_pending_update_marker_path(target_exe)
+        try:
+            write_atomic_json_file(
+                pending_marker,
+                {
+                    "source_version": source_version,
+                    "target_version": target_version,
+                    "target_exe": str(target_exe),
+                    "backup_exe": str(backup_exe) if backup_exe else "",
+                    "expected_sha256": expected_sha,
+                    "restart_after_update": restart_after,
+                    "helper_pid": os.getpid(),
+                    "updated_at_epoch": time.time(),
+                },
+            )
+        except Exception as mk_exc:
+            DIAG_LOG.warning(
+                "UPDATE_HELPER", f"Could not write pending marker: {mk_exc}"
+            )
+
+        DIAG_LOG.milestone(
+            "UPDATE_HELPER_REPLACED",
+            f"Replaced '{target_exe}' with v{target_version} (backup preserved at '{backup_exe}')",
+            flush_disk=True,
+        )
+
+        # Preserve Windows startup registry path if already enabled
+        try:
+            cfg = AppConfig.load()
+            if cfg.start_with_windows and sys.platform == "win32":
+                import winreg
+
+                key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+                ) as key:
+                    winreg.SetValueEx(
+                        key, "HDRSnipFusion", 0, winreg.REG_SZ, f'"{target_exe}"'
+                    )
+        except Exception as reg_exc:
+            DIAG_LOG.warning("UPDATE_HELPER", f"Startup registry sync note: {reg_exc}")
+
+        # Always verify that the newly installed executable can boot Python + Qt and write
+        # a valid cryptographic startup confirmation token (even if restart_after is False,
+        # in which case we pass --verify-startup-only so the child exits cleanly right after
+        # confirming readiness). This guarantees recovery never depends on a broken EXE!
+        confirm_token = secrets.token_hex(32)
+        env = _build_clean_pyinstaller_env()
+        env["HDRSNIP_STARTUP_CONFIRM_TOKEN"] = confirm_token
+        confirm_file = (
+            m_path.parent
+            / f"startup_confirm_{os.getpid()}_{int(time.time() * 1000)}.json"
+        )
+        proc: Optional[subprocess.Popen] = None
+        reported_child_pid: int = 0
+        try:
+            if confirm_file.exists():
+                try:
+                    confirm_file.unlink()
+                except OSError:
+                    pass
+
+            if launch_command_override is not None:
+                try:
+                    proc = launch_command_override(
+                        target_exe, confirm_file, confirm_token
+                    )
+                except TypeError:
+                    try:
+                        proc = launch_command_override(target_exe, confirm_file)
+                    except TypeError:
+                        proc = launch_command_override(target_exe)
+            else:
+                creationflags = 0
+                if sys.platform == "win32":
+                    creationflags = 0x00000200  # CREATE_NEW_PROCESS_GROUP
+                launch_args = [
+                    str(target_exe),
+                    "--restarted-after-update",
+                    "--confirm-startup-file",
+                    str(confirm_file),
+                    "--confirm-startup-token",
+                    confirm_token,
+                ]
+                if not restart_after:
+                    launch_args.append("--verify-startup-only")
+                proc = subprocess.Popen(
+                    launch_args,
+                    env=env,
+                    cwd=str(target_exe.parent),
+                    close_fds=True,
+                    creationflags=creationflags,
+                    shell=False,
+                )
+
+            confirmed, confirm_reason = _wait_for_startup_confirmation(
+                proc,
+                confirm_file=confirm_file,
+                expected_version=target_version,
+                expected_token=confirm_token,
+                expected_executable=target_exe,
+                timeout_sec=post_launch_verify_sec,
+                verify_executable_path=(launch_command_override is None),
+                allow_clean_exit_after_confirm=(not restart_after),
+            )
+            reported_child_pid = _read_reported_pid_from_confirm_file(confirm_file)
+            if not confirmed:
+                raise RuntimeError(confirm_reason)
+
+            if not restart_after and proc is not None:
+                # Ensure the verify-only process exits cleanly
+                try:
+                    proc.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    _terminate_process_tree_safely(
+                        proc,
+                        timeout_sec=2.0,
+                        extra_pids=[reported_child_pid] if reported_child_pid else None,
+                    )
+
+            DIAG_LOG.milestone(
+                "UPDATE_HELPER_CONFIRMED",
+                confirm_reason,
+                flush_disk=True,
+            )
+        except Exception as start_exc:
+            if not reported_child_pid:
+                reported_child_pid = _read_reported_pid_from_confirm_file(confirm_file)
+            DIAG_LOG.error(
+                "UPDATE_HELPER_ROLLBACK",
+                f"Updated executable failed startup confirmation ({start_exc}); "
+                "terminating PyInstaller process tree and rolling back to backup!",
+                start_exc,
+            )
+            extra_kill_pids = [reported_child_pid] if reported_child_pid > 0 else []
+            _terminate_process_tree_safely(
+                proc, timeout_sec=5.0, extra_pids=extra_kill_pids
+            )
+            if backup_exe is not None and backup_exe.exists():
+                try:
+                    _wait_for_file_unlocked(target_exe, timeout_sec=15.0)
+                    if _restore_backup_executable(target_exe, backup_exe):
+                        try:
+                            if pending_marker.exists():
+                                pending_marker.unlink()
+                        except OSError:
+                            pass
+                        try:
+                            backup_exe.unlink()
+                        except OSError:
+                            pass
+                        DIAG_LOG.milestone(
+                            "UPDATE_HELPER_ROLLBACK_OK",
+                            f"Restored previous working version at '{target_exe}'",
+                            flush_disk=True,
+                        )
+                        if restart_after:
+                            if launch_command_override is not None:
+                                try:
+                                    launch_command_override(target_exe, None, "")
+                                except TypeError:
+                                    try:
+                                        launch_command_override(target_exe, None)
+                                    except TypeError:
+                                        launch_command_override(target_exe)
+                            else:
+                                subprocess.Popen(
+                                    [str(target_exe), "--restarted-after-update"],
+                                    env=_build_clean_pyinstaller_env(),
+                                    cwd=str(target_exe.parent),
+                                    close_fds=True,
+                                    shell=False,
+                                )
+                except Exception as rb_err:
+                    DIAG_LOG.error(
+                        "UPDATE_HELPER_ROLLBACK_ERR",
+                        "Failed to restore backup executable after startup failure",
+                        rb_err,
+                    )
+            return 6
+        finally:
+            try:
+                if confirm_file.exists():
+                    confirm_file.unlink()
+            except OSError:
+                pass
+
+        # Startup confirmation succeeded! Now safe to remove backup_exe, pending_marker, and manifest
+        try:
+            if pending_marker.exists():
+                pending_marker.unlink()
+        except OSError:
+            pass
+        try:
+            if backup_exe is not None and backup_exe.exists():
+                backup_exe.unlink()
+        except OSError:
+            pass
+        try:
+            if m_path.exists():
+                m_path.unlink()
+        except OSError:
+            pass
+
+        DIAG_LOG.milestone(
+            "UPDATE_HELPER_DONE",
+            f"Update to v{target_version} confirmed usable and finalized cleanly.",
+            flush_disk=True,
+        )
+        return 0
+    except Exception as exc:
+        DIAG_LOG.error(
+            "UPDATE_HELPER", "Unhandled error in run_staged_update_helper", exc
+        )
+        return 1
+    finally:
+        if lock_file is not None:
+            try:
+                if lock_file.exists():
+                    lock_file.unlink()
+            except OSError:
+                pass
+        if updater_mutex and kernel32_err is not None:
+            try:
+                kernel32_err.CloseHandle(ctypes.c_void_p(updater_mutex))
+            except Exception:
+                pass
+
+
+# =============================================================================
 # 9. FRUTIGER AERO GLASS SETTINGS DIALOG & 3D AQUA BUBBLE TRAY ICON
 # =============================================================================
 
 if HAS_QT:
 
+    class UpdateWorkerSignals(QObject):
+        """GUI-thread signals emitted by background GitHub update check & download jobs."""
+
+        check_completed = pyqtSignal(object, bool)  # (UpdateCheckResult, manual_user_request)
+        download_progress = pyqtSignal(int, int)    # (bytes_downloaded, total_bytes)
+        download_completed = pyqtSignal(str, str, str, object, bool)  # (version, staged_path, sha256, check_result, install_immediately)
+        download_failed = pyqtSignal(str, bool, object)  # (error_msg, manual_user_request, check_result)
+
+
+    class UpdateCheckJob(QRunnable):
+        """Runs `fetch_latest_github_release` in a background thread without blocking Qt."""
+
+        def __init__(
+            self,
+            signals: UpdateWorkerSignals,
+            manual_request: bool = False,
+            api_url: str = GITHUB_LATEST_RELEASE_API_URL,
+        ) -> None:
+            super().__init__()
+            self.signals = signals
+            self.manual_request = bool(manual_request)
+            self.api_url = api_url
+
+        def run(self) -> None:
+            try:
+                res = fetch_latest_github_release(
+                    api_url=self.api_url, current_version=APP_VERSION
+                )
+                self.signals.check_completed.emit(res, self.manual_request)
+            except Exception as exc:
+                err_res = UpdateCheckResult(
+                    status="error",
+                    current_version=APP_VERSION,
+                    message=f"Update check error: {exc}",
+                )
+                try:
+                    self.signals.check_completed.emit(err_res, self.manual_request)
+                except RuntimeError:
+                    pass
+
+
+    class UpdateDownloadJob(QRunnable):
+        """Downloads and SHA-256 + PE64 validates `HDRSnipFusion.exe` in a background worker thread."""
+
+        def __init__(
+            self,
+            signals: UpdateWorkerSignals,
+            check_result: UpdateCheckResult,
+            install_immediately: bool = False,
+            manual_request: bool = False,
+            cancel_event: Optional[threading.Event] = None,
+        ) -> None:
+            super().__init__()
+            self.signals = signals
+            self.check_result = check_result
+            self.install_immediately = bool(install_immediately)
+            self.manual_request = bool(manual_request)
+            self.cancel_event = cancel_event
+
+        def _on_progress(self, done: int, total: int) -> None:
+            try:
+                self.signals.download_progress.emit(int(done), int(total))
+            except RuntimeError:
+                pass
+
+        def run(self) -> None:
+            try:
+                staged_path = download_and_stage_release_asset(
+                    self.check_result,
+                    staging_root=LOCAL_UPDATE_ROOT_DIR,
+                    progress_callback=self._on_progress,
+                    cancel_event=self.cancel_event,
+                )
+                self.signals.download_completed.emit(
+                    format_semver(self.check_result.latest_version),
+                    str(staged_path),
+                    self.check_result.expected_sha256,
+                    self.check_result,
+                    self.install_immediately,
+                )
+            except Exception as exc:
+                DIAG_LOG.error("UPDATE_DOWNLOAD", "Background update download/validation failed", exc)
+                try:
+                    self.signals.download_failed.emit(
+                        str(exc), self.manual_request, self.check_result
+                    )
+                except RuntimeError:
+                    pass
+
+
+    class UpdatePromptDialog(QDialog):
+        """
+        Frutiger Aqua Glass Update Notification & Progress Dialog:
+          - Shows `HDRSnip Fusion v<version> is available` and release notes from GitHub.
+          - Offers `[Update Now]`, `[Later]`, and `[View Release]`.
+          - Displays real-time download & SHA-256 verification progress when `[Update Now]`
+            is clicked in packaged EXE mode.
+          - Clearly explains source-Python mode or protected installation folder limitations
+            with a direct `[View Release]` link when automatic replacement is not applicable.
+        """
+
+        def __init__(
+            self,
+            check_result: UpdateCheckResult,
+            controller: "HDRSnipFusionApplication",
+            parent: Optional[QWidget] = None,
+        ) -> None:
+            super().__init__(parent)
+            self.check_result = check_result
+            self.controller = controller
+            self._drag_offset: Optional[QPoint] = None
+            self._cached_base_pix: Optional[QPixmap] = None
+            self._water_dirty: bool = True
+            self._wave_paths = (
+                QPainterPath(),
+                QPainterPath(),
+                QPainterPath(),
+                QPainterPath(),
+            )
+            self._downloading: bool = False
+
+            self.setWindowTitle(
+                f"HDRSnip Fusion v{check_result.latest_version} is available"
+            )
+            self.setMinimumWidth(500)
+            self.setWindowFlags(
+                Qt.WindowType.Dialog
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.WindowStaysOnTopHint
+            )
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+            self.setStyleSheet(
+                """
+                QLabel {
+                    color: #F4FFFF;
+                    font-family: 'Segoe UI', sans-serif;
+                    font-size: 12px;
+                    font-weight: 600;
+                    background: transparent;
+                }
+                QFrame#AquaUpdateCard {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 44),
+                        stop:0.5 rgba(205, 248, 255, 28),
+                        stop:1 rgba(160, 238, 255, 38));
+                    border: 1px solid rgba(215, 252, 255, 155);
+                    border-radius: 13px;
+                }
+                QTextEdit#ReleaseNotesBox {
+                    background: rgba(6, 44, 86, 175);
+                    color: #EAFFFF;
+                    border: 1px solid rgba(155, 245, 255, 165);
+                    border-radius: 9px;
+                    padding: 6px 8px;
+                    font-family: 'Segoe UI', sans-serif;
+                    font-size: 12px;
+                }
+                QProgressBar {
+                    background: rgba(6, 48, 92, 190);
+                    color: #FFFFFF;
+                    border: 1px solid rgba(165, 248, 255, 195);
+                    border-radius: 8px;
+                    text-align: center;
+                    font-family: 'Segoe UI', sans-serif;
+                    font-size: 11px;
+                    font-weight: bold;
+                    min-height: 18px;
+                }
+                QProgressBar::chunk {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #00C6FF,
+                        stop:0.6 #00F2FE,
+                        stop:1 #69F0AE);
+                    border-radius: 7px;
+                }
+                """
+            )
+
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(18, 14, 18, 16)
+            outer.setSpacing(10)
+
+            title_row = QHBoxLayout()
+            title_lbl = QLabel(
+                f"✦  HDRSnip Fusion v{check_result.latest_version} is available"
+            )
+            title_lbl.setStyleSheet(
+                "font-size: 14px; font-weight: bold; color: #FFFFFF;"
+            )
+            title_row.addWidget(title_lbl)
+            title_row.addStretch()
+            close_x = AeroGelButton("✕", variant="ruby", parent=self)
+            close_x.setFixedSize(30, 26)
+            close_x.clicked.connect(self._on_later_clicked)
+            title_row.addWidget(close_x)
+            outer.addLayout(title_row)
+
+            card = QFrame(self)
+            card.setObjectName("AquaUpdateCard")
+            card_vbox = QVBoxLayout(card)
+            card_vbox.setContentsMargins(14, 11, 14, 12)
+            card_vbox.setSpacing(8)
+
+            packaged = is_packaged_exe()
+            is_prot, prot_reason = (
+                is_protected_install_location() if packaged else (False, "")
+            )
+
+            if not packaged:
+                sub_text = (
+                    f"Installed version: v{APP_VERSION} (Python Source Mode)  •  "
+                    f"Latest stable release: v{check_result.latest_version}\n"
+                    "You are running from Python source (.py). Automatic EXE replacement "
+                    "is only active in packaged HDRSnipFusion.exe builds."
+                )
+            elif is_prot:
+                sub_text = (
+                    f"Installed version: v{APP_VERSION}  •  "
+                    f"Latest stable release: v{check_result.latest_version}\n"
+                    f"Note: {prot_reason} Please download the update from the official release page."
+                )
+            else:
+                sub_text = (
+                    f"A new stable version (v{check_result.latest_version}) is ready to install "
+                    f"(currently running v{APP_VERSION}).\n"
+                    "Your hotkey, default screenshot folder, and HDR settings will be preserved."
+                )
+
+            self.subtitle_lbl = QLabel(sub_text, card)
+            self.subtitle_lbl.setWordWrap(True)
+            card_vbox.addWidget(self.subtitle_lbl)
+
+            notes_box = QTextEdit(card)
+            notes_box.setObjectName("ReleaseNotesBox")
+            notes_box.setReadOnly(True)
+            notes_box.setFixedHeight(130)
+            notes_content = (
+                check_result.release_notes.strip()
+                or f"HDRSnip Fusion v{check_result.latest_version} stable release."
+            )
+            notes_box.setPlainText(notes_content)
+            card_vbox.addWidget(notes_box)
+
+            self.progress_bar = QProgressBar(card)
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.hide()
+            card_vbox.addWidget(self.progress_bar)
+
+            self.status_lbl = QLabel("", card)
+            self.status_lbl.setWordWrap(True)
+            self.status_lbl.setStyleSheet("color: #A8FAFF; font-size: 11px;")
+            self.status_lbl.hide()
+            card_vbox.addWidget(self.status_lbl)
+
+            outer.addWidget(card)
+
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(8)
+            self.view_release_btn = AeroGelButton(
+                "View Release", variant="sapphire", parent=self
+            )
+            self.view_release_btn.clicked.connect(self._on_view_release_clicked)
+            btn_row.addWidget(self.view_release_btn)
+            btn_row.addStretch()
+
+            self.later_btn = AeroGelButton("Later", variant="glass", parent=self)
+            self.later_btn.clicked.connect(self._on_later_clicked)
+            btn_row.addWidget(self.later_btn)
+
+            self.update_now_btn = AeroGelButton(
+                "Update Now", variant="emerald", parent=self
+            )
+            if not packaged or is_prot:
+                self.update_now_btn.setText("Open Release Page")
+            self.update_now_btn.clicked.connect(self._on_update_now_clicked)
+            btn_row.addWidget(self.update_now_btn)
+
+            outer.addLayout(btn_row)
+
+        def _on_view_release_clicked(self) -> None:
+            url = self.check_result.release_url or GITHUB_RELEASES_PAGE_URL
+            if is_valid_github_url(url, require_repo_prefix=True):
+                webbrowser.open(url)
+
+        def _on_later_clicked(self) -> None:
+            if self._downloading:
+                self.controller.cancel_active_update_download()
+            self.controller.config.declined_update_version = format_semver(
+                self.check_result.latest_version
+            )
+            self.controller.config.save()
+            self.reject()
+
+        def _on_update_now_clicked(self) -> None:
+            if not is_packaged_exe():
+                self._on_view_release_clicked()
+                self.accept()
+                return
+            is_prot, prot_reason = is_protected_install_location()
+            if is_prot:
+                QMessageBox.information(
+                    self,
+                    "Manual Update Required",
+                    f"{prot_reason}\n\nOpening the official GitHub Release page so you can download "
+                    f"{EXPECTED_RELEASE_ASSET_NAME} manually.",
+                )
+                self._on_view_release_clicked()
+                return
+
+            self._downloading = True
+            self.update_now_btn.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.show()
+            self.status_lbl.setText(
+                f"Downloading and verifying {EXPECTED_RELEASE_ASSET_NAME} (SHA-256)..."
+            )
+            self.status_lbl.show()
+            self.controller.start_update_download(
+                self.check_result, install_immediately=True, manual_request=True
+            )
+
+        def on_download_progress(self, done: int, total: int) -> None:
+            if total > 0:
+                pct = max(0, min(100, int(round((done / float(total)) * 100.0))))
+                self.progress_bar.setValue(pct)
+                self.status_lbl.setText(
+                    f"Downloading {EXPECTED_RELEASE_ASSET_NAME}: "
+                    f"{done / (1024 * 1024):.1f} / {total / (1024 * 1024):.1f} MB ({pct}%)"
+                )
+
+        def on_download_failed(self, err_msg: str) -> None:
+            self._downloading = False
+            self.update_now_btn.setEnabled(True)
+            self.status_lbl.setText(f"Update verification/download failed: {err_msg}")
+            self.status_lbl.show()
+
+        def paintEvent(self, event) -> None:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = QRectF(self.rect()).adjusted(6.0, 6.0, -6.0, -6.0)
+            draw_frutiger_glass_panel(
+                painter,
+                rect,
+                radius=20.0,
+                frosted_pixmap=None,
+                tint_style="dialog",
+                t_sec=AeroAnimationDirector.instance().elapsed_seconds(),
+                intensity_scale=AeroAnimationDirector.instance().scale,
+            )
+
+        def mousePressEvent(self, event) -> None:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._drag_offset = (
+                    event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                )
+            super().mousePressEvent(event)
+
+        def mouseMoveEvent(self, event) -> None:
+            if (
+                self._drag_offset is not None
+                and event.buttons() & Qt.MouseButton.LeftButton
+            ):
+                self.move(event.globalPosition().toPoint() - self._drag_offset)
+            super().mouseMoveEvent(event)
+
+        def mouseReleaseEvent(self, event) -> None:
+            self._drag_offset = None
+            super().mouseReleaseEvent(event)
+
+
     class SettingsDialog(QDialog):
         """
-        Polished Frutiger Aqua Glass Control Panel Settings Dialog:
-          - Organized into four distinct, scannable frosted glass section cards:
+        Polished Frutiger Aqua Glass Control Panel Settings Dialog (v0.1.1):
+          - Organized into six scannable frosted glass section cards inside a smooth,
+            high-DPI-safe transparent scroll area:
             1. Capture & Startup (Hotkey + Windows Startup & SDR Fallback)
-            2. Frutiger Aqua Glass & Animation (Live Animation Intensity & Glass Transparency)
-            3. HDR Tone Mapping (Curve, SDR White Level & Highlight Knee, Gamma 2.2 & White Boost)
-            4. Stability & Diagnostics (Visually subordinated deep-ocean card with status pill,
-               Safe Mode, persistent logging, and a compact 2x2 subsystem isolation grid)
-          - Preserves Windows DWM Acrylic blur-behind, living water glass backdrop,
-            custom draggable glass title bar, and tactile 3D gel buttons.
+            2. Screenshot Saving (Default Save Location read-only path + Browse...)
+            3. Frutiger Aqua Glass & Animation (Live Animation Intensity & Glass Transparency)
+            4. HDR Capture & Tone Mapping (Curve, SDR White Level, Highlight Knee, Gamma 2.2 & White Boost)
+            5. Application Updates (Current Version: v0.1.1, Auto-check, Auto-install, Check for Updates)
+            6. Stability & Diagnostics (Subordinated deep-ocean card with status pill, Safe Mode & Isolation grid)
+          - Preserves genuinely rounded transparent corners (native rectangular Acrylic disabled),
+            living water glass backdrop, custom draggable glass title bar, and tactile 3D gel buttons.
         """
 
         LABEL_COL_WIDTH: int = 154
 
-        def __init__(self, config: AppConfig, parent=None) -> None:
+        def __init__(
+            self,
+            config: AppConfig,
+            parent: Optional[QWidget] = None,
+            controller: Optional["HDRSnipFusionApplication"] = None,
+        ) -> None:
             super().__init__(parent)
             self.config = config
+            self.controller = controller
             self._original_intensity = config.animation_intensity
             self._original_transparency = config.glass_transparency
+            self._selected_save_directory: str = str(
+                config.save_directory or DEFAULT_SAVE_DIR
+            )
             self._drag_offset: Optional[QPoint] = None
             self._wave_paths = (
                 QPainterPath(),
@@ -9262,9 +12478,20 @@ if HAS_QT:
                 QPainterPath(),
             )
             self._cached_base_pix: Optional[QPixmap] = None
+            self._local_update_signals = UpdateWorkerSignals()
+            self._local_update_signals.check_completed.connect(
+                self._on_local_update_check_done
+            )
+            self._latest_check_result: Optional[UpdateCheckResult] = (
+                getattr(controller, "_last_update_result", None)
+                if controller is not None
+                else None
+            )
 
-            self.setWindowTitle("HDRSnip Fusion • Frutiger Aqua Settings")
-            self.setMinimumWidth(540)
+            self.setWindowTitle(
+                f"HDRSnip Fusion v{APP_VERSION} • Frutiger Aqua Settings"
+            )
+            self.setMinimumWidth(568)
             self.setWindowFlags(
                 Qt.WindowType.Dialog
                 | Qt.WindowType.FramelessWindowHint
@@ -9305,6 +12532,15 @@ if HAS_QT:
                     font-size: 11px;
                     font-weight: bold;
                 }
+                QLabel#UpdateStatusLabel {
+                    background: rgba(6, 48, 92, 168);
+                    color: #CCF8FF;
+                    border: 1px solid rgba(145, 240, 255, 155);
+                    border-radius: 8px;
+                    padding: 4px 9px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
                 QFrame#AquaSectionCard {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba(255, 255, 255, 44),
@@ -9326,7 +12562,31 @@ if HAS_QT:
                     min-height: 1px;
                     border: none;
                 }
-                QKeySequenceEdit, QComboBox, QDoubleSpinBox {
+                QScrollArea#AquaScrollArea {
+                    background: transparent;
+                    border: none;
+                }
+                QWidget#AquaScrollContents {
+                    background: transparent;
+                }
+                QScrollBar:vertical {
+                    background: rgba(6, 46, 88, 95);
+                    width: 9px;
+                    margin: 2px 0 2px 2px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical {
+                    background: rgba(145, 244, 255, 185);
+                    min-height: 28px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: rgba(210, 255, 255, 235);
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+                QKeySequenceEdit, QComboBox, QDoubleSpinBox, QLineEdit#SavePathEdit {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba(255, 255, 255, 232),
                         stop:0.48 rgba(218, 246, 255, 222),
@@ -9341,7 +12601,7 @@ if HAS_QT:
                     font-size: 12px;
                     font-weight: bold;
                 }
-                QKeySequenceEdit:hover, QComboBox:hover, QDoubleSpinBox:hover {
+                QKeySequenceEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QLineEdit#SavePathEdit:hover {
                     border: 1.5px solid #84FAFF;
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba(255, 255, 255, 248),
@@ -9398,14 +12658,16 @@ if HAS_QT:
 
             outer_layout = QVBoxLayout(self)
             outer_layout.setContentsMargins(18, 14, 18, 16)
-            outer_layout.setSpacing(10)
+            outer_layout.setSpacing(9)
 
             # -----------------------------------------------------------------
-            # Draggable Frutiger Aqua Title Bar
+            # Draggable Frutiger Aqua Title Bar (shows installed version v0.1.1)
             # -----------------------------------------------------------------
             title_row = QHBoxLayout()
             title_row.setContentsMargins(2, 0, 2, 2)
-            title_lbl = QLabel("✦  HDRSnip Fusion — Frutiger Aqua Settings")
+            title_lbl = QLabel(
+                f"✦  HDRSnip Fusion v{APP_VERSION} — Frutiger Aqua Settings"
+            )
             title_lbl.setStyleSheet(
                 "font-size: 14px; font-weight: bold; color: #FFFFFF;"
             )
@@ -9417,6 +12679,20 @@ if HAS_QT:
             close_x.clicked.connect(self.reject)
             title_row.addWidget(close_x)
             outer_layout.addLayout(title_row)
+
+            # Transparent Scroll Area so all 6 cards remain responsive on high-DPI displays
+            self.scroll_area = QScrollArea(self)
+            self.scroll_area.setObjectName("AquaScrollArea")
+            self.scroll_area.setWidgetResizable(True)
+            self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+            self.scroll_area.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            self.scroll_contents = QWidget(self.scroll_area)
+            self.scroll_contents.setObjectName("AquaScrollContents")
+            cards_layout = QVBoxLayout(self.scroll_contents)
+            cards_layout.setContentsMargins(0, 0, 4, 0)
+            cards_layout.setSpacing(9)
 
             # Helper for aligned label + control rows
             def _add_labeled_row(
@@ -9443,11 +12719,11 @@ if HAS_QT:
             # -----------------------------------------------------------------
             # Card 1: Capture & Startup
             # -----------------------------------------------------------------
-            capture_card = QFrame(self)
+            capture_card = QFrame(self.scroll_contents)
             capture_card.setObjectName("AquaSectionCard")
             cap_vbox = QVBoxLayout(capture_card)
-            cap_vbox.setContentsMargins(14, 10, 14, 11)
-            cap_vbox.setSpacing(8)
+            cap_vbox.setContentsMargins(14, 9, 14, 10)
+            cap_vbox.setSpacing(7)
 
             cap_hdr = QLabel("◆  CAPTURE & STARTUP", capture_card)
             cap_hdr.setObjectName("SectionHeader")
@@ -9476,16 +12752,60 @@ if HAS_QT:
             cap_chk_row.addWidget(self.startup_chk)
             cap_chk_row.addWidget(self.fallback_chk, 1)
             cap_vbox.addLayout(cap_chk_row)
-            outer_layout.addWidget(capture_card)
+            cards_layout.addWidget(capture_card)
 
             # -----------------------------------------------------------------
-            # Card 2: Frutiger Aqua Glass & Animation
+            # Card 2: Screenshot Saving (Part 1 — Default Save Location)
             # -----------------------------------------------------------------
-            visuals_card = QFrame(self)
+            saving_card = QFrame(self.scroll_contents)
+            saving_card.setObjectName("AquaSectionCard")
+            sav_vbox = QVBoxLayout(saving_card)
+            sav_vbox.setContentsMargins(14, 9, 14, 10)
+            sav_vbox.setSpacing(7)
+
+            sav_hdr = QLabel("◆  SCREENSHOT SAVING", saving_card)
+            sav_hdr.setObjectName("SectionHeader")
+            sav_vbox.addWidget(sav_hdr)
+
+            save_loc_row = QWidget(saving_card)
+            save_loc_layout = QHBoxLayout(save_loc_row)
+            save_loc_layout.setContentsMargins(0, 0, 0, 0)
+            save_loc_layout.setSpacing(8)
+
+            self.save_dir_edit = QLineEdit(self._selected_save_directory, save_loc_row)
+            self.save_dir_edit.setObjectName("SavePathEdit")
+            self.save_dir_edit.setReadOnly(True)
+            self.save_dir_edit.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self.save_dir_edit.setToolTip(
+                f"Default Save Location: {self._selected_save_directory}\n"
+                "Clicking Save (Ctrl+S) or Quick Save (Ctrl+Shift+S) writes PNGs directly here. "
+                "Press Ctrl+Alt+S in the overlay to Save As to a custom path."
+            )
+            self.save_dir_edit.setCursorPosition(len(self._selected_save_directory))
+
+            self.browse_save_dir_btn = AeroGelButton(
+                "Browse...", variant="sapphire", parent=save_loc_row
+            )
+            self.browse_save_dir_btn.setToolTip(
+                "Choose the default folder where screenshots are saved when pressing Save or Ctrl+S"
+            )
+            self.browse_save_dir_btn.clicked.connect(self._on_browse_save_directory)
+
+            save_loc_layout.addWidget(self.save_dir_edit, 1)
+            save_loc_layout.addWidget(self.browse_save_dir_btn)
+            _add_labeled_row(sav_vbox, "Default Save Location:", save_loc_row)
+            cards_layout.addWidget(saving_card)
+
+            # -----------------------------------------------------------------
+            # Card 3: Frutiger Aqua Glass & Animation
+            # -----------------------------------------------------------------
+            visuals_card = QFrame(self.scroll_contents)
             visuals_card.setObjectName("AquaSectionCard")
             vis_vbox = QVBoxLayout(visuals_card)
-            vis_vbox.setContentsMargins(14, 10, 14, 11)
-            vis_vbox.setSpacing(8)
+            vis_vbox.setContentsMargins(14, 9, 14, 10)
+            vis_vbox.setSpacing(7)
 
             vis_hdr = QLabel("◆  FRUTIGER AQUA GLASS & ANIMATION", visuals_card)
             vis_hdr.setObjectName("SectionHeader")
@@ -9526,16 +12846,16 @@ if HAS_QT:
             trans_layout.addWidget(self.trans_slider, 1)
             trans_layout.addWidget(self.trans_val_lbl)
             _add_labeled_row(vis_vbox, "Glass Transparency:", trans_row)
-            outer_layout.addWidget(visuals_card)
+            cards_layout.addWidget(visuals_card)
 
             # -----------------------------------------------------------------
-            # Card 3: HDR Capture & Tone Mapping
+            # Card 4: HDR Capture & Tone Mapping
             # -----------------------------------------------------------------
-            hdr_card = QFrame(self)
+            hdr_card = QFrame(self.scroll_contents)
             hdr_card.setObjectName("AquaSectionCard")
             hdr_vbox = QVBoxLayout(hdr_card)
-            hdr_vbox.setContentsMargins(14, 10, 14, 11)
-            hdr_vbox.setSpacing(8)
+            hdr_vbox.setContentsMargins(14, 9, 14, 10)
+            hdr_vbox.setSpacing(7)
 
             hdr_hdr = QLabel("◆  HDR CAPTURE & TONE MAPPING", hdr_card)
             hdr_hdr.setObjectName("SectionHeader")
@@ -9596,16 +12916,85 @@ if HAS_QT:
             )
             self.white_boost_chk.setChecked(config.boost_sdr_whites)
             hdr_vbox.addWidget(self.white_boost_chk)
-            outer_layout.addWidget(hdr_card)
+            cards_layout.addWidget(hdr_card)
 
             # -----------------------------------------------------------------
-            # Card 4: Stability & Diagnostics (Lower-Priority Subordinated Card)
+            # Card 5: Application Updates (Part 2 — Built-in GitHub Updater)
             # -----------------------------------------------------------------
-            diag_card = QFrame(self)
+            updates_card = QFrame(self.scroll_contents)
+            updates_card.setObjectName("AquaSectionCard")
+            upd_vbox = QVBoxLayout(updates_card)
+            upd_vbox.setContentsMargins(14, 9, 14, 10)
+            upd_vbox.setSpacing(7)
+
+            upd_hdr = QLabel("◆  APPLICATION UPDATES", updates_card)
+            upd_hdr.setObjectName("SectionHeader")
+            upd_vbox.addWidget(upd_hdr)
+
+            ver_row = QHBoxLayout()
+            ver_row.setContentsMargins(0, 0, 0, 0)
+            ver_row.setSpacing(10)
+            mode_tag = "Packaged EXE" if is_packaged_exe() else "Python Source"
+            self.current_version_lbl = QLabel(
+                f"Current Version: v{APP_VERSION}  ({mode_tag})", updates_card
+            )
+            self.current_version_lbl.setStyleSheet(
+                "color: #FFFFFF; font-weight: bold;"
+            )
+            ver_row.addWidget(self.current_version_lbl, 1)
+
+            self.install_update_btn = AeroGelButton(
+                "Update Now...", variant="emerald", parent=updates_card
+            )
+            self.install_update_btn.hide()
+            self.install_update_btn.clicked.connect(self._on_install_available_update)
+            ver_row.addWidget(self.install_update_btn)
+
+            self.check_updates_btn = AeroGelButton(
+                "Check for Updates", variant="sapphire", parent=updates_card
+            )
+            self.check_updates_btn.setToolTip(
+                f"Check official GitHub Releases ({GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}) for a newer stable version"
+            )
+            self.check_updates_btn.clicked.connect(self._on_check_for_updates_clicked)
+            ver_row.addWidget(self.check_updates_btn)
+            upd_vbox.addLayout(ver_row)
+
+            upd_chk_row = QHBoxLayout()
+            upd_chk_row.setContentsMargins(2, 0, 2, 0)
+            upd_chk_row.setSpacing(16)
+            self.auto_check_updates_chk = QCheckBox(
+                "Automatically check for updates", updates_card
+            )
+            self.auto_check_updates_chk.setChecked(config.auto_check_updates)
+            self.auto_install_updates_chk = QCheckBox(
+                "Automatically download updates in background", updates_card
+            )
+            self.auto_install_updates_chk.setToolTip(
+                "Downloads and SHA-256 verifies stable updates in the background, then prompts to restart and install with helper verification"
+            )
+            self.auto_install_updates_chk.setChecked(config.auto_install_updates)
+            upd_chk_row.addWidget(self.auto_check_updates_chk)
+            upd_chk_row.addWidget(self.auto_install_updates_chk, 1)
+            upd_vbox.addLayout(upd_chk_row)
+
+            self.update_status_lbl = QLabel(
+                "You're running the latest version.", updates_card
+            )
+            self.update_status_lbl.setObjectName("UpdateStatusLabel")
+            self.update_status_lbl.setWordWrap(True)
+            upd_vbox.addWidget(self.update_status_lbl)
+            self._refresh_update_status_display()
+            cards_layout.addWidget(updates_card)
+
+            # -----------------------------------------------------------------
+            # Card 6: Stability & Diagnostics (Lower-Priority Subordinated Card)
+            # -----------------------------------------------------------------
+            diag_card = QFrame(self.scroll_contents)
             diag_card.setObjectName("AquaDiagCard")
             diag_vbox = QVBoxLayout(diag_card)
-            diag_vbox.setContentsMargins(14, 9, 14, 10)
-            diag_vbox.setSpacing(7)
+            diag_vbox.setContentsMargins(14, 8, 14, 9)
+            diag_vbox.setSpacing(6)
 
             diag_hdr_row = QHBoxLayout()
             diag_hdr_row.setContentsMargins(0, 0, 0, 0)
@@ -9700,10 +13089,14 @@ if HAS_QT:
             diag_vbox.addLayout(iso_grid)
 
             self._update_safe_mode_banner()
-            outer_layout.addWidget(diag_card)
+            cards_layout.addWidget(diag_card)
+            cards_layout.addStretch(1)
+
+            self.scroll_area.setWidget(self.scroll_contents)
+            outer_layout.addWidget(self.scroll_area, 1)
 
             # -----------------------------------------------------------------
-            # Bottom Action Bar
+            # Bottom Action Bar (Always Pinned & Visible)
             # -----------------------------------------------------------------
             btn_row = QHBoxLayout()
             btn_row.setContentsMargins(0, 2, 0, 0)
@@ -9722,6 +13115,124 @@ if HAS_QT:
             btn_row.addWidget(cancel_btn)
             btn_row.addWidget(save_btn)
             outer_layout.addLayout(btn_row)
+
+        def set_selected_save_directory(self, folder_path: str) -> None:
+            """Updates the pending save directory in the dialog without committing to AppConfig until Save & Apply."""
+            cleaned = str(folder_path or "").strip()
+            if not cleaned:
+                return
+            self._selected_save_directory = cleaned
+            self.save_dir_edit.setText(cleaned)
+            self.save_dir_edit.setToolTip(
+                f"Default Save Location: {cleaned}\n"
+                "Clicking Save (Ctrl+S) or Quick Save (Ctrl+Shift+S) writes PNGs directly here. "
+                "Press Ctrl+Alt+S in the overlay to Save As to a custom path."
+            )
+            self.save_dir_edit.setCursorPosition(len(cleaned))
+
+        def _on_browse_save_directory(self) -> None:
+            start_dir = self._selected_save_directory
+            try:
+                p = Path(start_dir).expanduser()
+                if not p.exists():
+                    if p.parent.exists():
+                        start_dir = str(p.parent)
+                    else:
+                        start_dir = str(Path.home())
+            except Exception:
+                start_dir = str(Path.home())
+
+            chosen = QFileDialog.getExistingDirectory(
+                self,
+                "Select Default Screenshot Save Location",
+                start_dir,
+                QFileDialog.Option.ShowDirsOnly
+                | QFileDialog.Option.DontResolveSymlinks,
+            )
+            if chosen:
+                self.set_selected_save_directory(chosen)
+
+        def _refresh_update_status_display(self) -> None:
+            res = self._latest_check_result
+            if res is None:
+                if (
+                    self.config.staged_update_version
+                    and is_newer_semver(self.config.staged_update_version, APP_VERSION)
+                    and self.config.staged_update_path
+                    and Path(self.config.staged_update_path).exists()
+                ):
+                    self.update_status_lbl.setText(
+                        f"Update v{self.config.staged_update_version} is downloaded and verified. Click Restart & Install to apply."
+                    )
+                    if is_packaged_exe() and self.controller is not None:
+                        self.install_update_btn.setText(
+                            f"Restart & Install v{self.config.staged_update_version}..."
+                        )
+                        self.install_update_btn.show()
+                    else:
+                        self.install_update_btn.hide()
+                else:
+                    self.update_status_lbl.setText("You're running the latest version.")
+                    self.install_update_btn.hide()
+                return
+
+            self.update_status_lbl.setText(res.message or "You're running the latest version.")
+            if res.status == "update_available":
+                self.install_update_btn.setText(
+                    f"Update to v{res.latest_version}..."
+                    if is_packaged_exe()
+                    else f"View v{res.latest_version} Release"
+                )
+                self.install_update_btn.show()
+            else:
+                self.install_update_btn.hide()
+
+        def _on_check_for_updates_clicked(self) -> None:
+            self.check_updates_btn.setEnabled(False)
+            self.update_status_lbl.setText("Checking GitHub Releases for updates...")
+            if self.controller is not None:
+                self.controller.check_for_updates(
+                    manual_request=True, notify_dialog_callback=self._on_local_update_check_done
+                )
+            else:
+                job = UpdateCheckJob(self._local_update_signals, manual_request=True)
+                QThreadPool.globalInstance().start(job)
+
+        def _on_local_update_check_done(
+            self, result: UpdateCheckResult, _manual: bool = True
+        ) -> None:
+            self.check_updates_btn.setEnabled(True)
+            self._latest_check_result = result
+            self._refresh_update_status_display()
+
+        def _on_install_available_update(self) -> None:
+            if self._latest_check_result is None:
+                if (
+                    self.controller is not None
+                    and is_packaged_exe()
+                    and self.config.staged_update_version
+                    and is_newer_semver(self.config.staged_update_version, APP_VERSION)
+                    and self.config.staged_update_path
+                    and self.config.staged_update_sha256
+                ):
+                    staged_p = Path(self.config.staged_update_path)
+                    if staged_p.exists():
+                        self.accept()
+                        self.controller._execute_staged_update_and_exit(
+                            self.config.staged_update_version,
+                            staged_p,
+                            self.config.staged_update_sha256,
+                            restart_after_update=True,
+                        )
+                return
+            if self.controller is not None:
+                self.controller.present_update_prompt(
+                    self._latest_check_result, parent=self
+                )
+            else:
+                url = self._latest_check_result.release_url or GITHUB_RELEASES_PAGE_URL
+                if is_valid_github_url(url, require_repo_prefix=True):
+                    webbrowser.open(url)
 
         def _update_safe_mode_banner(self) -> None:
             sm = bool(self.safe_mode_chk.isChecked() or ENV_SAFE_MODE)
@@ -9766,8 +13277,6 @@ if HAS_QT:
             director._safe_mode = bool(self.safe_mode_chk.isChecked() or ENV_SAFE_MODE)
             director._disable_continuous = bool(self.disable_cont_anim_chk.isChecked())
             director._sync_timer()
-            pct = int(self.trans_slider.value())
-            alpha_byte = max(0x14, min(0xAA, int(round((1.0 - pct / 100.0) * 0xB0))))
             enable_windows_acrylic_blur(
                 int(self.winId()),
                 0,
@@ -9798,7 +13307,6 @@ if HAS_QT:
             self._cached_base_pix = None
             self._water_dirty = True
             AeroAnimationDirector.instance().set_transparency(clamped)
-            alpha_byte = max(0x14, min(0xAA, int(round((1.0 - clamped / 100.0) * 0xB0))))
             enable_windows_acrylic_blur(
                 int(self.winId()),
                 0,
@@ -9816,9 +13324,17 @@ if HAS_QT:
 
         def showEvent(self, event) -> None:
             self._water_dirty = True
+            # Size dialog comfortably to fit all 6 cards without exceeding high-DPI display bounds
+            try:
+                scr = self.screen() or QGuiApplication.primaryScreen()
+                if scr is not None:
+                    avail = scr.availableGeometry()
+                    ideal_h = min(845, max(540, avail.height() - 44))
+                    self.resize(max(568, self.width()), ideal_h)
+            except Exception:
+                pass
             super().showEvent(event)
             pct = int(self.trans_slider.value())
-            alpha_byte = max(0x14, min(0xAA, int(round((1.0 - pct / 100.0) * 0xB0))))
             enable_windows_acrylic_blur(
                 int(self.winId()),
                 0,
@@ -9864,7 +13380,8 @@ if HAS_QT:
             AeroAnimationDirector.instance().unregister_surface(self)
 
         def reject(self) -> None:
-            # Restore original animation intensity, transparency & Safe Mode flags if user cancels
+            # Restore original animation intensity, transparency & Safe Mode flags if user cancels;
+            # unsaved changes to _selected_save_directory or update checkboxes are discarded.
             director = AeroAnimationDirector.instance()
             director.apply_config_flags(self.config)
             director.set_intensity(self._original_intensity)
@@ -9950,6 +13467,9 @@ if HAS_QT:
             seq = self.key_edit.keySequence().toString()
             if seq:
                 self.config.hotkey_str = seq
+            chosen_save_dir = str(self._selected_save_directory or "").strip()
+            if chosen_save_dir:
+                self.config.save_directory = chosen_save_dir
             anim_level = str(self.anim_combo.currentData() or "medium")
             self.config.animation_intensity = anim_level
             trans_pct = max(10, min(95, int(self.trans_slider.value())))
@@ -9964,6 +13484,12 @@ if HAS_QT:
             self.config.allow_sdr_fallback = bool(self.fallback_chk.isChecked())
             self.config.start_with_windows = bool(self.startup_chk.isChecked())
             self.config.boost_sdr_whites = bool(self.white_boost_chk.isChecked())
+            self.config.auto_check_updates = bool(
+                self.auto_check_updates_chk.isChecked()
+            )
+            self.config.auto_install_updates = bool(
+                self.auto_install_updates_chk.isChecked()
+            )
             self.config.diagnostic_safe_mode = bool(self.safe_mode_chk.isChecked())
             self.config.disable_continuous_animations = bool(
                 self.disable_cont_anim_chk.isChecked()
@@ -10036,25 +13562,77 @@ if HAS_QT:
     class HDRSnipFusionApplication:
         """Main System Tray controller living in the Windows Taskbar Hidden Icons area."""
 
-        def __init__(self) -> None:
+        def __init__(
+            self,
+            startup_confirm_file: Optional[Path] = None,
+            startup_confirm_token: str = "",
+            verify_startup_only: bool = False,
+        ) -> None:
+            self._startup_confirm_file: Optional[Path] = (
+                Path(startup_confirm_file).resolve()
+                if startup_confirm_file is not None
+                else None
+            )
+            self._startup_confirm_token: str = str(
+                startup_confirm_token
+                or os.environ.get("HDRSNIP_STARTUP_CONFIRM_TOKEN", "")
+            ).strip()
+            self._verify_startup_only: bool = bool(verify_startup_only)
             ensure_per_monitor_dpi_awareness()
             QApplication.setHighDpiScaleFactorRoundingPolicy(
                 Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
             )
             self.app = QApplication(sys.argv)
             self.app.setApplicationName("HDRSnip Fusion")
+            self.app.setApplicationVersion(APP_VERSION)
             self.app.setQuitOnLastWindowClosed(False)
             self.config = AppConfig.load()
             self._snip_in_progress: bool = False
+            self._shutting_down: bool = False
+
+            # NOTE: Do NOT call cleanup_stale_update_staging() synchronously during __init__!
+            # When launched by the updater helper, the helper's manifest and confirmation
+            # files reside in updates/v<APP_VERSION>/. Stale staging cleanup is deferred until
+            # after startup verification has completed and the helper transaction has finished.
+            if self.config.staged_update_version and not is_newer_semver(
+                self.config.staged_update_version, APP_VERSION
+            ):
+                self.config.staged_update_version = ""
+                self.config.staged_update_path = ""
+                self.config.staged_update_sha256 = ""
+                self.config.save()
+
             DIAG_LOG.milestone(
                 "APP_START",
-                f"HDRSnip Fusion started (python={sys.version.split()[0]}, platform={sys.platform}, "
+                f"HDRSnip Fusion v{APP_VERSION} started (packaged={is_packaged_exe()}, "
+                f"python={sys.version.split()[0]}, platform={sys.platform}, "
                 f"safe_mode={self.config.is_safe_mode_active}, anim={self.config.animation_intensity}, "
-                f"disable_hdr_dxgi={self.config.disable_native_hdr_capture})",
+                f"save_dir='{self.config.save_directory}')",
             )
             director = AeroAnimationDirector.instance()
             director.apply_config_flags(self.config)
             self.overlay: Optional[SnipOverlayWindow] = None
+
+            # Background GitHub Release Updater state
+            self._update_signals = UpdateWorkerSignals()
+            self._update_signals.check_completed.connect(self._on_update_check_completed)
+            self._update_signals.download_progress.connect(
+                self._on_update_download_progress
+            )
+            self._update_signals.download_completed.connect(
+                self._on_update_download_completed
+            )
+            self._update_signals.download_failed.connect(self._on_update_download_failed)
+            self._update_check_in_progress: bool = False
+            self._update_download_in_progress: bool = False
+            self._update_cancel_event = threading.Event()
+            self._last_update_result: Optional[UpdateCheckResult] = None
+            self._pending_update_prompt_result: Optional[UpdateCheckResult] = None
+            self._pending_immediate_install: Optional[Tuple[str, Path, str]] = None
+            self._active_update_dialog: Optional[UpdatePromptDialog] = None
+            self._settings_check_callback: Optional[
+                Callable[[UpdateCheckResult, bool], None]
+            ] = None
 
             self.tray = QSystemTrayIcon(create_tray_icon_pixmap(), self.app)
             self._update_tray_tooltip()
@@ -10104,12 +13682,20 @@ if HAS_QT:
             self.folder_action.triggered.connect(self.open_screenshots_folder)
             self.menu.addAction(self.folder_action)
 
+            self.check_updates_action = QAction(
+                f"Check for Updates... (v{APP_VERSION})", self.menu
+            )
+            self.check_updates_action.triggered.connect(
+                lambda: self.check_for_updates(manual_request=True)
+            )
+            self.menu.addAction(self.check_updates_action)
+
             self.diag_log_action = QAction("Open Diagnostic Log...", self.menu)
             self.diag_log_action.triggered.connect(self.open_diagnostic_log)
             self.menu.addAction(self.diag_log_action)
 
             self.settings_action = QAction(
-                "Change Hotkey, Safe Mode & HDR Settings...", self.menu
+                "Change Hotkey, Save Folder & HDR Settings...", self.menu
             )
             self.settings_action.triggered.connect(self.open_settings)
             self.menu.addAction(self.settings_action)
@@ -10121,6 +13707,7 @@ if HAS_QT:
 
             self.tray.setContextMenu(self.menu)
             self.tray.activated.connect(self._on_tray_activated)
+            self.tray.messageClicked.connect(self._on_tray_message_clicked)
             self.tray.show()
 
             self.hotkey_listener = Win32HotkeyListener(self.config.hotkey_str)
@@ -10136,11 +13723,412 @@ if HAS_QT:
             self.hotkey_listener.start()
 
             self.tray.showMessage(
-                "HDRSnip Fusion (Frutiger Aero Liquid Edition)",
+                f"HDRSnip Fusion v{APP_VERSION} (Frutiger Aqua Edition)",
                 f"Press {self.config.hotkey_str} to capture an HDR-corrected snip.",
                 QSystemTrayIcon.MessageIcon.Information,
                 2500,
             )
+
+            # Periodic background update scheduler (checks ~once per 24 hours after tray init)
+            self._update_periodic_timer = QTimer(self.app)
+            self._update_periodic_timer.setInterval(3600 * 1000)  # 1-hour low-overhead poll
+            self._update_periodic_timer.timeout.connect(
+                self._on_periodic_update_timer
+            )
+            self._update_periodic_timer.start()
+            QTimer.singleShot(150, self._confirm_post_update_startup_ready)
+            QTimer.singleShot(UPDATE_STARTUP_DELAY_MS, self._on_startup_update_check)
+
+        def _confirm_post_update_startup_ready(self) -> None:
+            """
+            Emits the explicit post-update readiness signal from the active Qt event loop
+            once QApplication, QSystemTrayIcon, and Win32HotkeyListener are initialized,
+            and schedules deferred staging cleanup after the helper finishes verification.
+            """
+            if self._shutting_down:
+                return
+            if self._startup_confirm_file is not None:
+                try:
+                    write_startup_confirmation_file(
+                        self._startup_confirm_file,
+                        version=APP_VERSION,
+                        pid=os.getpid(),
+                        ppid=os.getppid(),
+                        token=self._startup_confirm_token,
+                    )
+                    DIAG_LOG.milestone(
+                        "STARTUP_CONFIRMED",
+                        f"Wrote startup readiness confirmation to '{self._startup_confirm_file}' "
+                        f"(pid={os.getpid()}, ppid={os.getppid()})",
+                        flush_disk=True,
+                    )
+                except Exception as exc:
+                    DIAG_LOG.error(
+                        "STARTUP_CONFIRMED",
+                        f"Failed to write startup confirmation file '{self._startup_confirm_file}'",
+                        exc,
+                    )
+            if self._verify_startup_only:
+                self._verify_quit_deadline = time.monotonic() + 5.0
+                self._poll_verify_startup_quit()
+                return
+            # Defer staging cleanup so any active updater helper finishes reading confirmation
+            # and cleaning up its transaction lock before stale directories are pruned.
+            QTimer.singleShot(8000, self._run_deferred_staging_cleanup)
+
+        def _poll_verify_startup_quit(self) -> None:
+            if self._shutting_down:
+                return
+            confirm_consumed = (
+                self._startup_confirm_file is None
+                or not self._startup_confirm_file.exists()
+            )
+            if confirm_consumed or time.monotonic() >= getattr(
+                self, "_verify_quit_deadline", 0.0
+            ):
+                self.quit_app(skip_auto_update_on_exit=True)
+            else:
+                QTimer.singleShot(60, self._poll_verify_startup_quit)
+
+        def _run_deferred_staging_cleanup(self) -> None:
+            if self._shutting_down:
+                return
+            cleanup_stale_update_staging(
+                APP_VERSION,
+                LOCAL_UPDATE_ROOT_DIR,
+                protect_confirm_file=self._startup_confirm_file,
+            )
+            if is_packaged_exe():
+                finalize_pending_update_verification(
+                    get_current_executable_path(), current_version=APP_VERSION
+                )
+
+        def is_snip_session_active(self) -> bool:
+            """Returns True when a screenshot capture or overlay annotation session is open."""
+            return bool(
+                self._snip_in_progress
+                or (self.overlay is not None and self.overlay.isVisible())
+            )
+
+        def _on_startup_update_check(self) -> None:
+            if self._shutting_down or not self.config.auto_check_updates:
+                return
+            self.check_for_updates(manual_request=False)
+
+        def _on_periodic_update_timer(self) -> None:
+            if self._shutting_down or not self.config.auto_check_updates:
+                return
+            elapsed = time.time() - float(self.config.last_update_check_epoch or 0.0)
+            if elapsed >= UPDATE_CHECK_INTERVAL_SEC:
+                self.check_for_updates(manual_request=False)
+
+        def check_for_updates(
+            self,
+            *,
+            manual_request: bool = False,
+            notify_dialog_callback: Optional[
+                Callable[[UpdateCheckResult, bool], None]
+            ] = None,
+        ) -> None:
+            """Starts a non-blocking GitHub Releases check on the worker thread pool."""
+            if self._shutting_down:
+                return
+            if notify_dialog_callback is not None:
+                self._settings_check_callback = notify_dialog_callback
+            if self._update_check_in_progress:
+                return
+            self._update_check_in_progress = True
+            DIAG_LOG.log(
+                "UPDATER",
+                f"Starting GitHub update check (manual={manual_request}, current=v{APP_VERSION})",
+            )
+            job = UpdateCheckJob(self._update_signals, manual_request=manual_request)
+            QThreadPool.globalInstance().start(job)
+
+        def _on_update_check_completed(
+            self, result: UpdateCheckResult, manual_request: bool
+        ) -> None:
+            self._update_check_in_progress = False
+            self._last_update_result = result
+            if result.status in ("up_to_date", "update_available", "asset_pending"):
+                self.config.last_update_check_epoch = time.time()
+                self.config.save()
+
+            DIAG_LOG.log(
+                "UPDATER",
+                f"Update check finished: status={result.status}, latest=v{result.latest_version}, "
+                f"manual={manual_request}, msg='{result.message}'",
+            )
+
+            cb = self._settings_check_callback
+            self._settings_check_callback = None
+            if cb is not None:
+                try:
+                    cb(result, manual_request)
+                except Exception:
+                    pass
+
+            if self._shutting_down:
+                return
+
+            if result.status == "update_available":
+                self.check_updates_action.setText(
+                    f"✦ Update Available: v{result.latest_version}..."
+                )
+                # If automatic download & install is enabled in packaged EXE mode,
+                # stage the verified executable quietly in the background
+                if (
+                    self.config.auto_install_updates
+                    and is_packaged_exe()
+                    and not manual_request
+                ):
+                    is_prot, _ = is_protected_install_location()
+                    if not is_prot:
+                        self.start_update_download(
+                            result, install_immediately=False, manual_request=False
+                        )
+                        return
+
+                # Respect user's declined version during automatic checks (unless manual)
+                if (
+                    not manual_request
+                    and self.config.declined_update_version
+                    and not is_newer_semver(
+                        result.latest_version, self.config.declined_update_version
+                    )
+                ):
+                    DIAG_LOG.log(
+                        "UPDATER",
+                        f"Suppressing automatic notification for previously declined version v{result.latest_version}",
+                    )
+                    return
+
+                # Never interrupt an active screenshot or annotation session!
+                if self.is_snip_session_active():
+                    self._pending_update_prompt_result = result
+                    return
+
+                if manual_request:
+                    self.present_update_prompt(result)
+                else:
+                    self._pending_update_prompt_result = result
+                    self.tray.showMessage(
+                        f"HDRSnip Fusion v{result.latest_version} is available",
+                        "A new stable version is ready. Click here or open Settings to review and install.",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        7500,
+                    )
+            elif manual_request and cb is None:
+                # Manual check invoked from tray menu
+                QMessageBox.information(
+                    None,
+                    f"HDRSnip Fusion v{APP_VERSION} — Updates",
+                    result.message or f"You're running the latest version (v{APP_VERSION}).",
+                )
+
+        def _on_tray_message_clicked(self) -> None:
+            if (
+                self._pending_update_prompt_result is not None
+                and not self.is_snip_session_active()
+            ):
+                res = self._pending_update_prompt_result
+                self._pending_update_prompt_result = None
+                self.present_update_prompt(res)
+
+        def present_update_prompt(
+            self,
+            result: UpdateCheckResult,
+            parent: Optional[QWidget] = None,
+        ) -> None:
+            if self._shutting_down or self.is_snip_session_active():
+                self._pending_update_prompt_result = result
+                return
+            if (
+                self._active_update_dialog is not None
+                and self._active_update_dialog.isVisible()
+            ):
+                self._active_update_dialog.raise_()
+                self._active_update_dialog.activateWindow()
+                return
+
+            dlg = UpdatePromptDialog(result, self, parent=parent)
+            self._active_update_dialog = dlg
+            try:
+                dlg.exec()
+            finally:
+                if self._active_update_dialog is dlg:
+                    self._active_update_dialog = None
+                dlg.deleteLater()
+
+        def start_update_download(
+            self,
+            check_result: UpdateCheckResult,
+            *,
+            install_immediately: bool = False,
+            manual_request: bool = False,
+        ) -> None:
+            if self._shutting_down or self._update_download_in_progress:
+                return
+            self._update_download_in_progress = True
+            self._update_cancel_event.clear()
+            job = UpdateDownloadJob(
+                self._update_signals,
+                check_result,
+                install_immediately=install_immediately,
+                manual_request=manual_request,
+                cancel_event=self._update_cancel_event,
+            )
+            QThreadPool.globalInstance().start(job)
+
+        def cancel_active_update_download(self) -> None:
+            self._update_cancel_event.set()
+
+        def _on_update_download_progress(self, done: int, total: int) -> None:
+            if (
+                self._active_update_dialog is not None
+                and self._active_update_dialog.isVisible()
+            ):
+                self._active_update_dialog.on_download_progress(done, total)
+
+        def _on_update_download_completed(
+            self,
+            version: str,
+            staged_path: str,
+            sha256: str,
+            check_result: object,
+            install_immediately: bool,
+        ) -> None:
+            self._update_download_in_progress = False
+            self.config.staged_update_version = version
+            self.config.staged_update_path = staged_path
+            self.config.staged_update_sha256 = sha256
+            self.config.save()
+
+            if (
+                self._active_update_dialog is not None
+                and self._active_update_dialog.isVisible()
+            ):
+                self._active_update_dialog.accept()
+
+            if install_immediately:
+                if self.is_snip_session_active():
+                    # Defer actual restart until the active screenshot overlay closes
+                    self._pending_immediate_install = (
+                        version,
+                        Path(staged_path),
+                        sha256,
+                    )
+                    self.tray.showMessage(
+                        f"HDRSnip Fusion v{version} Ready",
+                        "Update verified and will install as soon as you finish your current screenshot.",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        5000,
+                    )
+                else:
+                    self._execute_staged_update_and_exit(
+                        version,
+                        Path(staged_path),
+                        sha256,
+                        restart_after_update=True,
+                    )
+            else:
+                DIAG_LOG.milestone(
+                    "UPDATE_STAGED_READY",
+                    f"Verified update v{version} staged at '{staged_path}'; prompting user when idle to restart and install.",
+                )
+                if isinstance(check_result, UpdateCheckResult):
+                    self._pending_update_prompt_result = check_result
+                    if not self.is_snip_session_active():
+                        self.tray.showMessage(
+                            f"HDRSnip Fusion v{version} Downloaded & Verified",
+                            "Click here or open Settings to restart and install the verified update.",
+                            QSystemTrayIcon.MessageIcon.Information,
+                            7500,
+                        )
+
+        def _on_update_download_failed(
+            self,
+            err_msg: str,
+            manual_request: bool,
+            check_result: object,
+        ) -> None:
+            self._update_download_in_progress = False
+            if (
+                self._active_update_dialog is not None
+                and self._active_update_dialog.isVisible()
+            ):
+                self._active_update_dialog.on_download_failed(err_msg)
+            elif manual_request:
+                rel_url = (
+                    getattr(check_result, "release_url", GITHUB_RELEASES_PAGE_URL)
+                    or GITHUB_RELEASES_PAGE_URL
+                )
+                ans = QMessageBox.warning(
+                    None,
+                    "HDRSnip Fusion — Update Failed",
+                    f"Could not download or verify the update automatically:\n{err_msg}\n\n"
+                    f"Would you like to open the official GitHub Release page ({rel_url})?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if ans == QMessageBox.StandardButton.Yes and is_valid_github_url(
+                    rel_url, require_repo_prefix=True
+                ):
+                    webbrowser.open(rel_url)
+
+        def _execute_staged_update_and_exit(
+            self,
+            target_version: str,
+            staged_exe: Path,
+            expected_sha256: str,
+            *,
+            restart_after_update: bool = True,
+        ) -> bool:
+            """
+            Prepares the verified update manifest, launches the independent updater helper,
+            and triggers a clean application exit so the running EXE can be replaced safely.
+            """
+            if not is_packaged_exe():
+                return False
+            if not _UPDATE_TRANSACTION_LOCK.acquire(blocking=False):
+                return False
+            try:
+                helper_exe, manifest_path = prepare_staged_update_transaction(
+                    staged_exe=staged_exe,
+                    target_version=target_version,
+                    expected_sha256=expected_sha256,
+                    target_exe=get_current_executable_path(),
+                    restart_after_update=restart_after_update,
+                    staging_root=LOCAL_UPDATE_ROOT_DIR,
+                )
+                launch_staged_update_helper(helper_exe, manifest_path)
+                # Clear staged config markers now that helper transaction is launched
+                self.config.staged_update_version = ""
+                self.config.staged_update_path = ""
+                self.config.staged_update_sha256 = ""
+                self.config.save()
+                self.quit_app(skip_auto_update_on_exit=True)
+                return True
+            except Exception as exc:
+                DIAG_LOG.error(
+                    "UPDATE_INSTALL",
+                    f"Failed to launch staged update v{target_version}",
+                    exc,
+                )
+                if restart_after_update:
+                    ans = QMessageBox.warning(
+                        None,
+                        "HDRSnip Fusion — Automatic Update Failed",
+                        f"Could not replace the installed executable automatically:\n{exc}\n\n"
+                        "Would you like to open the official GitHub Releases page to download manually?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes,
+                    )
+                    if ans == QMessageBox.StandardButton.Yes:
+                        webbrowser.open(GITHUB_RELEASES_PAGE_URL)
+                return False
+            finally:
+                _UPDATE_TRANSACTION_LOCK.release()
 
         def _on_tray_activated(
             self, reason: QSystemTrayIcon.ActivationReason
@@ -10150,13 +14138,23 @@ if HAS_QT:
 
         def _update_tray_tooltip(self) -> None:
             sm_tag = " • [SAFE MODE]" if self.config.is_safe_mode_active else ""
-            self.tray.setToolTip(f"HDRSnip Fusion ({self.config.hotkey_str}){sm_tag}")
+            self.tray.setToolTip(
+                f"HDRSnip Fusion v{APP_VERSION} ({self.config.hotkey_str}){sm_tag}"
+            )
 
         def open_screenshots_folder(self) -> None:
-            save_dir = Path(self.config.save_directory)
-            save_dir.mkdir(parents=True, exist_ok=True)
-            if sys.platform == "win32":
-                os.startfile(str(save_dir))
+            save_dir = Path(self.config.save_directory).expanduser()
+            try:
+                save_dir.mkdir(parents=True, exist_ok=True)
+                if sys.platform == "win32":
+                    os.startfile(str(save_dir))
+            except Exception as exc:
+                DIAG_LOG.error("OPEN_FOLDER", f"Could not open folder '{save_dir}'", exc)
+                QMessageBox.warning(
+                    None,
+                    "HDRSnip Fusion — Folder Error",
+                    f"Could not open screenshots folder:\n{save_dir}\n\nReason: {exc}",
+                )
 
         def open_diagnostic_log(self) -> None:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -10182,6 +14180,29 @@ if HAS_QT:
                 self.overlay = None
             AeroAnimationDirector.instance().notify_visibility_changed()
             gc.collect()
+
+            # If a user-approved immediate update finished downloading while the overlay was open,
+            # or a background update notification was deferred during the snip, process it now.
+            if self._pending_immediate_install is not None and not self._shutting_down:
+                ver, st_path, sha = self._pending_immediate_install
+                self._pending_immediate_install = None
+                QTimer.singleShot(
+                    250,
+                    lambda: self._execute_staged_update_and_exit(
+                        ver, st_path, sha, restart_after_update=True
+                    ),
+                )
+            elif (
+                self._pending_update_prompt_result is not None
+                and not self._shutting_down
+            ):
+                res = self._pending_update_prompt_result
+                self.tray.showMessage(
+                    f"HDRSnip Fusion v{res.latest_version} is available",
+                    "A new stable version is ready. Click here or open Settings to review and install.",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    7500,
+                )
 
         def trigger_snip(self, t_trigger: Any = None) -> None:
             t_now = time.perf_counter()
@@ -10261,7 +14282,7 @@ if HAS_QT:
                 if (self.overlay is not None and self.overlay.isVisible())
                 else None
             )
-            dlg = SettingsDialog(self.config, parent=parent_w)
+            dlg = SettingsDialog(self.config, parent=parent_w, controller=self)
             try:
                 dlg.raise_()
                 dlg.activateWindow()
@@ -10277,12 +14298,20 @@ if HAS_QT:
                 elif self.overlay is not None and not self.overlay._closed:
                     self.overlay.setFocus()
             finally:
+                self._settings_check_callback = None
                 dlg.cleanup_resources()
                 dlg.deleteLater()
                 AeroAnimationDirector.instance().notify_visibility_changed()
 
-        def quit_app(self) -> None:
+        def quit_app(self, *, skip_auto_update_on_exit: bool = False) -> None:
+            # Note: Unattended deferred installation on application exit is intentionally
+            # disabled so updates are only installed via user-confirmed immediate restart
+            # with live independent-helper verification and automatic rollback.
+            _ = skip_auto_update_on_exit
             self._shutting_down = True
+            self._update_cancel_event.set()
+            if hasattr(self, "_update_periodic_timer"):
+                self._update_periodic_timer.stop()
             DIAG_LOG.milestone("APP_SHUTDOWN", "Shutting down HDRSnip Fusion cleanly")
             self.hotkey_listener.stop()
             if self.overlay is not None:
@@ -10308,8 +14337,86 @@ if HAS_QT:
             return self.app.exec()
 
 
-def main() -> int:
+def _extract_cli_option_value(args: Sequence[str], flag: str) -> Optional[str]:
+    """Extracts `<value>` from `[..., flag, value]` or `[..., f"{flag}={value}"]`."""
+    prefix = flag + "="
+    for idx, item in enumerate(args):
+        if item == flag:
+            if idx + 1 < len(args):
+                return str(args[idx + 1]).strip()
+            return ""
+        if item.startswith(prefix):
+            return item[len(prefix) :].strip()
+    return None
+
+
+def write_compiled_version_file(target_file: Path) -> None:
+    """
+    Writes structured version metadata directly to `target_file` for CI and
+    `PyInstaller --windowed` verification where `sys.stdout` is unavailable.
+    """
+    payload = {
+        "app": "HDRSnip Fusion",
+        "version": APP_VERSION,
+        "tag": f"v{APP_VERSION}",
+        "packaged": is_packaged_exe(),
+        "executable": str(get_current_executable_path()),
+    }
+    write_atomic_json_file(Path(target_file), payload)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
     _ensure_safe_stdio()
+    args = list(sys.argv[1:] if argv is None else argv)
+
+    # 1. Windowed-safe file-based version verification (`--write-version-file <path>`)
+    #    Works reliably in PyInstaller `--onefile --windowed` builds where stdout is None.
+    version_file_arg = _extract_cli_option_value(args, "--write-version-file")
+    if version_file_arg is not None:
+        if not version_file_arg:
+            return 2
+        try:
+            write_compiled_version_file(Path(version_file_arg))
+            return 0
+        except Exception as exc:
+            DIAG_LOG.error("VERSION_CHECK", f"Failed to write version file '{version_file_arg}'", exc)
+            return 2
+
+    # 2. Lightweight CLI version query (exits before Qt/hotkey/mutex initialization)
+    if "--version" in args or "-V" in args:
+        env_ver_file = os.environ.get("HDRSNIP_VERSION_FILE", "").strip()
+        if env_ver_file:
+            try:
+                write_compiled_version_file(Path(env_ver_file))
+            except Exception:
+                return 2
+        print(f"HDRSnip Fusion v{APP_VERSION}")
+        return 0
+
+    # 3. Early out-of-process staged updater helper mode (exits before Qt/hotkey/mutex init)
+    if len(args) >= 2 and args[0] == "--apply-staged-update":
+        return run_staged_update_helper(args[1])
+
+    # 4. Simulated startup failure/hang hooks for automated CI / Windows two-EXE rollback testing
+    if "--simulate-broken-startup" in args or os.environ.get(
+        "HDRSNIP_SIMULATE_BROKEN_STARTUP", ""
+    ).strip().lower() in ("1", "true", "yes"):
+        DIAG_LOG.error(
+            "SIMULATED_FAILURE",
+            "Exiting before startup confirmation due to --simulate-broken-startup",
+        )
+        return 13
+
+    if "--simulate-hung-startup" in args or os.environ.get(
+        "HDRSNIP_SIMULATE_HUNG_STARTUP", ""
+    ).strip().lower() in ("1", "true", "yes"):
+        DIAG_LOG.error(
+            "SIMULATED_HUNG_STARTUP",
+            "Sleeping without writing startup confirmation due to --simulate-hung-startup",
+        )
+        time.sleep(30.0)
+        return 14
+
     if not HAS_QT:
         print(
             "PyQt6 is required to run the HDRSnip Fusion GUI.\n"
@@ -10318,6 +14425,22 @@ def main() -> int:
         )
         return 1
 
+    confirm_startup_arg = _extract_cli_option_value(args, "--confirm-startup-file")
+    confirm_startup_path = (
+        Path(confirm_startup_arg).resolve()
+        if confirm_startup_arg
+        else None
+    )
+    confirm_token_arg = (
+        _extract_cli_option_value(args, "--confirm-startup-token")
+        or os.environ.get("HDRSNIP_STARTUP_CONFIRM_TOKEN", "")
+    ).strip()
+    verify_startup_only = ("--verify-startup-only" in args) or (
+        os.environ.get("HDRSNIP_VERIFY_STARTUP_ONLY", "").strip().lower()
+        in ("1", "true", "yes")
+    )
+
+    restarted_after_update = "--restarted-after-update" in args
     mutex = None
     kernel32_err = None
     if sys.platform == "win32":
@@ -10331,21 +14454,36 @@ def main() -> int:
         kernel32_err.CreateMutexW.restype = ctypes.c_void_p
         kernel32_err.CloseHandle.argtypes = [ctypes.c_void_p]
         kernel32_err.CloseHandle.restype = wintypes.BOOL
-        mutex = kernel32_err.CreateMutexW(
-            None, False, "Local\\HDRSnipFusion_SingleInstance"
-        )
-        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
-            print("HDRSnip Fusion is already running in the system tray.")
-            DIAG_LOG.log(
-                "SINGLE_INSTANCE",
-                "Another instance of HDRSnip Fusion is already running; exiting.",
+
+        max_mutex_tries = 35 if restarted_after_update else 1
+        for attempt in range(max_mutex_tries):
+            mutex = kernel32_err.CreateMutexW(
+                None, False, r"Local\HDRSnipFusion_SingleInstance"
             )
+            if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+                break
             if mutex:
                 kernel32_err.CloseHandle(ctypes.c_void_p(mutex))
-            return 0
+                mutex = None
+            if attempt + 1 < max_mutex_tries:
+                time.sleep(0.12)
+            else:
+                print("HDRSnip Fusion is already running in the system tray.")
+                DIAG_LOG.log(
+                    "SINGLE_INSTANCE",
+                    "Another instance of HDRSnip Fusion is already running; exiting.",
+                )
+                return 0
     try:
-        controller = HDRSnipFusionApplication()
+        controller = HDRSnipFusionApplication(
+            startup_confirm_file=confirm_startup_path,
+            startup_confirm_token=confirm_token_arg,
+            verify_startup_only=verify_startup_only,
+        )
         return controller.run()
+    except Exception as exc:
+        DIAG_LOG.error("MAIN_STARTUP_FAILURE", "Fatal error during application startup", exc)
+        return 1
     finally:
         if mutex and kernel32_err is not None:
             kernel32_err.CloseHandle(ctypes.c_void_p(mutex))

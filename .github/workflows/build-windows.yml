@@ -1,43 +1,498 @@
-name: Build Windows EXE
+name: Build & Release Windows Executable
+
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - "HDRSnipFusion.py"
-      - "RELEASE_NOTES.md"
-      - "requirements.txt"
-      - ".github/workflows/build-windows.yml"
-  release:
-    types: [published]
+    branches: [ main ]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
-  build:
+  build-windows:
+    name: Build & Verify HDRSnipFusion.exe (Windows x64)
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: python -m pip install -U pip pyinstaller PyQt6 numpy Pillow
-      - name: Build executable
-        run: python -m PyInstaller --onefile --windowed --clean --noconfirm --name "HDRSnipFusion" "HDRSnipFusion.py"
-      - name: Upload artifact
+          fetch-depth: 0
+
+      - name: Set up Python 3.11 (64-bit)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+          cache: 'pip'
+
+      - name: Locate entry-point script & verify APP_VERSION consistency
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $candidates = @("HDRSnipFusion.py", "src/HDRSnipFusion.py", "HDRSnipFusion_Gemini_Safer.py")
+          $entryScript = $null
+          foreach ($cand in $candidates) {
+            if (Test-Path -LiteralPath $cand) {
+              $entryScript = $cand
+              break
+            }
+          }
+          if (-not $entryScript) {
+            Write-Error "Could not locate HDRSnipFusion.py in the repository."
+            exit 1
+          }
+
+          $content = Get-Content -LiteralPath $entryScript -Raw -Encoding UTF8
+          if ($content -match '(?m)^APP_VERSION\s*(?::\s*str\s*)?=\s*["'']([0-9]+\.[0-9]+\.[0-9]+)["'']') {
+            $appVersion = $Matches[1]
+          } else {
+            Write-Error "Failed to parse APP_VERSION = 'X.Y.Z' from $entryScript."
+            exit 1
+          }
+
+          $isTagPush = $env:GITHUB_REF_TYPE -eq "tag" -or $env:GITHUB_REF -like "refs/tags/v*"
+          $tagName = ""
+          if ($isTagPush) {
+            $tagName = $env:GITHUB_REF_NAME
+            $expectedTag = "v$appVersion"
+            if ($tagName -ne $expectedTag) {
+              Write-Error "Version mismatch! Git tag is '$tagName', but APP_VERSION in $entryScript is '$appVersion' (expected tag '$expectedTag')."
+              exit 1
+            }
+            Write-Host "Verified Git tag '$tagName' matches APP_VERSION '$appVersion' in $entryScript."
+          } else {
+            Write-Host "Non-tag build on ref '$env:GITHUB_REF': APP_VERSION is '$appVersion'."
+          }
+
+          "entry_script=$entryScript" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "is_tag=$($isTagPush.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag_name=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install runtime & packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path -LiteralPath "requirements.txt") {
+            pip install -r requirements.txt
+          } else {
+            pip install PyQt6 numpy Pillow
+          }
+          pip install pyinstaller
+
+      - name: Run headless verification checks on source script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $entry = "${{ steps.meta.outputs.entry_script }}"
+          $expectedVer = "${{ steps.meta.outputs.app_version }}"
+
+          $verOut = (python $entry --version | Out-String).Trim()
+          Write-Host "Source --version output: $verOut"
+          if ($verOut -ne "HDRSnip Fusion v$expectedVer") {
+            Write-Error "Unexpected --version output from source: '$verOut' (expected 'HDRSnip Fusion v$expectedVer')"
+            exit 1
+          }
+
+          $srcVerJsonPath = Join-Path $env:RUNNER_TEMP "source_version_check.json"
+          if (Test-Path -LiteralPath $srcVerJsonPath) { Remove-Item -LiteralPath $srcVerJsonPath -Force }
+          python $entry --write-version-file $srcVerJsonPath
+          if (-not (Test-Path -LiteralPath $srcVerJsonPath)) {
+            Write-Error "Source --write-version-file did not create $srcVerJsonPath"
+            exit 1
+          }
+          $srcVerObj = Get-Content -LiteralPath $srcVerJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($srcVerObj.version -ne $expectedVer) {
+            Write-Error "Source --write-version-file version mismatch: got '$($srcVerObj.version)', expected '$expectedVer'"
+            exit 1
+          }
+
+      - name: Build single-file Windows executable with PyInstaller
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $entry = "${{ steps.meta.outputs.entry_script }}"
+
+          $iconArgs = @()
+          if (Test-Path -LiteralPath "assets/icon.ico") {
+            $iconArgs = @("--icon", "assets/icon.ico")
+          } elseif (Test-Path -LiteralPath "icon.ico") {
+            $iconArgs = @("--icon", "icon.ico")
+          }
+
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "HDRSnipFusion" `
+            --collect-submodules PyQt6 `
+            @iconArgs `
+            $entry
+
+      - name: Verify compiled HDRSnipFusion.exe (PE64 headers, version & SHA-256)
+        id: verify_exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exePath = Join-Path (Get-Location) "dist\HDRSnipFusion.exe"
+          $expectedVer = "${{ steps.meta.outputs.app_version }}"
+
+          if (-not (Test-Path -LiteralPath $exePath)) {
+            Write-Error "PyInstaller did not produce expected executable at $exePath"
+            exit 1
+          }
+
+          $item = Get-Item -LiteralPath $exePath
+          $sizeBytes = $item.Length
+          Write-Host "Built executable: $exePath ($sizeBytes bytes)"
+          if ($sizeBytes -lt 5242880) {
+            Write-Error "HDRSnipFusion.exe size ($sizeBytes bytes) is unexpectedly small (< 5 MB)."
+            exit 1
+          }
+
+          # Validate 64-bit Windows PE headers using the built-in validator
+          python -c "import sys, pathlib; sys.path.insert(0, '.'); import HDRSnipFusion as m; ok, reason = m.validate_windows_pe_executable(pathlib.Path(r'$exePath')); print('PE check:', ok, reason); sys.exit(0 if ok else 1)"
+
+          # Verify compiled --onefile --windowed executable version via file-based flag
+          # (Safe for --windowed subsystem=GUI builds where stdout is not attached)
+          $verJsonPath = Join-Path $env:RUNNER_TEMP "compiled_exe_version.json"
+          if (Test-Path -LiteralPath $verJsonPath) {
+            Remove-Item -LiteralPath $verJsonPath -Force
+          }
+
+          $proc = Start-Process -FilePath $exePath -ArgumentList @("--write-version-file", $verJsonPath) -Wait -PassThru -WindowStyle Hidden
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "Compiled HDRSnipFusion.exe --write-version-file exited with code $($proc.ExitCode)"
+            exit 1
+          }
+          if (-not (Test-Path -LiteralPath $verJsonPath)) {
+            Write-Error "Compiled HDRSnipFusion.exe did not create version verification file at $verJsonPath"
+            exit 1
+          }
+
+          $verData = Get-Content -LiteralPath $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          Write-Host "Compiled EXE version payload: $($verData | ConvertTo-Json -Compress)"
+          if ($verData.version -ne $expectedVer -or $verData.tag -ne "v$expectedVer" -or -not $verData.packaged) {
+            Write-Error "Compiled HDRSnipFusion.exe reported unexpected version metadata: $($verData | ConvertTo-Json -Compress)"
+            exit 1
+          }
+
+          $hashObj = Get-FileHash -LiteralPath $exePath -Algorithm SHA256
+          $sha256 = $hashObj.Hash.ToLowerInvariant()
+          $shaFile = Join-Path (Get-Location) "dist\HDRSnipFusion.exe.sha256"
+          "$sha256  HDRSnipFusion.exe" | Out-File -FilePath $shaFile -Encoding ascii -NoNewline
+          Write-Host "Computed SHA-256: $sha256"
+
+          "exe_path=$exePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "size_bytes=$sizeBytes" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Verify two-EXE PyInstaller --onefile --windowed updater, PID ancestry, rollback & staging cleanup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $entry = "${{ steps.meta.outputs.entry_script }}"
+          $baseExe = "${{ steps.verify_exe.outputs.exe_path }}"
+          $baseVer = "${{ steps.meta.outputs.app_version }}"
+
+          # Compute next patch version (e.g. 0.1.1 -> 0.1.2) for the second real --onefile --windowed EXE
+          $verParts = $baseVer.Split(".")
+          $nextPatch = [int]$verParts[2] + 1
+          $nextVer = "$($verParts[0]).$($verParts[1]).$nextPatch"
+
+          $testRoot = Join-Path $env:RUNNER_TEMP "hdrsnip_two_exe_updater_test"
+          if (Test-Path -LiteralPath $testRoot) {
+            Remove-Item -LiteralPath $testRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+
+          $nextSrc = Join-Path $testRoot "HDRSnipFusion_vNext.py"
+          $rawSrc = Get-Content -LiteralPath $entry -Raw -Encoding UTF8
+          $patchedSrc = [regex]::Replace(
+            $rawSrc,
+            '(?m)^APP_VERSION\s*(?::\s*str\s*)?=\s*["''][0-9]+\.[0-9]+\.[0-9]+["'']',
+            "APP_VERSION: str = `"$nextVer`""
+          )
+          Set-Content -LiteralPath $nextSrc -Value $patchedSrc -Encoding UTF8
+
+          Write-Host "Building second real PyInstaller --onefile --windowed executable (v$nextVer) for updater test..."
+          $pyiWork = Join-Path $testRoot "build"
+          $pyiDist = Join-Path $testRoot "dist_next"
+          $pyiSpec = Join-Path $testRoot "spec"
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "HDRSnipFusion_vNext" `
+            --workpath $pyiWork `
+            --distpath $pyiDist `
+            --specpath $pyiSpec `
+            --collect-submodules PyQt6 `
+            $nextSrc
+
+          $nextExe = Join-Path $pyiDist "HDRSnipFusion_vNext.exe"
+          if (-not (Test-Path -LiteralPath $nextExe)) {
+            Write-Error "Failed to build second test executable at $nextExe"
+            exit 1
+          }
+
+          # Run end-to-end verification of the two real --onefile --windowed executables
+          $testScript = Join-Path $testRoot "run_two_exe_validation.py"
+          $pyCode = @'
+          import json
+          import os
+          from pathlib import Path
+          import secrets
+          import shutil
+          import subprocess
+          import sys
+          import time
+
+          sys.path.insert(0, os.getcwd())
+          import HDRSnipFusion as m
+
+          base_exe_src = Path(sys.argv[1]).resolve()
+          next_exe_src = Path(sys.argv[2]).resolve()
+          base_ver = sys.argv[3].strip()
+          next_ver = sys.argv[4].strip()
+          work_root = Path(sys.argv[5]).resolve()
+
+          install_dir = work_root / "install"
+          staging_root = work_root / "updates"
+          install_dir.mkdir(parents=True, exist_ok=True)
+          staging_root.mkdir(parents=True, exist_ok=True)
+
+          installed_exe = install_dir / "HDRSnipFusion.exe"
+          shutil.copy2(base_exe_src, installed_exe)
+          base_sha = m.compute_file_sha256(installed_exe)
+          next_sha = m.compute_file_sha256(next_exe_src)
+          assert base_sha != next_sha, "Base EXE and Next EXE SHA-256 must differ"
+
+          # -------------------------------------------------------------------------
+          # 1. Test real PyInstaller --onefile bootloader parent PID vs Python child PID
+          # -------------------------------------------------------------------------
+          confirm_1 = staging_root / "test_pid_confirm.json"
+          token_1 = secrets.token_hex(32)
+          env_1 = m._build_clean_pyinstaller_env()
+          env_1["HDRSNIP_STARTUP_CONFIRM_TOKEN"] = token_1
+          proc_1 = subprocess.Popen(
+              [
+                  str(installed_exe),
+                  "--restarted-after-update",
+                  "--confirm-startup-file",
+                  str(confirm_1),
+                  "--confirm-startup-token",
+                  token_1,
+                  "--verify-startup-only",
+              ],
+              env=env_1,
+              cwd=str(install_dir),
+          )
+          ok_1, reason_1 = m._wait_for_startup_confirmation(
+              proc_1,
+              confirm_file=confirm_1,
+              expected_version=base_ver,
+              expected_token=token_1,
+              expected_executable=installed_exe,
+              timeout_sec=20.0,
+              verify_executable_path=True,
+              allow_clean_exit_after_confirm=True,
+          )
+          print("Test 1 (Bootloader/Child PID confirmation):", ok_1, reason_1)
+          assert ok_1, f"Bootloader/Child startup confirmation failed: {reason_1}"
+          payload_1 = json.loads(confirm_1.read_text(encoding="utf-8"))
+          print("Test 1 payload:", payload_1, "Popen.pid:", proc_1.pid)
+          # In PyInstaller --onefile on Windows, Popen.pid is the native bootloader parent
+          # while payload_1['pid'] is the separate Python child process (ppid == Popen.pid)!
+          assert int(payload_1["pid"]) != int(proc_1.pid), (
+              f"Expected PyInstaller --onefile child PID ({payload_1['pid']}) != bootloader Popen.pid ({proc_1.pid})"
+          )
+          assert int(payload_1["ppid"]) == int(proc_1.pid), (
+              f"Expected child ppid ({payload_1['ppid']}) == bootloader Popen.pid ({proc_1.pid})"
+          )
+          confirm_1.unlink(missing_ok=True)
+          proc_1.wait(timeout=10.0)
+
+          # -------------------------------------------------------------------------
+          # 2. Test active staging protection & successful update (base_ver -> next_ver)
+          # -------------------------------------------------------------------------
+          vnext_dir = staging_root / f"v{next_ver}"
+          vnext_dir.mkdir(parents=True, exist_ok=True)
+          staged_next = vnext_dir / "HDRSnipFusion.exe"
+          shutil.copy2(next_exe_src, staged_next)
+
+          helper_exe, manifest_path = m.prepare_staged_update_transaction(
+              staged_exe=staged_next,
+              target_version=next_ver,
+              expected_sha256=next_sha,
+              target_exe=installed_exe,
+              restart_after_update=True,
+              staging_root=staging_root,
+          )
+          # Verify helper was copied from the known-good installed_exe (base_sha)
+          assert m.compute_file_sha256(helper_exe) == base_sha, "Helper must be copied from known-good installed EXE"
+          assert (vnext_dir / m.ACTIVE_TRANSACTION_LOCK_FILENAME).exists(), "Active transaction lock must exist"
+
+          # Verify premature cleanup_stale_update_staging call does NOT delete active transaction files
+          m.cleanup_stale_update_staging(next_ver, staging_root)
+          assert staged_next.exists() and manifest_path.exists() and helper_exe.exists(), (
+              "Active transaction files must be protected from premature cleanup!"
+          )
+
+          os.environ["HDRSNIP_VERIFY_STARTUP_ONLY"] = "1"
+          try:
+              rc_update = m.run_staged_update_helper(
+                  str(manifest_path),
+                  allowed_staging_root=staging_root,
+                  post_launch_verify_sec=25.0,
+              )
+          finally:
+              os.environ.pop("HDRSNIP_VERIFY_STARTUP_ONLY", None)
+
+          print("Test 2 (Successful update rc):", rc_update)
+          assert rc_update == 0, f"Expected run_staged_update_helper rc=0, got {rc_update}"
+          assert m.compute_file_sha256(installed_exe) == next_sha, "Installed EXE was not updated to next_ver"
+          assert not m.get_backup_executable_path(installed_exe).exists(), ".bak should be removed after confirmation"
+          assert not m.get_pending_update_marker_path(installed_exe).exists(), ".pending_verify.json should be removed"
+          assert not (vnext_dir / m.ACTIVE_TRANSACTION_LOCK_FILENAME).exists(), "Transaction lock should be removed"
+
+          # -------------------------------------------------------------------------
+          # 3. Test failed startup & hung child process-tree termination + rollback
+          # -------------------------------------------------------------------------
+          vfail_dir = staging_root / "v9.9.9"
+          vfail_dir.mkdir(parents=True, exist_ok=True)
+          staged_fail = vfail_dir / "HDRSnipFusion.exe"
+          shutil.copy2(base_exe_src, staged_fail)
+
+          helper_fail, manifest_fail = m.prepare_staged_update_transaction(
+              staged_exe=staged_fail,
+              target_version="9.9.9",
+              expected_sha256=base_sha,
+              target_exe=installed_exe,
+              restart_after_update=False,
+              staging_root=staging_root,
+          )
+          # Simulate a hung PyInstaller child process that never writes startup confirmation
+          os.environ["HDRSNIP_SIMULATE_HUNG_STARTUP"] = "1"
+          try:
+              rc_fail = m.run_staged_update_helper(
+                  str(manifest_fail),
+                  allowed_staging_root=staging_root,
+                  post_launch_verify_sec=3.0,
+              )
+          finally:
+              os.environ.pop("HDRSNIP_SIMULATE_HUNG_STARTUP", None)
+
+          print("Test 3 (Hung child process rollback rc):", rc_fail)
+          assert rc_fail == 6, f"Expected rollback rc=6 on hung startup, got {rc_fail}"
+          assert m.compute_file_sha256(installed_exe) == next_sha, (
+              "Rollback failed: installed_exe was not restored to next_ver!"
+          )
+          assert not m.get_backup_executable_path(installed_exe).exists(), ".bak should be cleaned up after rollback"
+
+          # -------------------------------------------------------------------------
+          # 4. Test post-transaction staging cleanup
+          # -------------------------------------------------------------------------
+          m.cleanup_stale_update_staging(next_ver, staging_root)
+          assert not vnext_dir.exists(), f"Stale staging dir {vnext_dir} should be cleaned up after transaction completes"
+          print("ALL TWO-EXE WINDOWS PYINSTALLER UPDATER CHECKS PASSED!")
+          '@
+          Set-Content -LiteralPath $testScript -Value $pyCode -Encoding UTF8
+          python $testScript $baseExe $nextExe $baseVer $nextVer $testRoot
+          Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Upload Windows build artifact (Branch / PR / Manual runs)
         uses: actions/upload-artifact@v4
         with:
-          name: HDRSnipFusion-Windows
-          path: dist/HDRSnipFusion.exe
-      - name: Publish v0.1.0 preview release
-        if: github.event_name == 'push' && github.event.head_commit.message == 'Publish v0.1.0 preview'
+          name: HDRSnipFusion-Windows-x64-v${{ steps.meta.outputs.app_version }}
+          path: |
+            dist/HDRSnipFusion.exe
+            dist/HDRSnipFusion.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish & attach HDRSnipFusion.exe to GitHub Release (Tag push only)
+        if: steps.meta.outputs.is_tag == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: gh release create "v0.1.0" "dist/HDRSnipFusion.exe" --title "HDRScreenshot FrutigerAqua v0.1.0" --notes-file RELEASE_NOTES.md --prerelease --target "${{ github.sha }}"
-      - name: Attach executable to release
-        if: github.event_name == 'release'
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ steps.meta.outputs.tag_name }}"
+          $ver = "${{ steps.meta.outputs.app_version }}"
+          $exePath = "${{ steps.verify_exe.outputs.exe_path }}"
+          $sha256 = "${{ steps.verify_exe.outputs.sha256 }}"
+          $sizeBytes = "${{ steps.verify_exe.outputs.size_bytes }}"
+
+          $notesFile = Join-Path $env:RUNNER_TEMP "release_notes_$tag.md"
+          $notesLines = @(
+            "## HDRSnip Fusion $tag (Frutiger Aqua Edition)",
+            "",
+            "### Official Standalone Windows 10/11 Executable",
+            "- **Asset**: ``HDRSnipFusion.exe`` (64-bit standalone PyInstaller build)",
+            "- **Version**: ``v$ver``",
+            "- **Size**: ``$sizeBytes`` bytes",
+            "- **SHA-256**: ``$sha256``",
+            "",
+            "```text",
+            "$sha256  HDRSnipFusion.exe",
+            "```"
+          )
+          $notesLines -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
+
+          # Native CLI commands do not throw on nonzero exit by default in PowerShell.
+          # Check $LASTEXITCODE explicitly rather than relying on try/catch.
+          gh release view $tag --repo "${{ github.repository }}" --json tagName 2>$null | Out-Null
+          $releaseExists = ($LASTEXITCODE -eq 0)
+
+          if (-not $releaseExists) {
+            Write-Host "Creating GitHub Release $tag and uploading HDRSnipFusion.exe..."
+            gh release create $tag `
+              "$exePath#HDRSnipFusion.exe" `
+              "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256" `
+              --repo "${{ github.repository }}" `
+              --title "HDRSnip Fusion $tag" `
+              --notes-file $notesFile `
+              --verify-tag
+          } else {
+            Write-Host "Release $tag already exists; uploading/replacing HDRSnipFusion.exe asset..."
+            gh release upload $tag `
+              "$exePath#HDRSnipFusion.exe" `
+              "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256" `
+              --repo "${{ github.repository }}" `
+              --clobber
+          }
+
+      - name: Verify published GitHub Release asset & digest metadata
+        if: steps.meta.outputs.is_tag == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: gh release upload "${{ github.event.release.tag_name }}" "dist/HDRSnipFusion.exe" --clobber
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ steps.meta.outputs.tag_name }}"
+          $expectedSha = "${{ steps.verify_exe.outputs.sha256 }}"
+          $expectedSize = [int64]"${{ steps.verify_exe.outputs.size_bytes }}"
+
+          $relJson = gh api "repos/${{ github.repository }}/releases/tags/$tag"
+          $rel = $relJson | ConvertFrom-Json
+
+          $exeAsset = $rel.assets | Where-Object { $_.name -eq "HDRSnipFusion.exe" } | Select-Object -First 1
+          if (-not $exeAsset) {
+            Write-Error "GitHub Release $tag is missing the required HDRSnipFusion.exe asset!"
+            exit 1
+          }
+          if ($exeAsset.state -ne "uploaded") {
+            Write-Error "HDRSnipFusion.exe asset state is '$($exeAsset.state)' (expected 'uploaded')."
+            exit 1
+          }
+          if ([int64]$exeAsset.size -ne $expectedSize) {
+            Write-Error "Uploaded HDRSnipFusion.exe size ($($exeAsset.size)) does not match built size ($expectedSize)."
+            exit 1
+          }
+          if ($exeAsset.digest -and ($exeAsset.digest -ne "sha256:$expectedSha")) {
+            Write-Error "Uploaded asset digest '$($exeAsset.digest)' does not match expected 'sha256:$expectedSha'."
+            exit 1
+          }
+          Write-Host "Successfully verified HDRSnipFusion.exe on GitHub Release $tag (url=$($exeAsset.browser_download_url))."
