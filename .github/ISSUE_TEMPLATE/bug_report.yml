@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a bug, crash, or HDR capture problem
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Please remove personal information from screenshots, paths, and logs before posting."
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open HDRSnip Fusion\n2. Press Ctrl+Shift+X\n3. ..."
+    validations:
+      required: true
+  - type: input
+    id: win
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      placeholder: "AMD Radeon RX 9070, driver version..."
+  - type: dropdown
+    id: hdr
+    attributes:
+      label: Windows HDR state
+      options:
+        - "HDR enabled"
+        - "HDR disabled"
+        - "Not sure"
+  - type: input
+    id: app
+    attributes:
+      label: App version
+      placeholder: "v0.1.0"
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional notes or sanitized logs
+      description: "Check logs and screenshots for personal information before uploading."
