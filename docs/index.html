@@ -7,6 +7,8 @@
   <title>HDRSnip Fusion | Frutiger Aqua HDR Screenshot Tool for Windows</title>
   <meta name="description" content="Download HDRSnip Fusion: a free, open-source Windows screenshot tool with HDR and Auto HDR capture, annotation, custom hotkeys, and a Frutiger Aqua interface.">
   <meta name="theme-color" content="#073b51">
+  <link rel="icon" type="image/png" sizes="48x48" href="favicon.png">
+  <link rel="shortcut icon" type="image/png" href="favicon.png">
   <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
   <meta property="og:type" content="website">
@@ -14,6 +16,7 @@
   <meta property="og:description" content="Free, open-source HDR and Auto HDR screenshot capture, annotation tools, and a Frutiger Aqua-inspired interface for Windows.">
   <meta property="og:url" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
   <meta property="og:site_name" content="HDRSnip Fusion">
+  <meta property="og:locale" content="en_US">
   <meta property="og:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
   <meta property="og:image:alt" content="HDRSnip Fusion HDR screenshot selection overlay with Aqua toolbar and editing tools">
   <meta name="twitter:card" content="summary_large_image">
@@ -30,6 +33,8 @@
     "description": "A free, open-source Windows screenshot and annotation application with HDR and Auto HDR capture, configurable tone mapping, system-tray hotkeys, and a Frutiger Aqua-inspired interface.",
     "url": "https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/",
     "codeRepository": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua",
+    "sameAs": ["https://github.com/shadow728270/HDRScreenshot-FrutigerAqua"],
+    "image": "https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/favicon.png",
     "downloadUrl": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe",
     "softwareVersion": "0.1.1",
     "operatingSystem": "Windows 10, Windows 11",
@@ -49,7 +54,8 @@
     a:hover { color:white; }
     .wrap { max-width:1090px; padding:0 24px; margin:0 auto; }
     .nav { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:25px 0; border-bottom:1px solid var(--line); }
-    .brand { color:#ecffff; text-decoration:none; font-weight:750; letter-spacing:-.04em; font-size:1.12rem; }
+    .brand { display:inline-flex; align-items:center; gap:11px; color:#ecffff; text-decoration:none; font-weight:750; letter-spacing:-.04em; font-size:1.12rem; }
+    .brand-icon { display:block; width:38px; height:38px; border-radius:10px; flex:0 0 38px; box-shadow:0 0 0 1px rgba(197,255,252,.45),0 6px 22px rgba(30,210,240,.17); }
     .brand span { color:#9efaf1; }
     .nav-links { display:flex; gap:20px; flex-wrap:wrap; font-size:.91rem; }
     .nav-links a { text-decoration:none; color:var(--muted); }
@@ -103,13 +109,13 @@
 <body>
   <div class="wrap">
     <header class="nav">
-      <a class="brand" href="./">HDR<span>Snip</span> Fusion</a>
+      <a class="brand" href="./" aria-label="HDRSnip Fusion home"><img class="brand-icon" src="favicon.png" width="38" height="38" alt="">HDR<span>Snip</span> Fusion</a>
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#features">Features</a>
         <a href="#screenshots">Screenshots</a>
         <a href="#download">Download</a>
         <a href="#questions">FAQ</a>
-        <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">Source on GitHub ↗</a>
+        <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub Repository ↗</a>
       </nav>
     </header>
     <main>
@@ -120,10 +126,10 @@
           <p class="intro">HDRSnip Fusion is a free Windows screenshot tool for capturing HDR, Auto HDR, and SDR screen content, selecting a region, adding annotations, and saving or copying the result. Wrapped in a Frutiger Aqua-inspired glass interface.</p>
           <div class="buttons">
             <a class="btn primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe">↓ Download for Windows</a>
-            <a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">View Python source ↗</a>
+            <a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua" aria-label="View the official HDRSnip Fusion open-source GitHub repository">★ View on GitHub ↗</a>
           </div>
           <p class="micro">v0.1.1 · 64-bit Windows EXE · No Python installation required · MIT License</p>
-          <p class="micro">Project repository: <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">HDRScreenshot-FrutigerAqua on GitHub</a>.</p>
+          <p class="micro">Official open-source GitHub repository: <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">shadow728270/HDRScreenshot-FrutigerAqua</a> · <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">Releases &amp; changelog</a></p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="orb"></div>
@@ -170,6 +176,7 @@
       <section id="questions" aria-labelledby="faq-title">
         <h2 id="faq-title">Frequently asked questions</h2>
         <details><summary>Can HDRSnip Fusion capture an HDR game or Auto HDR desktop?</summary><p>It is designed to do so using DXGI Desktop Duplication and tone mapping. Success and output appearance can vary based on graphics drivers, Windows HDR settings, and a game's presentation mode.</p></details>
+        <details><summary>Does the app combine several exposures into an HDR screenshot?</summary><p>No. HDRSnip Fusion captures the GPU framebuffer with DXGI Desktop Duplication, then tone-maps HDR content to a conventional SDR image. It does not stitch or merge multiple differently exposed screenshots.</p></details>
         <details><summary>Will the screenshot preserve actual HDR metadata?</summary><p>No. The current export is a conventional PNG with configurable HDR-to-SDR tone mapping. It is intended to avoid washed-out or clipped-looking captures on supported configurations, not to save native HDR images.</p></details>
         <details><summary>Is it free and open source?</summary><p>Yes. The application is free, and the Python source is published under the <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/LICENSE">MIT License</a>.</p></details>
         <details><summary>Do I need Python or an installer?</summary><p>No. Download the standalone Windows EXE from the GitHub Releases page. Python is only required if you choose to run or build the source code.</p></details>
@@ -178,7 +185,7 @@
       <section>
         <h2>Built in the open</h2>
         <p class="section-intro">The complete Python source, build workflow, and issue tracker are public. Found a bug, want a feature, or have a screenshot to share?</p>
-        <div class="buttons"><a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Report an issue ↗</a><a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/README.md">Read project docs ↗</a></div>
+        <div class="buttons"><a class="btn primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">Explore GitHub Repository ↗</a><a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Report an issue ↗</a><a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/README.md">Read project docs ↗</a></div>
       </section>
     </main>
     <footer><div class="foot"><span>© HDRSnip Fusion contributors · MIT License · Independent open-source project</span><span><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub</a><a href="sitemap.xml">Sitemap</a></span></div></footer>

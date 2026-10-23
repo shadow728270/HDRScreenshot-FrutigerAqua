@@ -1,3 +1,5 @@
+<img src="docs/favicon.png" width="52" height="52" alt="HDRSnip Fusion glossy Frutiger Aqua app icon">
+
 # HDRSnip Fusion · HDR Screenshot Tool for Windows
 
 **Free, open-source Windows screenshot and annotation tool with HDR and Auto HDR capture, a global hotkey, and a Frutiger Aqua-inspired interface.**
