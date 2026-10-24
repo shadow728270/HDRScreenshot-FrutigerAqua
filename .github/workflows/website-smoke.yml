@@ -77,6 +77,13 @@ jobs:
               if(await page.locator('#opacityValue').textContent()!=='66%')throw Error('Opacity control failed');
               await page.locator('#compareRange').evaluate(el=>{el.value='73';el.dispatchEvent(new Event('input',{bubbles:true}))});
               if(!String(await page.locator('#compare').getAttribute('style')).includes('73%'))throw Error('Comparison slider failed');
+              const imageBuffer=fs.readFileSync('docs/assets/hdrsnip-capture-overlay.webp');
+              await page.locator('#realConventional').setInputFiles({name:'conventional.webp',mimeType:'image/webp',buffer:imageBuffer});
+              await page.locator('#realPrismwake').setInputFiles({name:'prismwake.webp',mimeType:'image/webp',buffer:imageBuffer});
+              await page.waitForFunction(()=>document.querySelector('#compare')?.dataset.real==='true');
+              if(await page.locator('#compareLabelLeft').innerText()!=='Your conventional capture')throw Error('Real-file comparison mode failed');
+              await page.locator('#compareReset').click();
+              if(await page.locator('#compare').getAttribute('data-real')!=='false')throw Error('Comparison reset failed');
               await page.locator('[data-tool=rect]').click();
               const stage=await page.locator('#demoStage').boundingBox();
               await page.mouse.move(stage.x+stage.width*.25,stage.y+stage.height*.3);
