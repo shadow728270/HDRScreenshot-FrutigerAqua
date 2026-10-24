@@ -61,6 +61,10 @@ py HDRSnipFusion.py
 
 Builds and release automation live in [`.github/workflows/`](.github/workflows/). The legacy Python entry-point and packaged EXE names are intentionally unchanged for v0.1.2.
 
+## Upcoming v0.1.3 transition
+
+The [Prismwake v0.1.3 migration contract](docs/PRISMWAKE_V013_MIGRATION.md) documents the non-breaking app rename and how existing v0.1.2 users must continue to receive verified updates through the legacy executable asset and repository. The [automated compatibility suite](tests/test_legacy_updater_contract.py) checks the actual v0.1.2 update parser against future dual-named releases. **v0.1.3 is not published yet.**
+
 ## Releases, security and contributing
 
 Read [the current release notes](RELEASE_NOTES_v0.1.2.md), [contributing guidelines](CONTRIBUTING.md) and [security policy](SECURITY.md). Downloads should come from the official GitHub Releases page only. Inspect diagnostic logs before sharing them publicly; paths, window titles and screenshots can contain private information.
