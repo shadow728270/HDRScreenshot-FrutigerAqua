@@ -239,22 +239,61 @@
     @media(max-width:410px) { .nav-links a{font-size:.78rem;} .motion-toggle{padding:7px 9px;font-size:.74rem;} .hero {padding:30px 16px;} .btn {width:100%;} }
     @media (prefers-reduced-motion:reduce) { html{scroll-behavior:auto;} *,*::before,*::after{animation-duration:0.001ms!important; animation-iteration-count:1!important; transition-duration:0.001ms!important;} #water-light{display:none;} }
 
+
+    /* A unified, site-wide underwater atmosphere with pointer and scroll depth. */
+    body { background:transparent!important; overflow-x:hidden; isolation:isolate; }
+    body::before { opacity:.12; z-index:-1; }
+    .deep-sea { position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none;contain:strict;
+      background:linear-gradient(157deg,#062941,#085d81 36%,#074365 63%,#031c33); }
+    .deep-sea>div { position:absolute;inset:-13%;pointer-events:none; }
+    .sea-depth { background:radial-gradient(ellipse 60% 50% at 48% 2%,rgba(183,253,248,.25),transparent 75%),
+      radial-gradient(ellipse 55% 55% at 96% 38%,rgba(26,219,219,.29),transparent 82%),
+      radial-gradient(ellipse 54% 52% at 5% 80%,rgba(13,141,203,.23),transparent 89%);
+      transform:translate3d(var(--far-x,0px),var(--far-y,0px),0); }
+    .sea-rays { background:conic-gradient(from 192deg at 52% -11%,transparent 0deg,
+      rgba(153,252,254,.08) 10deg,transparent 18deg,rgba(202,255,255,.10) 26deg,transparent 34deg,
+      rgba(125,241,255,.09) 51deg,transparent 61deg,rgba(163,255,245,.10) 79deg,transparent 93deg);
+      opacity:.7;filter:blur(12px);transform:translate3d(var(--far-x,0px),var(--far-y,0px),0); }
+    .sea-glass { background:repeating-radial-gradient(ellipse 40% 44% at 32% 5%,transparent 0 52px,
+      rgba(171,255,252,.11) 56px 58px,transparent 65px 126px),
+      repeating-radial-gradient(ellipse 44% 38% at 75% 16%,transparent 0 75px,rgba(205,255,255,.08) 78px 80px,transparent 90px 164px);
+      opacity:.22;filter:blur(3px);mix-blend-mode:screen;
+      transform:translate3d(var(--mid-x,0px),var(--mid-y,0px),0);animation:sea-shimmer 28s ease-in-out infinite alternate; }
+    .sea-float { inset:0!important; transform:translate3d(var(--near-x,0px),var(--near-y,0px),0); }
+    .sea-float i { position:absolute;top:105%;height:13px;width:13px;border:1px solid rgba(222,255,254,.39);
+      border-radius:50%;background:radial-gradient(circle at 33% 27%,rgba(255,255,255,.51),transparent 35%);
+      box-shadow:inset -2px -3px 7px rgba(4,38,80,.21);opacity:0;animation:sea-rise 23s linear infinite; }
+    .sea-float i:nth-child(1){left:7%;animation-delay:-4s;width:8px;height:8px}
+    .sea-float i:nth-child(2){left:21%;animation-delay:-12s;width:21px;height:21px}
+    .sea-float i:nth-child(3){left:32%;animation-delay:-17s;width:9px;height:9px}
+    .sea-float i:nth-child(4){left:46%;animation-delay:-7s;width:16px;height:16px}
+    .sea-float i:nth-child(5){left:60%;animation-delay:-21s;width:11px;height:11px}
+    .sea-float i:nth-child(6){left:75%;animation-delay:-3s;width:22px;height:22px}
+    .sea-float i:nth-child(7){left:88%;animation-delay:-15s;width:11px;height:11px}
+    .sea-float i:nth-child(8){left:96%;animation-delay:-9s;width:6px;height:6px}
+    .wrap { max-width:1160px; }
+    .hero { margin:28px 0; padding:64px 34px; background:linear-gradient(127deg,rgba(61,175,193,.23),rgba(5,43,76,.55) 61%,rgba(44,148,176,.27));
+      border-radius:30px;border:1px solid rgba(215,255,255,.43);box-shadow:inset 0 1px rgba(255,255,255,.39),0 28px 69px rgba(0,13,43,.22); }
+    .panel { background:linear-gradient(150deg,rgba(123,224,230,.18),rgba(7,50,88,.67)); }
+    .art { transform:translate3d(var(--hero-x,0px),var(--hero-y,0px),0);transition:transform .2s ease-out; }
+    @keyframes sea-shimmer { 0%{background-position:0 0,0 0}100%{background-position:42px -28px,-34px 28px} }
+    @keyframes sea-rise { 0%{transform:translateY(28px);opacity:0}10%{opacity:.45}85%{opacity:.28}100%{transform:translate(27px,-118vh);opacity:0} }
+    @media(max-width:760px){ .hero{margin-top:15px;padding:42px 22px} .sea-glass{opacity:.14} .sea-float i:nth-child(n+5){display:none} }
+    @media(prefers-reduced-motion:reduce){ .sea-glass,.sea-float i{animation:none!important} .art{transform:none!important} }
+
   </style>
-  <link rel="stylesheet" href="water.css">
 </head>
 <body>
-  <canvas id="water-light" aria-hidden="true"></canvas>
+  <div class="deep-sea" aria-hidden="true"><div class="sea-depth"></div><div class="sea-rays"></div><div class="sea-glass"></div><div class="sea-float"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
   <div class="wrap">
     <header class="nav">
       <a class="brand" href="./" aria-label="HDRSnip Fusion home"><img class="brand-icon" src="favicon.png" width="38" height="38" alt="">HDR<span>Snip</span> Fusion</a>
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#features">Features</a>
-        <a href="#water-play">Water Lab</a>
         <a href="#screenshots">Screenshots</a>
         <a href="#download">Download</a>
         <a href="#questions">FAQ</a>
         <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub Repository ↗</a>
-        <button id="motion-toggle" class="motion-toggle" type="button" aria-label="Toggle decorative water animation" aria-pressed="true">❚❚ Pause water</button>
       </nav>
     </header>
     <main>
@@ -278,30 +317,6 @@
         </div>
       </div>
       <div class="water-separator" aria-hidden="true"></div>
-      <section id="water-play" class="water-stage" aria-labelledby="water-heading">
-        <div class="stage-heading"><div>
-          <p class="eyebrow">A little pocket of paradise</p>
-          <h2 id="water-heading">Go on. Disturb the water.</h2>
-          <p>Click, drag, or touch the surface. Watch ripples bend the light, cross one another, and fade into the lagoon.</p>
-        </div></div>
-        <div class="lagoon-shell">
-          <div class="lagoon-screen">
-            <canvas id="lagoon-canvas" role="img" aria-label="Interactive Aqua water. Click or drag to make water ripples."></canvas>
-            <span class="lagoon-rim" aria-hidden="true"></span>
-            <span class="lagoon-badge" aria-hidden="true">AQUA / WATER LAB</span>
-            <span id="lagoon-tip" class="lagoon-tip">✦ Click or drag to make ripples ✦</span>
-          </div>
-          <div class="lagoon-controls">
-            <span id="lagoon-status" class="lagoon-status" role="status" aria-live="off">Living water · raindrops enabled</span>
-            <div class="lagoon-buttons">
-              <button type="button" class="lagoon-btn is-active" id="lagoon-rain" aria-pressed="true">☁ Rain: ON</button>
-              <button type="button" class="lagoon-btn" id="lagoon-calm">◌ Clear waves</button>
-              <button type="button" class="lagoon-btn" id="lagoon-pause" aria-pressed="false">❚❚ Pause water</button>
-            </div>
-          </div>
-        </div>
-        <p class="water-footnote">Interactive water is rendered locally in your browser. No accounts, tracking, or external animation libraries.</p>
-      </section>
       <section id="features" aria-labelledby="features-title">
         <h2 id="features-title">Built for HDR screenshots, not just screen grabs.</h2>
         <p class="section-intro">A focused region-capture workflow with configurable HDR-to-SDR conversion, annotation tools, and a distinct Frutiger Aqua design.</p>
@@ -357,88 +372,34 @@
     <footer><div class="foot"><span>© HDRSnip Fusion contributors · MIT License · Independent open-source project</span><span><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub</a><a href="sitemap.xml">Sitemap</a></span></div></footer>
   </div>
 
+
+
+
   <script>
   (() => {
-    "use strict";
-    const canvas = document.getElementById("water-light");
-    const toggle = document.getElementById("motion-toggle");
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (!canvas || !toggle) return;
-    const ctx = canvas.getContext("2d", {alpha:true});
-    if (!ctx) { toggle.hidden=true; return; }
-    let userChoice = null;
-    try { const saved=localStorage.getItem("hdrsnip-site-motion"); if(saved==="on"||saved==="off") userChoice=(saved==="on"); } catch(_) {}
-    let active = userChoice === null ? !mq.matches : userChoice;
-    let raf = 0, last = 0, w = 0, h = 0, scaleX = 1, scaleY = 1;
-    let start = performance.now();
-    function sizeCanvas() {
-      w = window.innerWidth; h = window.innerHeight;
-      // Scale the effect resolution down for low CPU/GPU cost on 4K displays.
-      canvas.width = Math.max(1, Math.round(Math.min(w,1400)*0.65));
-      canvas.height = Math.max(1, Math.round(Math.min(h,900)*0.65));
-      scaleX = canvas.width / w; scaleY = canvas.height / h;
-      ctx.setTransform(scaleX,0,0,scaleY,0,0);
+    const sea=document.querySelector(".deep-sea");
+    if(!sea||matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+    const art=document.querySelector(".art");
+    let mx=0,my=0,sy=scrollY||0,x=0,y=0,z=sy,raf=0;
+    function update(){
+      raf=0;if(document.hidden)return;
+      x+=(mx-x)*.11;y+=(my-y)*.11;z+=(sy-z)*.12;
+      sea.style.setProperty("--far-x",(-x*9).toFixed(1)+"px");
+      sea.style.setProperty("--far-y",(-y*8+z*.012).toFixed(1)+"px");
+      sea.style.setProperty("--mid-x",(x*19).toFixed(1)+"px");
+      sea.style.setProperty("--mid-y",(y*19-z*.025).toFixed(1)+"px");
+      sea.style.setProperty("--near-x",(-x*28).toFixed(1)+"px");
+      sea.style.setProperty("--near-y",(-y*26+z*.04).toFixed(1)+"px");
+      if(art){art.style.setProperty("--hero-x",(x*5).toFixed(1)+"px");art.style.setProperty("--hero-y",(y*5).toFixed(1)+"px");}
+      if(Math.abs(x-mx)>.02||Math.abs(y-my)>.02||Math.abs(z-sy)>.2)request();
     }
-    function render(now) {
-      raf = 0;
-      if(!active || document.hidden) return;
-      if(now-last < 38) { raf=requestAnimationFrame(render); return; } // ~25fps cap
-      last=now;
-      const t=(now-start)/1000;
-      ctx.clearRect(0,0,w,h);
-      ctx.globalCompositeOperation="screen";
-      // Interlaced flowing caustic ribbons: subtle, not a full-screen flashing effect.
-      for(let n=0;n<21;n++) {
-        const baseY = (n+.5)*h/21;
-        const intensity=.055+.038*Math.sin(n*1.73+t*.22);
-        ctx.beginPath();
-        for(let x=-30;x<=w+30;x+=23) {
-          const ripple = Math.sin(x*.0105+n*1.4+t*.49)*13
-            + Math.sin(x*.025+n*.66-t*.8)*6
-            + Math.sin(x*.0043+n*2.2+t*.26)*15;
-          const y=baseY+ripple;
-          if(x===-30)ctx.moveTo(x,y);else ctx.lineTo(x,y);
-        }
-        ctx.strokeStyle="rgba(159,255,255,"+intensity.toFixed(3)+")";
-        ctx.lineWidth=n%4===0?2.1:.8;
-        ctx.stroke();
-      }
-      for(let n=0;n<19;n++) {
-        const x=((n*173+51)%Math.max(1,w))+Math.sin(t*.32+n*3)*35;
-        const y=((n*211+94)%Math.max(1,h))-((t*(8+(n%5)*3))%(h+140));
-        const yy=(y+h+140)%(h+140)-70;
-        const r=2+(n%4)*2;
-        ctx.beginPath(); ctx.arc(x,yy,r,0,Math.PI*2);
-        ctx.strokeStyle="rgba(204,255,255,"+(0.10+(n%3)*.05)+")";
-        ctx.lineWidth=1.1;ctx.stroke();
-        ctx.beginPath();ctx.arc(x-r*.26,yy-r*.32,Math.max(.8,r*.19),0,Math.PI*2);
-        ctx.fillStyle="rgba(255,255,255,.32)";ctx.fill();
-      }
-      ctx.globalCompositeOperation="source-over";
-      raf=requestAnimationFrame(render);
-    }
-    function updateToggle() {
-      document.documentElement.classList.toggle("motion-paused",!active);
-      toggle.textContent=active?"❚❚ Pause water":"▶ Play water";
-      toggle.setAttribute("aria-pressed",String(active));
-    }
-    function refresh() {
-      cancelAnimationFrame(raf);raf=0;updateToggle();
-      if(active && !document.hidden)raf=requestAnimationFrame(render);
-      else ctx.clearRect(0,0,w,h);
-    }
-    toggle.addEventListener("click",() => {
-      active=!active; userChoice=active;
-      try {localStorage.setItem("hdrsnip-site-motion",active?"on":"off");}catch(_){}
-      refresh();
-    });
-    window.addEventListener("resize",() => {sizeCanvas();refresh();},{passive:true});
-    document.addEventListener("visibilitychange",refresh);
-    if(typeof mq.addEventListener==="function") mq.addEventListener("change",() => {if(userChoice===null){active=!mq.matches;refresh();}});
-    sizeCanvas();refresh();
+    function request(){if(!raf&&!document.hidden)raf=requestAnimationFrame(update);}
+    addEventListener("pointermove",e=>{if(e.pointerType==="touch")return;mx=(e.clientX/innerWidth-.5)*2;my=(e.clientY/innerHeight-.5)*2;request();},{passive:true});
+    addEventListener("scroll",()=>{sy=scrollY||0;request();},{passive:true});
+    document.addEventListener("visibilitychange",()=>{if(document.hidden)cancelAnimationFrame(raf);else request();});
+    request();
   })();
   </script>
 
-  <script src="water.js" defer></script>
 </body>
 </html>
