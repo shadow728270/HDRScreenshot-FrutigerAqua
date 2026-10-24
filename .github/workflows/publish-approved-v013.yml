@@ -131,7 +131,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet 'numpy>=1.24' 'Pillow>=10'
-          gh api "repos/$REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release_metadata.json"
+          release_id=$(gh release view "$TAG" --repo "$REPO" --json databaseId --jq .databaseId)
+          gh api "repos/$REPO/releases/$release_id" > "$RUNNER_TEMP/release_metadata.json"
           python - <<'PY'
           import importlib.util, json, os, subprocess, sys, tempfile
           from pathlib import Path
@@ -139,14 +140,22 @@ jobs:
           tag=os.environ["TAG"]; repo=os.environ["REPO"]; digest=os.environ["VERIFIED_SHA256"]
           assert d["tag_name"]==tag
           assert not d["prerelease"]
-          assert d["html_url"]==f"https://github.com/{repo}/releases/tag/{tag}"
+          expected_url=f"https://github.com/{repo}/releases/tag/{tag}"
+          if d["draft"]:
+              assert d["html_url"].startswith(f"https://github.com/{repo}/releases/tag/untagged-"),d["html_url"]
+          else:
+              assert d["html_url"]==expected_url,d["html_url"]
           assets={a["name"]:a for a in d["assets"]}
           for name in ("Prismwake.exe", "HDRSnipFusion.exe"):
               a=assets[name]
               assert a["state"]=="uploaded",a
               assert a["digest"]=="sha256:"+digest,a
               assert a["size"]==Path("release-assets",name).stat().st_size
-              assert a["browser_download_url"]==f"https://github.com/{repo}/releases/download/{tag}/{name}"
+              expected_download=f"https://github.com/{repo}/releases/download/{tag}/{name}"
+              if d["draft"]:
+                  assert a["browser_download_url"].startswith(f"https://github.com/{repo}/releases/download/untagged-"),a["browser_download_url"]
+              else:
+                  assert a["browser_download_url"]==expected_download,a["browser_download_url"]
               assert name+".sha256" in assets
           src=subprocess.check_output(["git","show","v0.1.2:HDRSnipFusion.py"])
           with tempfile.TemporaryDirectory(prefix="legacy_updater_check_") as td:
@@ -154,7 +163,8 @@ jobs:
               spec=importlib.util.spec_from_file_location("frozen_v012",fp)
               mod=importlib.util.module_from_spec(spec);sys.modules["frozen_v012"]=mod
               spec.loader.exec_module(mod)
-              simulate=dict(d,draft=False)
+              simulate=dict(d,draft=False,html_url=expected_url,
+                  assets=[dict(a,browser_download_url=f"https://github.com/{repo}/releases/download/{tag}/{a['name']}") for a in d["assets"]])
               parsed=mod.parse_github_release_payload(simulate,current_version="0.1.2")
               assert parsed.status=="update_available",(parsed.status,parsed.message)
               assert parsed.asset_name=="HDRSnipFusion.exe",parsed.asset_name
@@ -173,6 +183,22 @@ jobs:
             latest=$(gh api "repos/$REPO/releases/latest" --jq .tag_name || true)
             if [ "$latest" = "$TAG" ]; then
               echo "Prismwake $TAG is the public GitHub latest release."
+              gh api "repos/$REPO/releases/latest" > "$RUNNER_TEMP/final_release.json"
+              python - <<'PY'
+              import json,os
+              from pathlib import Path
+              d=json.loads((Path(os.environ["RUNNER_TEMP"])/"final_release.json").read_text())
+              tag=os.environ["TAG"];repo=os.environ["REPO"];sha=os.environ["VERIFIED_SHA256"]
+              assert d["tag_name"]==tag and not d["draft"] and not d["prerelease"]
+              assert d["html_url"]==f"https://github.com/{repo}/releases/tag/{tag}"
+              assets={a["name"]:a for a in d["assets"]}
+              for name in ("Prismwake.exe","HDRSnipFusion.exe"):
+                  a=assets[name]
+                  assert a["digest"]=="sha256:"+sha
+                  assert a["state"]=="uploaded"
+                  assert a["browser_download_url"]==f"https://github.com/{repo}/releases/download/{tag}/{name}"
+              print("Published latest release has official asset URLs, versions and SHA-256 digests.")
+              PY
               exit 0
             fi
             sleep 3
