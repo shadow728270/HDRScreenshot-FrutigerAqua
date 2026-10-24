@@ -1,0 +1,38 @@
+name: Publish verified v0.1.2 artifact
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v012-artifact.yml'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download tested Windows build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 40069043598 --repo "$GITHUB_REPOSITORY" --name HDRSnipFusion-Windows-x64-v0.1.2 --dir release-artifacts
+          ls -la release-artifacts
+      - name: Verify executable and publish v0.1.2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -s release-artifacts/HDRSnipFusion.exe
+          test -s release-artifacts/HDRSnipFusion.exe.sha256
+          (cd release-artifacts && sha256sum --check HDRSnipFusion.exe.sha256)
+          test "$(dd if=release-artifacts/HDRSnipFusion.exe bs=1 count=2 status=none)" = "MZ"
+          grep -q '^APP_VERSION: str = "0.1.2"$' HDRSnipFusion.py
+          git fetch origin tag v0.1.2
+          gh release create v0.1.2 release-artifacts/HDRSnipFusion.exe release-artifacts/HDRSnipFusion.exe.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "HDRSnip Fusion v0.1.2 · Stroke Width & Paint Bucket" \
+            --notes-file RELEASE_NOTES_v0.1.2.md \
+            --verify-tag
+          gh release view v0.1.2 --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets,url
