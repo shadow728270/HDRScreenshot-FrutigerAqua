@@ -1,0 +1,181 @@
+name: Publish approved Prismwake v0.1.3
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-approved-v013.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prismwake-v0.1.3-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish verified v0.1.3 dual-asset release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: shadow728270/HDRScreenshot-FrutigerAqua
+      TAG: v0.1.3
+      VERIFIED_SOURCE_COMMIT: afa1a82849bd2409002a33bf3a8f549344b7e070
+      VERIFIED_SOURCE_BLOB: f7ff85d2ae9428315133d07faf60e351fc1786f2
+      VERIFIED_BUILD_RUN: "40138079555"
+      VERIFIED_SHA256: 959bc75e50ddccf0eff424b7559873c84834a8ccd2483f23047233e774bd0439
+      ALREADY_PUBLISHED: "false"
+
+    steps:
+      - name: Checkout authorized release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify source identity and successful tested Windows run
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$REPO"
+          test "$(git rev-parse "$VERIFIED_SOURCE_COMMIT:HDRSnipFusion.py")" = "$VERIFIED_SOURCE_BLOB"
+          test "$(git rev-parse HEAD:HDRSnipFusion.py)" = "$VERIFIED_SOURCE_BLOB"
+          gh run view "$VERIFIED_BUILD_RUN" --repo "$REPO" --json conclusion,headSha > "$RUNNER_TEMP/tested-run.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          info=json.loads((Path(os.environ["RUNNER_TEMP"])/"tested-run.json").read_text())
+          assert info["conclusion"]=="success",info
+          assert info["headSha"]==os.environ["VERIFIED_SOURCE_COMMIT"], info
+          print("Verified successful Windows CI run at exact uploaded source commit")
+          PY
+
+      - name: Retrieve approved executable artifacts from successful build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p downloaded release-assets
+          gh run download "$VERIFIED_BUILD_RUN" --repo "$REPO" \
+            --name "Prismwake-Windows-x64-v0.1.3" --dir downloaded
+          for filename in Prismwake.exe HDRSnipFusion.exe Prismwake.exe.sha256 HDRSnipFusion.exe.sha256; do
+            hits=$(find downloaded -type f -name "$filename" | wc -l)
+            if [ "$hits" -ne 1 ]; then
+              echo "::error::Expected exactly one artifact named $filename, found $hits"
+              exit 1
+            fi
+            cp "$(find downloaded -type f -name "$filename" -print -quit)" "release-assets/$filename"
+          done
+
+      - name: Verify Windows binaries, aliases and checksums before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum -c Prismwake.exe.sha256
+          sha256sum -c HDRSnipFusion.exe.sha256
+          test "$(sha256sum Prismwake.exe | cut -d' ' -f1)" = "$VERIFIED_SHA256"
+          cmp -s Prismwake.exe HDRSnipFusion.exe
+          python - <<'PY'
+          import struct
+          from pathlib import Path
+          for name in ("Prismwake.exe", "HDRSnipFusion.exe"):
+              path=Path(name)
+              assert 5_242_880 < path.stat().st_size < 367_001_600,(name,path.stat().st_size)
+              with path.open("rb") as f:
+                  assert f.read(2)==b"MZ",name
+                  f.seek(0x3c)
+                  pe_off=struct.unpack("<I",f.read(4))[0]
+                  f.seek(pe_off)
+                  assert f.read(4)==b"PE\0\0",name
+                  assert struct.unpack("<H",f.read(2))[0]==0x8664,name
+          print("PE x64 headers, checksums, and byte-identical executable aliases verified.")
+          PY
+
+      - name: Create stable tag at the exact tested source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            test "$(git rev-parse "$TAG^{}")" = "$VERIFIED_SOURCE_COMMIT" || {
+              echo "::error::Existing tag points to a different commit. Refusing to overwrite."
+              exit 1
+            }
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG" "$VERIFIED_SOURCE_COMMIT"
+            git push origin "refs/tags/$TAG"
+          fi
+
+      - name: Create a draft release with both tested binary aliases
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" --json isDraft >/dev/null 2>&1; then
+            draft=$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft)
+            if [ "$draft" != "true" ]; then
+              echo "Already published; will verify without replacing release assets."
+              echo "ALREADY_PUBLISHED=true" >> "$GITHUB_ENV"
+            else
+              gh release upload "$TAG" release-assets/* --repo "$REPO" --clobber
+            fi
+          else
+            gh release create "$TAG" release-assets/* \
+              --repo "$REPO" --title "Prismwake v0.1.3" \
+              --notes-file RELEASE_NOTES_v0.1.3.md --draft --verify-tag
+          fi
+
+      - name: Verify uploaded asset hashes and compatibility with shipped v0.1.2 updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'numpy>=1.24' 'Pillow>=10'
+          gh api "repos/$REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release_metadata.json"
+          python - <<'PY'
+          import importlib.util, json, os, subprocess, sys, tempfile
+          from pathlib import Path
+          d=json.loads((Path(os.environ["RUNNER_TEMP"])/"release_metadata.json").read_text())
+          tag=os.environ["TAG"]; repo=os.environ["REPO"]; digest=os.environ["VERIFIED_SHA256"]
+          assert d["tag_name"]==tag
+          assert not d["prerelease"]
+          assert d["html_url"]==f"https://github.com/{repo}/releases/tag/{tag}"
+          assets={a["name"]:a for a in d["assets"]}
+          for name in ("Prismwake.exe", "HDRSnipFusion.exe"):
+              a=assets[name]
+              assert a["state"]=="uploaded",a
+              assert a["digest"]=="sha256:"+digest,a
+              assert a["size"]==Path("release-assets",name).stat().st_size
+              assert a["browser_download_url"]==f"https://github.com/{repo}/releases/download/{tag}/{name}"
+              assert name+".sha256" in assets
+          src=subprocess.check_output(["git","show","v0.1.2:HDRSnipFusion.py"])
+          with tempfile.TemporaryDirectory(prefix="legacy_updater_check_") as td:
+              fp=Path(td)/"original_v012.py";fp.write_bytes(src)
+              spec=importlib.util.spec_from_file_location("frozen_v012",fp)
+              mod=importlib.util.module_from_spec(spec);sys.modules["frozen_v012"]=mod
+              spec.loader.exec_module(mod)
+              simulate=dict(d,draft=False)
+              parsed=mod.parse_github_release_payload(simulate,current_version="0.1.2")
+              assert parsed.status=="update_available",(parsed.status,parsed.message)
+              assert parsed.asset_name=="HDRSnipFusion.exe",parsed.asset_name
+              assert parsed.expected_sha256==digest,parsed.expected_sha256
+          print("Live release metadata accepted by frozen v0.1.2 updater after simulated publication.")
+          PY
+
+      - name: Make verified release public and mark latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$ALREADY_PUBLISHED" != "true" ]; then
+            gh release edit "$TAG" --repo "$REPO" --draft=false --latest
+          fi
+          for attempt in 1 2 3 4 5; do
+            latest=$(gh api "repos/$REPO/releases/latest" --jq .tag_name || true)
+            if [ "$latest" = "$TAG" ]; then
+              echo "Prismwake $TAG is the public GitHub latest release."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Latest stable release has not updated to $TAG"
+          exit 1
