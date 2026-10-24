@@ -85,3 +85,9 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer}img{max-width:10
 /* Keep visual layers, text and controls inside their grid tracks on all viewports. */
 .hero>* , .lab-card, .feature, .roadmap-entry, .compare-uploads>label, .download-panel>* {min-width:0}
 .compare-uploads input {min-width:0}
+
+/* Refined wordmark and more intentional two-line hero rhythm. */
+.brand .brandword{display:inline-block;color:#fff;letter-spacing:-.06em}.brand .brandword b{color:#c6fff3}
+.hero h1{margin-bottom:6px}
+.hero .hero-promise{font-size:clamp(1.85rem,3.1vw,2.8rem);font-weight:900;line-height:1.18;letter-spacing:-.058em;color:#c8fff5;margin:0 0 24px}
+@media(max-width:640px){.hero .hero-promise{font-size:clamp(1.7rem,7vw,2.3rem);margin-bottom:21px}}
