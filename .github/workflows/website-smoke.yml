@@ -92,13 +92,9 @@ jobs:
               if(await page.locator('#opacityValue').textContent()!=='66%')throw Error('Opacity control failed');
               await page.locator('#compareRange').evaluate(el=>{el.value='73';el.dispatchEvent(new Event('input',{bubbles:true}))});
               if(!String(await page.locator('#compare').getAttribute('style')).includes('73%'))throw Error('Comparison slider failed');
-              const imageBuffer=fs.readFileSync('docs/assets/hdrsnip-capture-overlay.webp');
-              await page.locator('#realConventional').setInputFiles({name:'conventional.webp',mimeType:'image/webp',buffer:imageBuffer});
-              await page.locator('#realPrismwake').setInputFiles({name:'prismwake.webp',mimeType:'image/webp',buffer:imageBuffer});
-              await page.waitForFunction(()=>document.querySelector('#compare')?.dataset.real==='true');
-              if(await page.locator('#compareLabelLeft').innerText()!=='Your conventional capture')throw Error('Real-file comparison mode failed');
+              if(await page.locator('input[type=file]').count()!==0)throw Error('Screenshot upload UI has returned');
               await page.locator('#compareReset').click();
-              if(await page.locator('#compare').getAttribute('data-real')!=='false')throw Error('Comparison reset failed');
+              if(await page.locator('#compare').evaluate(el=>parseFloat(el.style.getPropertyValue('--split')))!==50)throw Error('Comparison reset failed');
               await page.locator('[data-tool=rect]').click();
               const stage=await page.locator('#demoStage').boundingBox();
               await page.mouse.move(stage.x+stage.width*.25,stage.y+stage.height*.3);
@@ -106,6 +102,30 @@ jobs:
               if(await page.locator('#demoSvg > rect').count()<2)throw Error('Demo shape drawing failed');
               await page.locator('#demoUndo').click();
               if(await page.locator('#demoSvg > rect').count()!==1)throw Error('Undo failed');
+              await page.locator('[data-tool=fill]').click();
+              if(await page.locator('#demoFillSettings').isHidden())throw Error('Fill controls not visible when tool selected');
+              await page.locator('#demoFillTolerance').evaluate(el=>{el.value='64';el.dispatchEvent(new Event('input',{bubbles:true}))});
+              if(await page.locator('#demoToleranceValue').innerText()!=='64')throw Error('Fill tolerance display failed');
+              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.27),y:Math.round(stage.height*.22)}});
+              if(await page.locator('#demoSvg > image').count()!==1)throw Error('Paint Bucket did not create a raster flood-fill mask');
+              if(await page.locator('#demoSvg > ellipse').count()!==0)throw Error('Paint Bucket still draws an ellipse instead of a region fill');
+              const fillMask=await page.locator('#demoSvg > image').getAttribute('href');
+              if(!fillMask?.startsWith('data:image/png;base64,'))throw Error('Paint Bucket mask is not an inline transparent PNG');
+              const pixelStats=await page.evaluate(async()=>{
+                const href=document.querySelector('#demoSvg > image').getAttribute('href');
+                const bitmap=await createImageBitmap(await (await fetch(href)).blob());
+                const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+                const c=canvas.getContext('2d');c.drawImage(bitmap,0,0);
+                const raw=c.getImageData(0,0,canvas.width,canvas.height).data;
+                let painted=0,transparent=0;
+                for(let i=3;i<raw.length;i+=4){if(raw[i])painted++;else transparent++}
+                bitmap.close();return{painted,transparent};
+              });
+              if(pixelStats.painted<20||pixelStats.transparent<20)throw Error('Flood-fill region mask invalid '+JSON.stringify(pixelStats));
+              await page.locator('#demoUndo').click();
+              if(await page.locator('#demoSvg > image').count()!==0)throw Error('Undo did not remove Paint Bucket flood-fill');
+              await page.locator('[data-tool=select]').click();
+              if(!(await page.locator('#demoFillSettings').isHidden()))throw Error('Fill controls remain visible after selecting another tool');
               await page.locator('#refreshReleases').click();
               await page.waitForTimeout(200);
               if(!(await page.locator('#releaseList').innerText()).includes('v0.1.2'))throw Error('Live release list missing');
