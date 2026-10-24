@@ -146,7 +146,7 @@
             </div>
             <div class="demo-fill-settings" id="demoFillSettings" hidden>
               <label for="demoFillTolerance">Tolerance <output id="demoToleranceValue" for="demoFillTolerance">48</output></label>
-              <input id="demoFillTolerance" type="range" min="0" max="120" value="48" aria-label="Paint Bucket color tolerance">
+              <input id="demoFillTolerance" type="range" min="0" max="255" value="48" aria-label="Paint Bucket color tolerance">
               <label for="demoFillColor">Color</label><input id="demoFillColor" type="color" value="#35f2c8" aria-label="Paint Bucket fill color">
             </div>
             <div class="demo-stage" id="demoStage" aria-label="Interactive capture editor demo; use the toolbar then drag or tap inside">
@@ -154,7 +154,7 @@
               <svg id="demoSvg" class="demo-svg" viewBox="0 0 1000 615" preserveAspectRatio="none" aria-hidden="true"></svg>
               <span class="demo-hint" id="demoHint">Drag to choose a capture region</span>
             </div>
-            <p class="demo-note">Paint Bucket uses contiguous pixel-color matching, with adjustable tolerance and undo. The image stays local, and no screenshots are uploaded.</p>
+            <p class="demo-note">All tools stay inside your selection. Paint Bucket recognizes drawn outlines as boundaries, fills connected pixels and supports undo. Nothing is uploaded.</p>
           </article>
           <article class="lab-card" aria-labelledby="theme-title">
             <span class="lab-label">03 / CUSTOMIZE</span>
