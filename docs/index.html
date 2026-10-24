@@ -147,9 +147,30 @@ section{scroll-margin-top:125px}
 @media(max-width:760px){.nav{top:3px;padding:11px 14px;border-radius:17px}.hero{min-height:0;padding:34px 20px;grid-template-columns:1fr}.hero .art{max-width:310px;margin:18px auto 0;transform:none}.step{padding:18px}}
 @media(prefers-reduced-motion:reduce){.aqua-depth>i,.orb{animation:none!important}.art{transform:none!important}}
 
+
+
+  /* Whole-page transparent water surface: no standalone interactive playground. */
+  #aqua-caustic-canvas {position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.67;mix-blend-mode:screen;filter:blur(.65px)}
+  .aqua-depth{z-index:0!important;opacity:.92}
+  .wrap{z-index:2}
+  body{background:linear-gradient(163deg,#039dc0 0%,#07779f 22%,#074c7c 63%,#031d49 100%)!important}
+  .aqua-depth .sky{animation:waterSunPulse 17s ease-in-out infinite alternate}
+  .aqua-depth .waves{animation:aquaTide 13s ease-in-out infinite alternate}
+  .aqua-depth .caustics{animation:causticShift 17s ease-in-out infinite alternate}
+  .hero, .nav, .panel, figure.shot, .callout,.step{position:relative;isolation:isolate}
+  .hero::before,.panel::before,figure.shot::before,.nav::before{
+    content:"";position:absolute;inset:1px;pointer-events:none;border-radius:inherit;
+    background:linear-gradient(128deg,rgba(255,255,255,.15),transparent 27%,transparent 75%,rgba(135,255,253,.09));
+    mask-image:linear-gradient(to bottom,black,transparent 85%);z-index:-1
+  }
+  @keyframes waterSunPulse{from{filter:brightness(.97) saturate(1)}to{filter:brightness(1.2) saturate(1.17)}}
+  @media(prefers-reduced-motion:reduce){#aqua-caustic-canvas{display:none}.aqua-depth .sky{animation:none}}
+  @media(max-width:760px){#aqua-caustic-canvas{opacity:.36}}
+
   </style>
 </head>
 <body>
+  <canvas id="aqua-caustic-canvas" aria-hidden="true"></canvas>
   <div class="aqua-depth" aria-hidden="true"><i class="sky"></i><i class="sunshafts"></i><i class="waves"></i><i class="caustics"></i><i class="sparkles"></i></div>
   <div class="wrap">
     <header class="nav">
@@ -172,7 +193,7 @@ section{scroll-margin-top:125px}
             <a class="btn primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe">↓ Download for Windows</a>
             <a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua" aria-label="View the official HDRSnip Fusion open-source GitHub repository">★ View on GitHub ↗</a>
           </div>
-          <p class="micro">v0.1.1 · 64-bit Windows EXE · No Python installation required · MIT License</p>
+          <p class="micro">v0.1.2 · 64-bit Windows EXE · No Python installation required · MIT License</p>
           <p class="micro">Official open-source GitHub repository: <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">shadow728270/HDRScreenshot-FrutigerAqua</a> · <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">Releases &amp; changelog</a></p>
         </div>
         <div class="art" aria-hidden="true">
@@ -248,6 +269,64 @@ window.addEventListener("resize",schedule,{passive:true});
 document.addEventListener("visibilitychange",schedule);
 if(reduced.addEventListener)reduced.addEventListener("change",schedule);
 schedule();
+})();
+</script>
+
+<script>
+/* Ambient refracting water caustics across the entire page, never an extra feature panel.
+   Mouse movement and scrolling affect flow; pointer taps create brief optical ripples. */
+(()=>{"use strict";
+ const canvas=document.getElementById("aqua-caustic-canvas"),ctx=canvas?.getContext("2d",{alpha:true});
+ if(!ctx)return;
+ const reduced=matchMedia("(prefers-reduced-motion: reduce)");
+ let w=0,h=0,dpr=1,px=.5,py=.5,scroll=0,phase=0,last=0,raf=0;
+ const ripples=[],strokes=[];
+ function resize(){
+   dpr=Math.min(devicePixelRatio||1,1.5);
+   w=innerWidth;h=innerHeight;
+   canvas.width=Math.ceil(w*dpr);canvas.height=Math.ceil(h*dpr);
+   ctx.setTransform(dpr,0,0,dpr,0,0);
+   strokes.length=0;
+   const step=Math.max(56,Math.min(100,w/13));
+   for(let y=-step;y<h+step*2;y+=step)for(let x=-step;x<w+step*2;x+=step){
+     const seed=Math.sin(x*.043+y*.061)*43758.5453, f=seed-Math.floor(seed);
+     strokes.push({x,y,seed:f,width:step*(.65+f*.7)});
+   }
+ }
+ function render(t){
+   raf=requestAnimationFrame(render);
+   if(reduced.matches||document.hidden||t-last<40)return;
+   last=t;phase+=.013;
+   ctx.clearRect(0,0,w,h);
+   ctx.lineCap="round";ctx.globalCompositeOperation="screen";
+   const mx=(px-.5)*20,my=(py-.5)*16;
+   for(const p of strokes){
+     const q=phase+p.seed*6.283;
+     const x=p.x+Math.sin(q*.78+p.y*.015)*22+mx*(.3+p.seed);
+     const y=p.y+Math.cos(q*.62+p.x*.017)*16+my*.65-scroll*.025;
+     const a=.038+.063*(.5+.5*Math.sin(q*1.3));
+     ctx.strokeStyle="rgba(210,255,254,"+a.toFixed(3)+")";
+     ctx.lineWidth=.9+p.seed*1.25;
+     ctx.shadowBlur=10;ctx.shadowColor="rgba(90,250,250,.19)";
+     ctx.beginPath();ctx.moveTo(x-p.width*.56,y-7);
+     ctx.bezierCurveTo(x-p.width*.08,y-27,x+p.width*.16,y+22,x+p.width*.55,y+2);ctx.stroke();
+     ctx.beginPath();ctx.ellipse(x+18,y+5,p.width*.42,10+7*p.seed,q*.07,0,Math.PI*.88);ctx.stroke();
+   }
+   ctx.shadowBlur=0;
+   for(let i=ripples.length-1;i>=0;i--){
+     let p=ripples[i],life=(t-p.t)/1250;
+     if(life>=1){ripples.splice(i,1);continue}
+     const r=18+life*165;
+     ctx.lineWidth=1.6*(1-life);
+     ctx.strokeStyle="rgba(222,255,255,"+(.3*(1-life)).toFixed(3)+")";
+     ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
+   }
+ }
+ window.addEventListener("pointermove",e=>{px=e.clientX/Math.max(w,1);py=e.clientY/Math.max(h,1)},{passive:true});
+ window.addEventListener("pointerdown",e=>{if(!reduced.matches){ripples.push({x:e.clientX,y:e.clientY,t:performance.now()});if(ripples.length>8)ripples.shift()}},{passive:true});
+ window.addEventListener("scroll",()=>{scroll=window.scrollY},{passive:true});
+ window.addEventListener("resize",resize,{passive:true});
+ resize();raf=requestAnimationFrame(render);
 })();
 </script>
 </body>
