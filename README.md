@@ -1,121 +1,68 @@
-<img src="docs/favicon.png" width="52" height="52" alt="HDRSnip Fusion glossy Frutiger Aqua app icon">
+<p align="center"><img src="docs/assets/prismwake-mark.svg" width="104" alt="Prismwake logo"></p>
 
-# HDRSnip Fusion · HDR Screenshot Tool for Windows
+<h1 align="center">PRISMWAKE</h1>
+<p align="center"><strong>Catch the light. Keep the detail.</strong></p>
+<p align="center">A free, open-source Windows screenshot utility with HDR-aware capture, annotation tools, and a wonderfully glossy Frutiger Aqua spirit.</p>
 
-**Free, open-source Windows screenshot and annotation tool with HDR and Auto HDR capture, a global hotkey, and a Frutiger Aqua-inspired interface.**
+<p align="center">
+  <a href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">🌊 Explore the website</a> ·
+  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe">⬇ Download the Windows EXE</a> ·
+  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">Releases</a> ·
+  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Issues</a>
+</p>
 
-[**⬇ Download for Windows (v0.1.2)**](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe) · [Releases](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases) · [Project website](https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/) · [Report an issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues)
+> **Rebrand in progress:** Prismwake is the project's new website and documentation identity. The latest stable desktop release is still **v0.1.2**, distributed as `HDRSnipFusion.exe` and branded with its previous name internally. Keeping the existing binary name, API repository address and user data paths preserves compatibility with installations and update checking. A coordinated desktop-app rename will follow separately. Historical Git tags and releases remain unchanged.
 
-**Windows 10 / 11 · 64-bit · MIT licensed · No Python required for the EXE**
+## See it in action
 
-HDRSnip Fusion is designed for people who want to capture a selected area of their Windows screen, including HDR or Windows Auto HDR content, without relying solely on an ordinary SDR screen grab. It captures through **DXGI Desktop Duplication**, maps HDR screen data for viewable PNG output, and provides a lightweight screenshot editor and tray hotkey.
+<img src="docs/assets/hdrsnip-capture-overlay.webp" alt="Real Aqua screenshot editor captured before the Prismwake desktop rebrand" width="850">
 
-## Screenshots
+<img src="docs/assets/hdrsnip-settings.webp" alt="Real legacy Aqua settings dialog; desktop rebrand forthcoming" width="370">
 
-### HDR screenshot selection and annotation
+The screenshots above are real captures of the current Windows application, not mockups of a future UI.
 
-![HDRSnip Fusion screenshot overlay with a selectable HDR region, annotation tools, and Frutiger Aqua floating toolbar](docs/assets/hdrsnip-capture-overlay.webp)
+## What the desktop app can do
 
-*HDR-aware region selection with the translucent Aqua toolbar, annotation controls, and a draggable selection frame.*
+- **HDR-aware region screenshots.** Uses DXGI Desktop Duplication to read scRGB framebuffer data and tone-map it for shareable SDR PNG exports. True HDR file exports aren't implemented yet.
+- **Annotation tools.** Pen, rectangles, ellipses, lines, arrows, text, adjustable **1–40 px** stroke widths, and a non-destructive **Paint Bucket** (v0.1.2).
+- **Capture workflow.** Move and resize the capture region, undo/redo annotations, copy to clipboard, save or quick-save to a configurable folder.
+- **Desktop integration.** Configurable global capture hotkey, Windows tray icon, single-instance guard, optional start with Windows, per-monitor/DPI awareness and diagnostic logging.
+- **Updater.** Optional GitHub Releases update checking with download verification, staged replacement and rollback safety.
+- **Aqua interface.** Refraction-inspired glass styling, animation intensity and transparency controls.
 
-### Frutiger Aqua Settings
+**Known limits:** Actual fullscreen behavior depends on the game, driver and presentation mode. Borderless fullscreen is generally safer. The EXE is unsigned, so Windows SmartScreen may show a warning.
 
-<img src="docs/assets/hdrsnip-settings.webp" width="420" alt="HDRSnip Fusion translucent settings window showing capture hotkey, animation and glass settings, HDR tone mapping and diagnostics">
+## Try the new website lab
 
-*Settings for capture, liquid-glass animation, HDR tone mapping, and diagnostics. This example shows a user-configured `Ctrl+X` shortcut; **the built-in default for new installations is `Ctrl+Shift+X`**.*
+The <a href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/#playground">Prismwake Lab</a> contains four lightweight, browser-side experiences:
 
-## Features
+1. **HDR comparison:** drag a split slider over a clearly labeled simulation, or load two real screenshot files for a genuine local side-by-side comparison. No files are uploaded.
+2. **Interactive editor demo:** select a region, use drawing tools, fill, add labels and undo. This is a browser sandbox, not an in-browser screen-capture engine.
+3. **Aqua theme preview:** try Ocean, Emerald, Coral, or Vista themes plus transparency and motion preferences. These are **concept previews**, not yet desktop app settings.
+4. **Live release history and roadmap:** recent published releases load from the GitHub API where available. Upcoming ideas are labeled as ideas, not committed shipping dates.
 
-- **HDR-aware screenshots:** DXGI Desktop Duplication with scRGB capture and adjustable HDR-to-SDR tone mapping for HDR, Auto HDR, and SDR displays.
-- **Region selection & annotation:** select or resize a capture region; use pen, rectangle, ellipse, line, arrow, and text tools.
-- **One-click saving (v0.1.1):** choose a default screenshot folder in Settings, then save PNGs with the green Save button or Ctrl+S. Ctrl+Alt+S opens Save As.
-- **Built-in update checks (v0.1.1):** check GitHub Releases for newer stable versions, verify downloaded updates, and install with confirmation. Automatic checks are enabled by default.
-- **Save or copy:** save PNG screenshots or send captures to the Windows clipboard.
-- **Windows global hotkey:** press **Ctrl + Shift + X** by default; customize the shortcut in Settings.
-- **Multi-monitor & DPI awareness:** designed to target the display under your cursor, including different display scales.
-- **Frutiger Aqua aesthetic:** translucent glass, moving water caustics, glossy jelly buttons, and adjustable animation intensity.
-- **System tray workflow:** keep it running in the notification area and optionally launch when signing into Windows.
-- **Diagnostics & safety controls:** optional diagnostic logging and Safe Mode settings for troubleshooting.
+The website intentionally avoids permanent canvas animations and expensive full-page blur effects.
 
-> **Current version: v0.1.1.** This release adds configurable one-click saving and GitHub update checks. The EXE is still **unsigned**, so Windows SmartScreen may display a warning. Download from the [official Releases page](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases). [Read the v0.1.1 changelog](RELEASE_NOTES_v0.1.1.md).
+## Installation
 
-## Download and use
+1. Download [the latest stable executable](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe).
+2. Run it on 64-bit Windows 10/11. No Python installation is required.
+3. Find its tray icon and use **Ctrl + Shift + X** by default. A previously saved hotkey may override this.
+4. Choose your screenshot folder under Settings. Save with **Ctrl+S**, quick-save and copy with **Ctrl+Shift+S**, or open Save As with **Ctrl+Alt+S**.
 
-1. Visit [the latest GitHub Release](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest).
-2. Download **HDRSnipFusion.exe** from **Assets**. No installer or Python installation is required.
-3. Open the EXE. Find HDRSnip Fusion in the system tray or hidden notification icons.
-4. Press **Ctrl + Shift + X**, select a region, and annotate, copy, or save the screenshot.
+## Running from source
 
-If the hotkey doesn't work, another app may be using it. Open the tray icon's **Settings** and choose a different shortcut.
-
-**Note about saved preferences:** previously saved settings in `%APPDATA%\HDRSnip Fusion\config.json` can override the default hotkey.
-
-### Requirements
-
-- Windows 10 or Windows 11, 64-bit.
-- A compatible graphics/display setup for DXGI capture. HDR results vary with the GPU driver, game, display, and Windows HDR settings.
-- The executable is built with Python, PyQt6, NumPy, Pillow, and PyInstaller; those dependencies are bundled into the EXE.
-
-## What makes it different?
-
-**HDR and Auto HDR screenshots:** conventional SDR capture can make bright HDR scenes appear washed out or clip highlights. HDRSnip Fusion uses a GPU-framebuffer capture path and configurable tone mapping to produce viewable captures. Output is a **tone-mapped SDR PNG**, not an HDR image file.
-
-**Aqua-style screenshot workflow:** the capture overlay includes animated water and glass-inspired controls, while remaining customizable.
-
-**Local and open source:** the screenshot processing runs on your PC. The program's Python source is available for inspection under the MIT License.
-
-## Run from Python (developers)
+Python 3.10+ on Windows:
 
 ```powershell
 py -m pip install -r requirements.txt
 py HDRSnipFusion.py
 ```
 
-**Build a single Windows EXE:**
+Builds and release automation live in [`.github/workflows/`](.github/workflows/). The legacy Python entry-point and packaged EXE names are intentionally unchanged for v0.1.2.
 
-```powershell
-py -m pip install pyinstaller
-py -m PyInstaller --onefile --windowed --clean --noconfirm --name "HDRSnipFusion" HDRSnipFusion.py
-```
+## Releases, security and contributing
 
-Find the executable at `dist\HDRSnipFusion.exe`. GitHub Actions also builds a Windows executable from commits to `main`.
+Read [the current release notes](RELEASE_NOTES_v0.1.2.md), [contributing guidelines](CONTRIBUTING.md) and [security policy](SECURITY.md). Downloads should come from the official GitHub Releases page only. Inspect diagnostic logs before sharing them publicly; paths, window titles and screenshots can contain private information.
 
-## Frequently asked questions
-
-<details>
-<summary><strong>Can it capture screenshots of HDR games or Windows Auto HDR?</strong></summary>
-
-It is designed to capture HDR/Auto HDR desktop content using DXGI Desktop Duplication and tone-map it into a standard PNG. Results can depend on game presentation mode, display settings, drivers, and Windows.
-</details>
-
-<details>
-<summary><strong>Do I need Python to use it?</strong></summary>
-
-No. Download the compiled Windows EXE from the latest release. Python is only needed to run or build from source.
-</details>
-
-<details>
-<summary><strong>Is it free, and can I modify it?</strong></summary>
-
-Yes. The project is free to use, and its source is provided under the [MIT License](LICENSE).
-</details>
-
-<details>
-<summary><strong>Why doesn't Ctrl + Shift + X trigger a screenshot?</strong></summary>
-
-Check the tray icon for errors, whether another application registered the shortcut, and your saved shortcut under Settings. A previously saved `config.json` may override the built-in default.
-</details>
-
-<details>
-<summary><strong>Where are my screenshots and diagnostics stored?</strong></summary>
-
-The default save folder is `Pictures\HDRSnip Fusion` under your Windows user profile. Diagnostic logs, when enabled, are written under `%APPDATA%\HDRSnip Fusion`.
-</details>
-
-## Feedback and contributions
-
-Found a bug or have a feature idea? [Open an issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues). Include the Windows version, GPU, driver version, and reproduction steps when relevant. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
-
-[MIT](LICENSE). HDRSnip Fusion is an independent project and is not affiliated with Microsoft, AMD, or other third-party brands.
+Prismwake is an independent project distributed under the [MIT License](LICENSE).
