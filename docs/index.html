@@ -119,8 +119,8 @@
             <h3 id="compare-title">See the difference.</h3>
             <p>Drag the divider, or load two screenshots of the same scene for a genuine, side-by-side HDR comparison.</p>
             <div class="compare" id="compare" data-real="false" tabindex="0" role="group" aria-label="Comparison preview. Drag, or use the comparison slider below." style="--split:50%">
-              <img id="compareRight" src="assets/hdrsnip-capture-overlay.webp" alt="Actual Aqua capture interface screenshot showing original image" width="1600" height="757">
-              <div class="compare-top"><img id="compareLeft" src="assets/hdrsnip-capture-overlay.webp" alt="" width="1600" height="757"></div>
+              <img id="compareRight" draggable="false" src="assets/hdrsnip-capture-overlay.webp" alt="Actual Aqua capture interface screenshot showing original image" width="1600" height="757">
+              <div class="compare-top"><img id="compareLeft" draggable="false" src="assets/hdrsnip-capture-overlay.webp" alt="" width="1600" height="757"></div>
               <span class="compare-badge left" id="compareLabelLeft">Simulated blown-out capture</span>
               <span class="compare-badge right" id="compareLabelRight">Original Prismwake-era capture</span>
               <span class="compare-line" aria-hidden="true"></span>
@@ -149,7 +149,7 @@
               <button type="button" class="tool" id="demoReset">Reset</button>
             </div>
             <div class="demo-stage" id="demoStage" aria-label="Interactive capture editor demo; use the toolbar then drag or tap inside">
-              <img src="assets/hdrsnip-capture-overlay.webp" alt="Real editor screenshot, used as a backdrop for the simulated capture controls" width="1600" height="757" draggable="false">
+              <img src="assets/demo-landscape.webp" alt="Clear Frutiger Aqua waterscape with grass, sparkling water, clouds, bubbles and colorful glass architecture, used as the interactive editor canvas" width="750" height="408" draggable="false">
               <svg id="demoSvg" class="demo-svg" viewBox="0 0 1000 615" preserveAspectRatio="none" aria-hidden="true"></svg>
               <span class="demo-hint" id="demoHint">Drag to choose a capture region</span>
             </div>
@@ -159,7 +159,7 @@
             <span class="lab-label">03 / CUSTOMIZE</span>
             <h3 id="theme-title">Choose your Aqua.</h3>
             <p>Preview an interface palette, adjust glass opacity, and select a small animation level. Themes are concepts for a future app release.</p>
-            <div class="theme-preview" id="themePreview" data-theme="ocean" data-motion="off">
+            <div class="theme-preview" id="themePreview" data-theme="ocean">
               <div class="theme-window">
                 <div class="theme-window-title"><span id="themeName">Ocean Current</span> · Prismwake</div>
                 <p>Capture the light. Shape the moment.</p>
@@ -174,8 +174,8 @@
               <button type="button" class="theme-button" data-theme-choice="vista" aria-pressed="false">Vista</button>
             </div>
             <div class="theme-adjust"><label for="themeOpacity">Glass opacity: <span id="opacityValue">92%</span></label><input id="themeOpacity" type="range" min="30" max="100" value="92"></div>
-            <div class="theme-adjust"><label for="themeMotion">Animation preview</label><select id="themeMotion"><option value="off" selected>Off (fastest)</option><option value="subtle">Subtle</option><option value="medium">Medium</option><option value="high">High</option></select></div>
-            <p class="theme-warning">These previews change only this demo, not the downloadable v0.1.2 application.</p>
+            
+            <p class="theme-warning">Palette and glass settings are previews only and do not change the v0.1.2 desktop app.</p>
           </article>
           <article class="lab-card" id="roadmap" aria-labelledby="roadmap-title">
             <span class="lab-label">04 / FOLLOW ALONG</span>
