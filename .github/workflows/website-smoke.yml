@@ -96,6 +96,7 @@ jobs:
               await page.locator('#compareReset').click();
               if(await page.locator('#compare').evaluate(el=>parseFloat(el.style.getPropertyValue('--split')))!==50)throw Error('Comparison reset failed');
               await page.locator('[data-tool=rect]').click();
+              await page.locator('#demoStage').scrollIntoViewIfNeeded();
               const stage=await page.locator('#demoStage').boundingBox();
               await page.mouse.move(stage.x+stage.width*.25,stage.y+stage.height*.3);
               await page.mouse.down();await page.mouse.move(stage.x+stage.width*.7,stage.y+stage.height*.65,{steps:4});await page.mouse.up();
