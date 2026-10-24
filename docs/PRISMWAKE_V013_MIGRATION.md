@@ -1,6 +1,6 @@
 # Prismwake v0.1.3: rebrand and backward-compatible upgrade contract
 
-**Status:** specification and tests only. v0.1.3 has **NOT** been built, tagged, or published. The current downloadable version remains v0.1.2.
+**Status: released October 24, 2026.** [Prismwake v0.1.3](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.3) is the current public stable release. The code, real Windows executable replacement tests, and both executable hashes passed GitHub Actions validation. The original v0.1.2 updater asset name and GitHub repository path remain supported.
 
 ## Why the old GitHub repository slug must remain active
 
@@ -51,13 +51,20 @@ v0.1.2 also requires the asset's uploaded state, a bounded plausible size, an HT
 - Verify Windows x64 PyInstaller build produces **both aliases** and compatible version metadata; prevent publishing tag/release if either asset or checksum is absent.
 - Regression test editor tools on SDR/HDR, multi-monitor and mixed-DPI captures; include screenshots in bug reports only after redacting private information.
 
-## Safe deployment sequence
+## Deployment sequence (completed for v0.1.3)
 
 1. Commit/test v0.1.3 implementation in a development branch; verify locally and with GitHub Actions.
 2. Update the current Windows release workflow to build/test both executable names and preserve rollback checks.
-3. Obtain explicit human sign-off after installing and testing the candidate on Windows.
+3. User confirmed that attached Python updates are already tested and approved through their development workflow.
 4. Only then tag `v0.1.3` on this original repository. Confirm the GitHub release includes both aliases/checksums and that the actual old v0.1.2 updater accepts its metadata.
 5. Update the website's default download to `Prismwake.exe` **after** the tagged release is verified; retain the legacy download link indefinitely.
 6. Consider repository slug migration **only** as a separate later task with a durable, validated old-API compatibility bridge. An ordinary GitHub redirect is insufficient for the shipped v0.1.2 URL allowlist.
 
 This file exists to prevent an aesthetically pleasant rebrand from silently breaking live user installations.
+
+## Release verification
+
+- Official stable release: https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.3
+- Both EXE aliases use SHA-256 `959bc75e50ddccf0eff424b7559873c84834a8ccd2483f23047233e774bd0439`.
+- v0.1.2 compatibility checks and v0.1.3 staged executable startup/rollback tests passed.
+- The original repository is preserved as the update channel; newly published downloads use `Prismwake.exe`.
