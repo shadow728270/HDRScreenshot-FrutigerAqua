@@ -1,4 +1,4 @@
-# Contributing to HDRSnip Fusion
+# Contributing to Prismwake
 
 Thanks for helping improve this free Windows screenshot tool.
 
