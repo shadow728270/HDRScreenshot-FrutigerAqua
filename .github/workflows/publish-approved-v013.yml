@@ -179,29 +179,32 @@ jobs:
           if [ "$ALREADY_PUBLISHED" != "true" ]; then
             gh release edit "$TAG" --repo "$REPO" --draft=false --latest
           fi
+          found=false
           for attempt in 1 2 3 4 5; do
             latest=$(gh api "repos/$REPO/releases/latest" --jq .tag_name || true)
             if [ "$latest" = "$TAG" ]; then
-              echo "Prismwake $TAG is the public GitHub latest release."
-              gh api "repos/$REPO/releases/latest" > "$RUNNER_TEMP/final_release.json"
-              python - <<'PY'
-              import json,os
-              from pathlib import Path
-              d=json.loads((Path(os.environ["RUNNER_TEMP"])/"final_release.json").read_text())
-              tag=os.environ["TAG"];repo=os.environ["REPO"];sha=os.environ["VERIFIED_SHA256"]
-              assert d["tag_name"]==tag and not d["draft"] and not d["prerelease"]
-              assert d["html_url"]==f"https://github.com/{repo}/releases/tag/{tag}"
-              assets={a["name"]:a for a in d["assets"]}
-              for name in ("Prismwake.exe","HDRSnipFusion.exe"):
-                  a=assets[name]
-                  assert a["digest"]=="sha256:"+sha
-                  assert a["state"]=="uploaded"
-                  assert a["browser_download_url"]==f"https://github.com/{repo}/releases/download/{tag}/{name}"
-              print("Published latest release has official asset URLs, versions and SHA-256 digests.")
-              PY
-              exit 0
+              found=true
+              break
             fi
             sleep 3
           done
-          echo "::error::Latest stable release has not updated to $TAG"
-          exit 1
+          if [ "$found" != "true" ]; then
+            echo "::error::Latest stable release has not updated to $TAG"
+            exit 1
+          fi
+          gh api "repos/$REPO/releases/latest" > "$RUNNER_TEMP/final_release.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          d=json.loads((Path(os.environ["RUNNER_TEMP"])/"final_release.json").read_text())
+          tag=os.environ["TAG"];repo=os.environ["REPO"];sha=os.environ["VERIFIED_SHA256"]
+          assert d["tag_name"]==tag and not d["draft"] and not d["prerelease"]
+          assert d["html_url"]==f"https://github.com/{repo}/releases/tag/{tag}"
+          assets={a["name"]:a for a in d["assets"]}
+          for name in ("Prismwake.exe","HDRSnipFusion.exe"):
+              a=assets[name]
+              assert a["digest"]=="sha256:"+sha
+              assert a["state"]=="uploaded"
+              assert a["browser_download_url"]==f"https://github.com/{repo}/releases/download/{tag}/{name}"
+          print("Verified latest public release, official asset URLs and SHA-256 digests.")
+          PY
