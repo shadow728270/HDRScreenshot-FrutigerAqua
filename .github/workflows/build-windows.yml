@@ -1,4 +1,4 @@
-name: Build & Release Windows Executable
+name: Build & Release Prismwake Windows Executables
 
 on:
   push:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build & Verify HDRSnipFusion.exe (Windows x64)
+    name: Build & Verify Prismwake + legacy updater EXEs (Windows x64)
     runs-on: windows-latest
 
     steps:
@@ -76,6 +76,8 @@ jobs:
             Write-Host "Non-tag build on ref '$env:GITHUB_REF': APP_VERSION is '$appVersion'."
           }
 
+          $primaryName = if ([version]$appVersion -ge [version]"0.1.3") { "Prismwake" } else { "HDRSnipFusion" }
+          "primary_exe_name=$primaryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "entry_script=$entryScript" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "is_tag=$($isTagPush.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -101,8 +103,9 @@ jobs:
 
           $verOut = (python $entry --version | Out-String).Trim()
           Write-Host "Source --version output: $verOut"
-          if ($verOut -ne "HDRSnip Fusion v$expectedVer") {
-            Write-Error "Unexpected --version output from source: '$verOut' (expected 'HDRSnip Fusion v$expectedVer')"
+          $expectedText = if ([version]$expectedVer -ge [version]"0.1.3") { "Prismwake v$expectedVer (formerly HDRSnip Fusion)" } else { "HDRSnip Fusion v$expectedVer" }
+          if ($verOut -ne $expectedText) {
+            Write-Error "Unexpected --version output from source: '$verOut' (expected '$expectedText')"
             exit 1
           }
 
@@ -125,18 +128,30 @@ jobs:
           $ErrorActionPreference = "Stop"
           $entry = "${{ steps.meta.outputs.entry_script }}"
 
+          $primaryName = "${{ steps.meta.outputs.primary_exe_name }}"
           $iconArgs = @()
-          if (Test-Path -LiteralPath "assets/icon.ico") {
+          if ($primaryName -eq "Prismwake") {
+            python tools/make_prismwake_icon.py
+            if (-not (Test-Path -LiteralPath "assets/prismwake.ico")) { throw "Missing generated Prismwake icon" }
+            $iconArgs = @("--icon", "assets/prismwake.ico")
+          } elseif (Test-Path -LiteralPath "assets/icon.ico") {
             $iconArgs = @("--icon", "assets/icon.ico")
           } elseif (Test-Path -LiteralPath "icon.ico") {
             $iconArgs = @("--icon", "icon.ico")
           }
 
           pyinstaller --noconfirm --clean --onefile --windowed `
-            --name "HDRSnipFusion" `
+            --name $primaryName `
             --collect-submodules PyQt6 `
             @iconArgs `
             $entry
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
+          if ($primaryName -eq "Prismwake") {
+            Copy-Item -LiteralPath "dist\Prismwake.exe" -Destination "dist\HDRSnipFusion.exe" -Force
+            if ((Get-FileHash "dist\Prismwake.exe" -Algorithm SHA256).Hash -ne (Get-FileHash "dist\HDRSnipFusion.exe" -Algorithm SHA256).Hash) {
+              throw "Prismwake and legacy executable aliases must be byte-identical"
+            }
+          }
 
       - name: Verify compiled HDRSnipFusion.exe (PE64 headers, version & SHA-256)
         id: verify_exe
@@ -191,10 +206,30 @@ jobs:
           $shaFile = Join-Path (Get-Location) "dist\HDRSnipFusion.exe.sha256"
           "$sha256  HDRSnipFusion.exe" | Out-File -FilePath $shaFile -Encoding ascii -NoNewline
           Write-Host "Computed SHA-256: $sha256"
+          $prismExe = "dist\Prismwake.exe"
+          if ($expectedVer -eq "0.1.3" -or [version]$expectedVer -gt [version]"0.1.3") {
+            if (-not (Test-Path -LiteralPath $prismExe)) { throw "Prismwake.exe must be present for v0.1.3+" }
+            $newHash = (Get-FileHash -LiteralPath $prismExe -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($newHash -ne $sha256) { throw "Dual EXE alias SHA-256 mismatch" }
+            "$sha256  Prismwake.exe" | Out-File -FilePath "dist\Prismwake.exe.sha256" -Encoding ascii -NoNewline
+            $newVersionFile = Join-Path $env:RUNNER_TEMP "prismwake_version.json"
+            $newProc = Start-Process -FilePath (Resolve-Path $prismExe) -ArgumentList @("--write-version-file", $newVersionFile) -Wait -PassThru -WindowStyle Hidden
+            if ($newProc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $newVersionFile)) { throw "Prismwake.exe version probe failed" }
+            $newInfo = Get-Content -LiteralPath $newVersionFile -Raw | ConvertFrom-Json
+            if ($newInfo.version -ne $expectedVer -or -not $newInfo.packaged) { throw "Prismwake.exe version mismatch" }
+            Write-Host "Verified Prismwake.exe and legacy updater alias (same $sha256)"
+          }
 
           "exe_path=$exePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "size_bytes=$sizeBytes" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Run Prismwake v0.1.3 candidate headless tests
+        if: steps.meta.outputs.app_version == '0.1.3'
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p "test_prismwake_candidate.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Prismwake candidate unit tests failed" }
 
       - name: Verify two-EXE PyInstaller --onefile --windowed updater, PID ancestry, rollback & staging cleanup
         shell: pwsh
@@ -410,14 +445,16 @@ jobs:
       - name: Upload Windows build artifact (Branch / PR / Manual runs)
         uses: actions/upload-artifact@v4
         with:
-          name: HDRSnipFusion-Windows-x64-v${{ steps.meta.outputs.app_version }}
+          name: Prismwake-Windows-x64-v${{ steps.meta.outputs.app_version }}
           path: |
             dist/HDRSnipFusion.exe
             dist/HDRSnipFusion.exe.sha256
+            dist/Prismwake.exe
+            dist/Prismwake.exe.sha256
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish & attach HDRSnipFusion.exe to GitHub Release (Tag push only)
+      - name: Publish & attach both verified executable aliases (Tag push only)
         if: steps.meta.outputs.is_tag == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -432,12 +469,21 @@ jobs:
 
           $notesFile = Join-Path $env:RUNNER_TEMP "release_notes_$tag.md"
           # Avoid Markdown backticks in double-quoted PowerShell strings: ` is the escape character.
-          $defaultNotes = "Official HDRSnip Fusion $tag Windows x64 build. SHA-256: $sha256."
+          $defaultNotes = "Official Prismwake $tag Windows x64 build. Both exe names have SHA-256 $sha256."
           $customNotes = "RELEASE_NOTES_$tag.md"
           if (Test-Path -LiteralPath $customNotes) {
             Copy-Item -LiteralPath $customNotes -Destination $notesFile -Force
           } else {
             $defaultNotes | Out-File -FilePath $notesFile -Encoding utf8
+          }
+
+          $releaseAssets = @("$exePath#HDRSnipFusion.exe", "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256")
+          if ([version]$ver -ge [version]"0.1.3") {
+            foreach ($file in @("dist\Prismwake.exe", "dist\Prismwake.exe.sha256")) {
+              if (-not (Test-Path -LiteralPath $file)) { throw "Refusing to publish: missing $file" }
+            }
+            $releaseAssets += "dist\Prismwake.exe#Prismwake.exe"
+            $releaseAssets += "dist\Prismwake.exe.sha256#Prismwake.exe.sha256"
           }
 
           # Native CLI commands do not throw on nonzero exit by default in PowerShell.
@@ -446,22 +492,19 @@ jobs:
           $releaseExists = ($LASTEXITCODE -eq 0)
 
           if (-not $releaseExists) {
-            Write-Host "Creating GitHub Release $tag and uploading HDRSnipFusion.exe..."
-            gh release create $tag `
-              "$exePath#HDRSnipFusion.exe" `
-              "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256" `
+            Write-Host "Creating GitHub Release $tag with checked aliases..."
+            gh release create $tag @releaseAssets `
               --repo "${{ github.repository }}" `
-              --title "HDRSnip Fusion $tag" `
+              --title "Prismwake $tag" `
               --notes-file $notesFile `
               --verify-tag
           } else {
-            Write-Host "Release $tag already exists; uploading/replacing HDRSnipFusion.exe asset..."
-            gh release upload $tag `
-              "$exePath#HDRSnipFusion.exe" `
-              "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256" `
+            Write-Host "Release $tag exists; uploading verified aliases..."
+            gh release upload $tag @releaseAssets `
               --repo "${{ github.repository }}" `
               --clobber
           }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release asset upload failed" }
 
       - name: Verify published GitHub Release asset & digest metadata
         if: steps.meta.outputs.is_tag == 'true'
@@ -495,3 +538,13 @@ jobs:
             exit 1
           }
           Write-Host "Successfully verified HDRSnipFusion.exe on GitHub Release $tag (url=$($exeAsset.browser_download_url))."
+          if ([version]"${{ steps.meta.outputs.app_version }}" -ge [version]"0.1.3") {
+            $prismAsset = $rel.assets | Where-Object { $_.name -eq "Prismwake.exe" } | Select-Object -First 1
+            if (-not $prismAsset -or $prismAsset.state -ne "uploaded") { throw "Published release missing uploaded Prismwake.exe" }
+            if ([int64]$prismAsset.size -ne $expectedSize) { throw "Prismwake.exe release size mismatch" }
+            if ($prismAsset.digest -and $prismAsset.digest -ne "sha256:$expectedSha") { throw "Prismwake.exe release SHA-256 mismatch" }
+            foreach ($name in @("Prismwake.exe.sha256","HDRSnipFusion.exe.sha256")) {
+              if (-not ($rel.assets | Where-Object { $_.name -eq $name })) { throw "Release missing $name" }
+            }
+            Write-Host "Verified both Prismwake v0.1.3+ executable assets and checksums."
+          }

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-HDRSnip Fusion - Frutiger Aero / Aqua Liquid Glass Edition
+Prismwake (formerly HDRSnip Fusion) - Frutiger Aero / Aqua Liquid Glass Edition
+Catch the light. Keep the detail.
 Game-Safe, HDR-Aware Screenshot & Annotation Tool for Windows 10/11
 ====================================================================================
 Features:
@@ -93,6 +94,7 @@ try:
         QColor,
         QCursor,
         QFont,
+        QFontMetrics,
         QGuiApplication,
         QIcon,
         QImage,
@@ -148,9 +150,12 @@ except ImportError:
 
 import traceback
 
-APP_VERSION: str = "0.1.2"
+APP_NAME: str = "Prismwake"
+LEGACY_APP_NAME: str = "HDRSnip Fusion"
+APP_TAGLINE: str = "Catch the light. Keep the detail."
+APP_VERSION: str = "0.1.3"
 
-# v0.1.2 Stroke Thickness & Non-Destructive Paint Bucket Constants
+# v0.1.2 / v0.1.3 Annotation Tool Constants
 MIN_STROKE_THICKNESS: int = 1
 MAX_STROKE_THICKNESS: int = 40
 DEFAULT_STROKE_THICKNESS: int = 3
@@ -161,11 +166,120 @@ MIN_FILL_OPACITY: int = 0
 MAX_FILL_OPACITY: int = 100
 DEFAULT_FILL_OPACITY: int = 100
 DEFAULT_TEXT_FONT_SIZE: int = 16
+MIN_BLUR_RADIUS: int = 1
+MAX_BLUR_RADIUS: int = 40
+DEFAULT_BLUR_RADIUS: int = 12
+MIN_PIXELATE_SIZE: int = 2
+MAX_PIXELATE_SIZE: int = 64
+DEFAULT_PIXELATE_SIZE: int = 12
+MIN_CALLOUT_RADIUS: int = 10
+MAX_CALLOUT_RADIUS: int = 36
+DEFAULT_CALLOUT_RADIUS: int = 15
+MIN_MAGNIFIER_ZOOM: int = 4
+MAX_MAGNIFIER_ZOOM: int = 16
+DEFAULT_MAGNIFIER_ZOOM: int = 8
+DEFAULT_REDACT_COLOR: str = "#000000"
+
 STROKE_DRAWING_TOOLS: Tuple[str, ...] = ("pen", "rect", "ellipse", "line", "arrow")
+BLUR_TOOLS: Tuple[str, ...] = ("blur", "blur_rect", "blur_brush")
+PIXELATE_TOOLS: Tuple[str, ...] = ("pixelate", "pixelate_rect", "pixelate_brush")
+REDACT_TOOLS: Tuple[str, ...] = ("redact", "redact_rect", "redact_brush")
+REGION_FILTER_TOOLS: Tuple[str, ...] = BLUR_TOOLS + PIXELATE_TOOLS + REDACT_TOOLS
+
+# Frutiger Aqua Desktop Themes (UI chrome only; never alters HDR capture or tone-mapping math)
+AQUA_THEME_NAMES: Tuple[str, ...] = (
+    "ocean_current",
+    "emerald_glass",
+    "sunset_coral",
+    "vista_sapphire",
+)
+
+AQUA_THEMES: Dict[str, Dict[str, Any]] = {
+    "ocean_current": {
+        "id": "ocean_current",
+        "label": "Ocean Current",
+        "description": "Signature Frutiger Aqua cyan, deep ocean sapphire, and aurora mint.",
+        "primary_rgb": (20, 145, 215),
+        "mid_rgb": (8, 72, 135),
+        "accent_rgb": (45, 220, 180),
+        "dialog_top_rgb": (16, 132, 205),
+        "dialog_mid_rgb": (12, 102, 175),
+        "dialog_bot_rgb": (35, 205, 170),
+        "border_rgb": (0, 230, 255),
+        "border_inner_rgb": (80, 245, 255),
+        "orb_mid_hex": "#7DF5FF",
+        "orb_deep_hex": "#0091EB",
+        "orb_dark_hex": "#004B9B",
+    },
+    "emerald_glass": {
+        "id": "emerald_glass",
+        "label": "Emerald Glass",
+        "description": "Lush tropical emerald lagoon, seafoam jade, and crystal mint.",
+        "primary_rgb": (16, 168, 136),
+        "mid_rgb": (6, 88, 78),
+        "accent_rgb": (105, 245, 180),
+        "dialog_top_rgb": (18, 152, 126),
+        "dialog_mid_rgb": (10, 108, 96),
+        "dialog_bot_rgb": (64, 224, 168),
+        "border_rgb": (46, 242, 190),
+        "border_inner_rgb": (132, 255, 214),
+        "orb_mid_hex": "#88FFD2",
+        "orb_deep_hex": "#00B87C",
+        "orb_dark_hex": "#006948",
+    },
+    "sunset_coral": {
+        "id": "sunset_coral",
+        "label": "Sunset Coral",
+        "description": "Warm reef twilight coral, sunlit amber glass, and magenta-aqua reflections.",
+        "primary_rgb": (214, 92, 128),
+        "mid_rgb": (96, 38, 98),
+        "accent_rgb": (255, 164, 104),
+        "dialog_top_rgb": (196, 82, 122),
+        "dialog_mid_rgb": (118, 52, 114),
+        "dialog_bot_rgb": (242, 148, 96),
+        "border_rgb": (255, 142, 118),
+        "border_inner_rgb": (255, 196, 168),
+        "orb_mid_hex": "#FFB8A2",
+        "orb_deep_hex": "#E05278",
+        "orb_dark_hex": "#7A1C48",
+    },
+    "vista_sapphire": {
+        "id": "vista_sapphire",
+        "label": "Vista Sapphire",
+        "description": "Classic Windows Aero deep cobalt sapphire, arctic ice blue, and silver specular glass.",
+        "primary_rgb": (28, 108, 224),
+        "mid_rgb": (10, 44, 124),
+        "accent_rgb": (112, 196, 255),
+        "dialog_top_rgb": (24, 98, 210),
+        "dialog_mid_rgb": (14, 64, 156),
+        "dialog_bot_rgb": (88, 178, 252),
+        "border_rgb": (82, 188, 255),
+        "border_inner_rgb": (162, 224, 255),
+        "orb_mid_hex": "#9CE0FF",
+        "orb_deep_hex": "#1565C0",
+        "orb_dark_hex": "#0A3272",
+    },
+}
+
+
+def normalize_aqua_theme(value: Any) -> str:
+    """Normalizes a theme identifier or human-readable label to a canonical AQUA_THEMES key."""
+    raw = str(value or "ocean_current").strip().lower().replace("-", "_").replace(" ", "_")
+    if raw in AQUA_THEMES:
+        return raw
+    for key, spec in AQUA_THEMES.items():
+        if raw == spec["label"].lower().replace(" ", "_") or raw in key:
+            return key
+    return "ocean_current"
+
+
+def get_aqua_theme_spec(theme_name: Any = "ocean_current") -> Dict[str, Any]:
+    """Returns the theme palette dictionary for `theme_name`."""
+    return AQUA_THEMES[normalize_aqua_theme(theme_name)]
 
 
 def clamp_stroke_thickness(value: Any) -> int:
-    """Clamps stroke thickness to the supported v0.1.2 range [1, 40] px."""
+    """Clamps stroke thickness to the supported range [1, 40] px."""
     try:
         return max(MIN_STROKE_THICKNESS, min(MAX_STROKE_THICKNESS, int(round(float(value)))))
     except Exception:
@@ -186,14 +300,57 @@ def clamp_fill_opacity(value: Any) -> int:
         return max(MIN_FILL_OPACITY, min(MAX_FILL_OPACITY, int(round(float(value)))))
     except Exception:
         return DEFAULT_FILL_OPACITY
+
+
+def clamp_blur_radius(value: Any) -> int:
+    """Clamps Blur tool radius to [1, 40] px."""
+    try:
+        return max(MIN_BLUR_RADIUS, min(MAX_BLUR_RADIUS, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_BLUR_RADIUS
+
+
+def clamp_pixelate_size(value: Any) -> int:
+    """Clamps Pixelation tool block size to [2, 64] px."""
+    try:
+        return max(MIN_PIXELATE_SIZE, min(MAX_PIXELATE_SIZE, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_PIXELATE_SIZE
+
+
+def clamp_callout_radius(value: Any) -> int:
+    """Clamps Numbered Callout marker radius to [10, 36] px."""
+    try:
+        return max(MIN_CALLOUT_RADIUS, min(MAX_CALLOUT_RADIUS, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_CALLOUT_RADIUS
+
+
+def clamp_magnifier_zoom(value: Any) -> int:
+    """Clamps Pixel Magnifier / Eyedropper zoom factor to [4, 16]x."""
+    try:
+        return max(MIN_MAGNIFIER_ZOOM, min(MAX_MAGNIFIER_ZOOM, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_MAGNIFIER_ZOOM
+
+
 GITHUB_REPO_OWNER: str = "shadow728270"
 GITHUB_REPO_NAME: str = "HDRScreenshot-FrutigerAqua"
 GITHUB_REPO_URL: str = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
 GITHUB_RELEASES_PAGE_URL: str = f"{GITHUB_REPO_URL}/releases"
+GITHUB_PAGES_WEBSITE_URL: str = f"https://{GITHUB_REPO_OWNER}.github.io/{GITHUB_REPO_NAME}/"
 GITHUB_LATEST_RELEASE_API_URL: str = (
     f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
 )
+PRIMARY_RELEASE_ASSET_NAME: str = "Prismwake.exe"
+LEGACY_RELEASE_ASSET_NAME: str = "HDRSnipFusion.exe"
 EXPECTED_RELEASE_ASSET_NAME: str = "HDRSnipFusion.exe"
+SUPPORTED_RELEASE_ASSET_NAMES: Tuple[str, ...] = (
+    PRIMARY_RELEASE_ASSET_NAME,
+    LEGACY_RELEASE_ASSET_NAME,
+)
+DEFAULT_SCREENSHOT_PREFIX: str = "Prismwake"
+LEGACY_SCREENSHOT_PREFIX: str = "HDRSnipFusion"
 UPDATE_CHECK_INTERVAL_SEC: float = 86400.0  # Check roughly once per 24 hours
 UPDATE_STARTUP_DELAY_MS: int = 4500         # Delay first background check until tray is ready
 MIN_EXE_SIZE_BYTES: int = 1_048_576         # 1 MB minimum sanity bound for packaged EXE
@@ -210,9 +367,17 @@ ALLOWED_GITHUB_HOSTS: Tuple[str, ...] = (
 
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "HDRSnip Fusion"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+PRISMWAKE_CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "Prismwake"
+PRISMWAKE_CONFIG_FILE = PRISMWAKE_CONFIG_DIR / "config.json"
 DIAGNOSTIC_LOG_FILE = CONFIG_DIR / "diagnostics.log"
 DIAGNOSTIC_LOG_BACKUP_FILE = CONFIG_DIR / "diagnostics.log.1"
-DEFAULT_SAVE_DIR = Path.home() / "Pictures" / "HDRSnip Fusion"
+LEGACY_DEFAULT_SAVE_DIR = Path.home() / "Pictures" / "HDRSnip Fusion"
+PRISMWAKE_DEFAULT_SAVE_DIR = Path.home() / "Pictures" / "Prismwake"
+DEFAULT_SAVE_DIR = (
+    LEGACY_DEFAULT_SAVE_DIR
+    if LEGACY_DEFAULT_SAVE_DIR.exists()
+    else PRISMWAKE_DEFAULT_SAVE_DIR
+)
 LOCAL_UPDATE_ROOT_DIR = (
     Path(os.environ.get("LOCALAPPDATA", os.environ.get("APPDATA", Path.home())))
     / "HDRSnip Fusion"
@@ -892,12 +1057,21 @@ class AppConfig:
     animation_intensity: str = "medium"
     # Glass & gel transparency percentage (10 = dense aero glass, 72 = crystal clear default, 95 = ultra-sheer water)
     glass_transparency: int = 72
-    # Default tool, stroke thickness (1..40 px), and Paint Bucket settings (v0.1.2+)
+    # Frutiger Aqua desktop theme ("ocean_current", "emerald_glass", "sunset_coral", "vista_sapphire")
+    aqua_theme: str = "ocean_current"
+    # Default screenshot filename prefix ("Prismwake" for new installs; preserves custom/legacy prefix)
+    screenshot_prefix: str = DEFAULT_SCREENSHOT_PREFIX
+    # Default tool, stroke thickness (1..40 px), Paint Bucket, Blur, Pixelate, Redact & Callout settings (v0.1.3+)
     default_color: str = "#00E5FF"
     default_thickness: int = DEFAULT_STROKE_THICKNESS
     default_fill_tolerance: int = DEFAULT_FILL_TOLERANCE
     default_fill_opacity: int = DEFAULT_FILL_OPACITY
     default_font_size: int = DEFAULT_TEXT_FONT_SIZE
+    default_blur_radius: int = DEFAULT_BLUR_RADIUS
+    default_pixelate_size: int = DEFAULT_PIXELATE_SIZE
+    default_callout_radius: int = DEFAULT_CALLOUT_RADIUS
+    default_redact_color: str = DEFAULT_REDACT_COLOR
+    default_magnifier_zoom: int = DEFAULT_MAGNIFIER_ZOOM
     save_directory: str = str(DEFAULT_SAVE_DIR)
     # GitHub Automatic Updater preferences (v0.1.1+)
     auto_check_updates: bool = True
@@ -949,14 +1123,69 @@ class AppConfig:
             else "medium"
         )
 
+    @staticmethod
+    def sync_profiles_non_destructive(
+        legacy_file: Optional[Path] = None,
+        prismwake_file: Optional[Path] = None,
+    ) -> Optional[Path]:
+        r"""
+        Atomically, idempotently, and reversibly synchronizes configuration between
+        `%APPDATA%\HDRSnip Fusion\config.json` and `%APPDATA%\Prismwake\config.json`.
+        Never deletes an existing legacy profile when creating or updating a Prismwake profile.
+        """
+        leg = Path(legacy_file or CONFIG_FILE)
+        pw = Path(prismwake_file or PRISMWAKE_CONFIG_FILE)
+        try:
+            if leg.exists() and not pw.exists():
+                pw.parent.mkdir(parents=True, exist_ok=True)
+                tmp = pw.with_name(f".{pw.name}.{os.getpid()}.tmp")
+                tmp.write_bytes(leg.read_bytes())
+                os.replace(str(tmp), str(pw))
+                return leg
+            if pw.exists() and not leg.exists():
+                leg.parent.mkdir(parents=True, exist_ok=True)
+                tmp = leg.with_name(f".{leg.name}.{os.getpid()}.tmp")
+                tmp.write_bytes(pw.read_bytes())
+                os.replace(str(tmp), str(leg))
+                return pw
+            if leg.exists():
+                return leg
+            if pw.exists():
+                return pw
+        except Exception:
+            if leg.exists():
+                return leg
+            if pw.exists():
+                return pw
+        return None
+
     @classmethod
     def load(cls) -> "AppConfig":
         cfg = cls()
         try:
-            if CONFIG_FILE.exists():
-                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            active_cfg_file = CONFIG_FILE if CONFIG_FILE.exists() else (
+                PRISMWAKE_CONFIG_FILE if PRISMWAKE_CONFIG_FILE.exists() else CONFIG_FILE
+            )
+            if active_cfg_file.exists():
+                data = json.loads(active_cfg_file.read_text(encoding="utf-8"))
                 valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
                 filtered = {k: v for k, v in data.items() if k in valid_keys}
+                if "aqua_theme" in filtered:
+                    filtered["aqua_theme"] = normalize_aqua_theme(filtered["aqua_theme"])
+                if "screenshot_prefix" in filtered:
+                    raw_pref = str(filtered["screenshot_prefix"] or "").strip()
+                    filtered["screenshot_prefix"] = raw_pref if raw_pref else DEFAULT_SCREENSHOT_PREFIX
+                if "default_blur_radius" in filtered:
+                    filtered["default_blur_radius"] = clamp_blur_radius(filtered["default_blur_radius"])
+                if "default_pixelate_size" in filtered:
+                    filtered["default_pixelate_size"] = clamp_pixelate_size(filtered["default_pixelate_size"])
+                if "default_callout_radius" in filtered:
+                    filtered["default_callout_radius"] = clamp_callout_radius(filtered["default_callout_radius"])
+                if "default_magnifier_zoom" in filtered:
+                    filtered["default_magnifier_zoom"] = clamp_magnifier_zoom(filtered["default_magnifier_zoom"])
+                if "default_redact_color" in filtered:
+                    rc = str(filtered["default_redact_color"] or DEFAULT_REDACT_COLOR).strip()
+                    filtered["default_redact_color"] = rc if rc.startswith("#") else DEFAULT_REDACT_COLOR
                 if "animation_intensity" in filtered:
                     val = str(filtered["animation_intensity"]).strip().lower()
                     filtered["animation_intensity"] = (
@@ -1028,10 +1257,29 @@ class AppConfig:
             if self.animation_intensity not in ANIMATION_INTENSITY_LEVELS:
                 self.animation_intensity = "medium"
             DIAG_LOG.set_enabled(self.enable_diagnostic_logging)
+            self.aqua_theme = normalize_aqua_theme(self.aqua_theme)
+            self.default_thickness = clamp_stroke_thickness(self.default_thickness)
+            self.default_fill_tolerance = clamp_fill_tolerance(self.default_fill_tolerance)
+            self.default_fill_opacity = clamp_fill_opacity(self.default_fill_opacity)
+            self.default_blur_radius = clamp_blur_radius(self.default_blur_radius)
+            self.default_pixelate_size = clamp_pixelate_size(self.default_pixelate_size)
+            self.default_callout_radius = clamp_callout_radius(self.default_callout_radius)
+            self.default_magnifier_zoom = clamp_magnifier_zoom(self.default_magnifier_zoom)
+            serialized = json.dumps(self.__dict__, indent=2)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            CONFIG_FILE.write_text(
-                json.dumps(self.__dict__, indent=2), encoding="utf-8"
-            )
+            tmp_cfg = CONFIG_FILE.with_name(f".{CONFIG_FILE.name}.{os.getpid()}.tmp")
+            tmp_cfg.write_text(serialized, encoding="utf-8")
+            os.replace(str(tmp_cfg), str(CONFIG_FILE))
+            # If the default CONFIG_FILE is the system APPDATA location, also mirror non-destructively
+            # to PRISMWAKE_CONFIG_FILE so both v0.1.2 and v0.1.3 profiles stay in sync.
+            if CONFIG_FILE == Path(os.environ.get("APPDATA", Path.home())) / "HDRSnip Fusion" / "config.json":
+                try:
+                    PRISMWAKE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                    tmp_pw = PRISMWAKE_CONFIG_FILE.with_name(f".{PRISMWAKE_CONFIG_FILE.name}.{os.getpid()}.tmp")
+                    tmp_pw.write_text(serialized, encoding="utf-8")
+                    os.replace(str(tmp_pw), str(PRISMWAKE_CONFIG_FILE))
+                except Exception:
+                    pass
             DIAG_LOG.log(
                 "CONFIG",
                 f"Saved configuration (safe_mode={self.is_safe_mode_active}, "
@@ -5094,6 +5342,7 @@ if HAS_QT:
             self._safe_mode: bool = bool(ENV_SAFE_MODE)
             self._disable_continuous: bool = False
             self._transparency: int = 72  # 10..95% transparent (default 72% crystal-clear)
+            self._theme: str = "ocean_current"
             self._surfaces: List[weakref.ReferenceType] = []
 
             self._timer = QTimer(self)
@@ -5137,6 +5386,7 @@ if HAS_QT:
             self._intensity = norm
             self._scale = get_animation_intensity_scale(norm)
             self._transparency = max(10, min(95, int(config.glass_transparency)))
+            self._theme = normalize_aqua_theme(getattr(config, "aqua_theme", "ocean_current"))
             self._sync_timer()
             for ref in list(self._surfaces):
                 w = ref()
@@ -5151,6 +5401,23 @@ if HAS_QT:
         @property
         def transparency(self) -> int:
             return self._transparency
+
+        @property
+        def theme(self) -> str:
+            return getattr(self, "_theme", "ocean_current")
+
+        def set_theme(self, theme_name: str) -> None:
+            norm = normalize_aqua_theme(theme_name)
+            if getattr(self, "_theme", "ocean_current") == norm:
+                return
+            self._theme = norm
+            for ref in list(self._surfaces):
+                w = ref()
+                if w is not None:
+                    if hasattr(w, "on_transparency_changed"):
+                        w.on_transparency_changed()
+                    elif w.isVisible():
+                        w.update()
 
         @property
         def opacity_factor(self) -> float:
@@ -5361,26 +5628,33 @@ if HAS_QT:
             painter.drawPixmap(target_r, frosted_pixmap)
             painter.restore()
 
-        # 2. Translucent Frutiger Aqua / Aurora glass tint (scaled by opacity_factor)
+        # 2. Translucent Frutiger Aqua / Aurora glass tint (scaled by opacity_factor & active theme)
+        theme_spec = get_aqua_theme_spec(director.theme)
+        p_r, p_g, p_b = theme_spec["primary_rgb"]
+        m_r, m_g, m_b = theme_spec["mid_rgb"]
+        ac_r, ac_g, ac_b = theme_spec["accent_rgb"]
         bg_grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
         if tint_style == "dialog":
+            dt_r, dt_g, dt_b = theme_spec["dialog_top_rgb"]
+            dm_r, dm_g, dm_b = theme_spec["dialog_mid_rgb"]
+            db_r, db_g, db_b = theme_spec["dialog_bot_rgb"]
             a0 = max(18, min(225, int(round(145 * op))))
             a1 = max(20, min(230, int(round(152 * op))))
             a2 = max(22, min(235, int(round(158 * op))))
             a3 = max(18, min(225, int(round(145 * op))))
-            bg_grad.setColorAt(0.0, QColor(16, 132, 205, a0))
-            bg_grad.setColorAt(0.50, QColor(12, 102, 175, a1))
-            bg_grad.setColorAt(0.85, QColor(14, 135, 190, a2))
-            bg_grad.setColorAt(1.0, QColor(35, 205, 170, a3))
+            bg_grad.setColorAt(0.0, QColor(dt_r, dt_g, dt_b, a0))
+            bg_grad.setColorAt(0.50, QColor(dm_r, dm_g, dm_b, a1))
+            bg_grad.setColorAt(0.85, QColor(p_r, p_g, p_b, a2))
+            bg_grad.setColorAt(1.0, QColor(db_r, db_g, db_b, a3))
         else:
             a0 = max(12, min(210, int(round(115 * op))))
             a1 = max(16, min(220, int(round(132 * op))))
             a2 = max(14, min(215, int(round(122 * op))))
             a3 = max(12, min(210, int(round(115 * op))))
-            bg_grad.setColorAt(0.0, QColor(20, 145, 215, a0))
-            bg_grad.setColorAt(0.50, QColor(8, 72, 135, a1))
-            bg_grad.setColorAt(0.85, QColor(14, 160, 215, a2))
-            bg_grad.setColorAt(1.0, QColor(45, 220, 180, a3))
+            bg_grad.setColorAt(0.0, QColor(p_r, p_g, p_b, a0))
+            bg_grad.setColorAt(0.50, QColor(m_r, m_g, m_b, a1))
+            bg_grad.setColorAt(0.85, QColor(p_r, min(255, p_g + 15), p_b, a2))
+            bg_grad.setColorAt(1.0, QColor(ac_r, ac_g, ac_b, a3))
         painter.fillPath(panel_path, QBrush(bg_grad))
 
         # 3. Static base Frutiger Aero bokeh light spheres
@@ -7565,12 +7839,17 @@ if HAS_QT:
                 AeroToolbarLabel._FONT = QFont("Segoe UI", 9, QFont.Weight.Bold)
             self.setFont(AeroToolbarLabel._FONT)
 
+        def setText(self, text: str) -> None:
+            super().setText(text)
+            self.updateGeometry()
+            self.update()
+
         def sizeHint(self) -> QSize:
             if AeroToolbarLabel._FONT is None:
                 AeroToolbarLabel._FONT = QFont("Segoe UI", 9, QFont.Weight.Bold)
             fm = QFontMetrics(AeroToolbarLabel._FONT)
             txt = self.text() or ""
-            pad = 10 if txt.endswith(":") else 6
+            pad = 14 if txt.endswith(":") else 10
             return QSize(fm.horizontalAdvance(txt) + pad, max(22, fm.height() + 4))
 
         def minimumSizeHint(self) -> QSize:
@@ -8060,14 +8339,21 @@ def compute_arrow_head_points(
 
 @dataclass
 class AnnotationItem:
-    tool: str  # "pen", "rect", "ellipse", "line", "arrow", "text", "fill"
-    color: str
+    tool: str  # "pen", "rect", "ellipse", "line", "arrow", "text", "fill", "blur", "blur_rect", "blur_brush", "pixelate", "pixelate_rect", "pixelate_brush", "redact", "redact_rect", "redact_brush", "callout"
+    color: str = "#00E5FF"
     thickness: int = DEFAULT_STROKE_THICKNESS
     points: List[Tuple[float, float]] = field(default_factory=list)
     text: str = ""
     opacity: int = DEFAULT_FILL_OPACITY
     tolerance: int = DEFAULT_FILL_TOLERANCE
     font_size: int = DEFAULT_TEXT_FONT_SIZE
+    # v0.1.3 Blur, Pixelate, Permanent Redaction, and Numbered Callout fields:
+    blur_radius: int = DEFAULT_BLUR_RADIUS
+    pixel_size: int = DEFAULT_PIXELATE_SIZE
+    shape_mode: str = "rect"  # "rect" or "brush" for blur/pixelate/redact tools
+    callout_number: int = 1
+    callout_radius: int = DEFAULT_CALLOUT_RADIUS
+    outline_color: str = "#FFFFFF"
     # For non-destructive Paint Bucket ("fill") items:
     # `fill_bbox` stores (bx, by, bw, bh) in full-resolution physical image coordinates.
     # `logical_bbox` stores (lx, ly, lw, lh) in overlay logical coordinates.
@@ -8077,6 +8363,80 @@ class AnnotationItem:
     compressed_mask: bytes = b""
     _cached_qimage: Any = field(default=None, init=False, repr=False, compare=False)
     _cached_cache_key: Any = field(default=None, init=False, repr=False, compare=False)
+    _cached_effect_rgb: Any = field(default=None, init=False, repr=False, compare=False)
+    _cached_effect_key: Any = field(default=None, init=False, repr=False, compare=False)
+
+    def effective_tool_kind(self) -> Tuple[str, str]:
+        """
+        Normalizes `tool` and `shape_mode` into `(family, mode)` where:
+          - `family` is one of `"blur"`, `"pixelate"`, `"redact"`, `"callout"`, `"fill"`, or the vector tool name.
+          - `mode` is `"brush"` or `"rect"` for filter/redaction tools, `"point"` for callout, else `"default"`.
+        """
+        t = str(self.tool or "").strip().lower()
+        sm = str(self.shape_mode or "rect").strip().lower()
+        if t in ("blur", "blur_rect", "blur_brush"):
+            mode = "brush" if (t == "blur_brush" or sm == "brush") else "rect"
+            return ("blur", mode)
+        if t in ("pixelate", "pixelate_rect", "pixelate_brush"):
+            mode = "brush" if (t == "pixelate_brush" or sm == "brush") else "rect"
+            return ("pixelate", mode)
+        if t in ("redact", "redact_rect", "redact_brush"):
+            mode = "brush" if (t == "redact_brush" or sm == "brush") else "rect"
+            return ("redact", mode)
+        if t == "callout":
+            return ("callout", "point")
+        return (t, "default")
+
+    def translate(self, dx: float, dy: float) -> None:
+        """Moves the annotation by `(dx, dy)` in overlay logical coordinates and invalidates caches."""
+        fdx = float(dx)
+        fdy = float(dy)
+        if self.points:
+            self.points = [(float(px) + fdx, float(py) + fdy) for px, py in self.points]
+        if self.logical_bbox is not None:
+            lx, ly, lw, lh = self.logical_bbox
+            self.logical_bbox = (lx + fdx, ly + fdy, lw, lh)
+        self.invalidate_render_cache()
+
+    def logical_bounding_box(self) -> Optional[Tuple[float, float, float, float]]:
+        """Returns `(x0, y0, width, height)` in logical coordinates for hit-testing and caching."""
+        family, mode = self.effective_tool_kind()
+        if family == "fill":
+            return self.logical_bbox
+        if not self.points:
+            return None
+        if family == "callout":
+            cx, cy = float(self.points[0][0]), float(self.points[0][1])
+            r = float(clamp_callout_radius(self.callout_radius))
+            return (cx - r, cy - r, r * 2.0, r * 2.0)
+        xs = [float(p[0]) for p in self.points]
+        ys = [float(p[1]) for p in self.points]
+        pad = (
+            float(clamp_stroke_thickness(self.thickness)) * 0.65
+            if (mode == "brush" or family == "pen")
+            else 0.0
+        )
+        x0 = min(xs) - pad
+        y0 = min(ys) - pad
+        x1 = max(xs) + pad
+        y1 = max(ys) + pad
+        return (x0, y0, max(1.0, x1 - x0), max(1.0, y1 - y0))
+
+    def hit_test(self, x: float, y: float, tolerance_px: float = 8.0) -> bool:
+        """Returns True if logical point `(x, y)` hits this annotation item."""
+        family, mode = self.effective_tool_kind()
+        if family == "callout" and self.points:
+            cx, cy = float(self.points[0][0]), float(self.points[0][1])
+            r = float(clamp_callout_radius(self.callout_radius)) + float(tolerance_px)
+            return math.hypot(float(x) - cx, float(y) - cy) <= r
+        bbox = self.logical_bounding_box()
+        if bbox is None:
+            return False
+        bx, by, bw, bh = bbox
+        return (
+            (bx - tolerance_px) <= float(x) <= (bx + bw + tolerance_px)
+            and (by - tolerance_px) <= float(y) <= (by + bh + tolerance_px)
+        )
 
     def decompress_mask_array(self) -> Optional[np.ndarray]:
         """Decompresses `compressed_mask` into a (bh, bw) uint8 coverage array (0..255)."""
@@ -8097,6 +8457,8 @@ class AnnotationItem:
     def invalidate_render_cache(self) -> None:
         self._cached_qimage = None
         self._cached_cache_key = None
+        self._cached_effect_rgb = None
+        self._cached_effect_key = None
 
     def get_or_create_qimage(self) -> Any:
         """
@@ -8412,15 +8774,334 @@ def render_annotations_for_fill_pil(
             ch = max(1, min(full_h - cy, int(ch)))
             return np.ascontiguousarray(clean_base[cy : cy + ch, cx : cx + cw]), None
         return clean_base, None
+    non_filter_annotations = [
+        it for it in annotations if it.effective_tool_kind()[0] not in ("blur", "pixelate")
+    ]
     comp_rgb, stroke_alpha = composite_annotations_pil(
         clean_base,
-        annotations,
+        non_filter_annotations,
         crop_rect=crop_rect,
         px_scale_x=px_scale_x,
         px_scale_y=px_scale_y,
     )
-    has_vector_strokes = any(it.tool != "fill" for it in annotations)
+    has_vector_strokes = any(
+        it.effective_tool_kind()[0] not in ("fill", "blur", "pixelate")
+        for it in non_filter_annotations
+    )
     return comp_rgb, (stroke_alpha if has_vector_strokes else None)
+
+
+def _compute_item_crop_bbox_and_mask(
+    item: AnnotationItem,
+    cw: int,
+    ch: int,
+    cx: int,
+    cy: int,
+    sx: float,
+    sy: float,
+) -> Optional[Tuple[int, int, int, int, Optional[np.ndarray]]]:
+    """
+    Computes the clipped integer bounding box `(ix0, iy0, ix1, iy1)` in crop-local
+    coordinates `(0..cw, 0..ch)` for a Blur, Pixelate, or Redact `AnnotationItem`.
+    When `mode == "brush"`, also rasterizes a tight `(iy1 - iy0, ix1 - ix0)` uint8 mask
+    for the brush path; when `mode == "rect"`, returns `mask = None` (full box coverage).
+    """
+    if not item.points:
+        return None
+    family, mode = item.effective_tool_kind()
+    pts_crop = [(float(p[0]) * sx - cx, float(p[1]) * sy - cy) for p in item.points]
+    scale_avg = max(0.25, 0.5 * (sx + sy))
+    brush_diam = max(4, int(round(clamp_stroke_thickness(item.thickness) * scale_avg)))
+
+    if mode == "rect":
+        if len(pts_crop) < 2:
+            return None
+        p1, p2 = pts_crop[0], pts_crop[-1]
+        rx0 = int(math.floor(min(p1[0], p2[0])))
+        ry0 = int(math.floor(min(p1[1], p2[1])))
+        rx1 = int(math.ceil(max(p1[0], p2[0])))
+        ry1 = int(math.ceil(max(p1[1], p2[1])))
+        ix0 = max(0, min(cw, rx0))
+        iy0 = max(0, min(ch, ry0))
+        ix1 = max(0, min(cw, rx1))
+        iy1 = max(0, min(ch, ry1))
+        if ix1 <= ix0 or iy1 <= iy0:
+            return None
+        return (ix0, iy0, ix1, iy1, None)
+
+    # Freehand brush mode ("brush")
+    rad = max(2, (brush_diam + 1) // 2)
+    xs = [p[0] for p in pts_crop]
+    ys = [p[1] for p in pts_crop]
+    ix0 = max(0, min(cw, int(math.floor(min(xs) - rad - 2))))
+    iy0 = max(0, min(ch, int(math.floor(min(ys) - rad - 2))))
+    ix1 = max(0, min(cw, int(math.ceil(max(xs) + rad + 2))))
+    iy1 = max(0, min(ch, int(math.ceil(max(ys) + rad + 2))))
+    if ix1 <= ix0 or iy1 <= iy0:
+        return None
+
+    from PIL import ImageDraw
+
+    bw = ix1 - ix0
+    bh = iy1 - iy0
+    mask_img = Image.new("L", (bw, bh), 0)
+    mdraw = ImageDraw.Draw(mask_img)
+    local_pts = [(px - ix0, py - iy0) for px, py in pts_crop]
+    if len(local_pts) == 1:
+        px0, py0 = local_pts[0]
+        mdraw.ellipse([px0 - rad, py0 - rad, px0 + rad, py0 + rad], fill=255)
+    else:
+        mdraw.line(local_pts, fill=255, width=brush_diam, joint="curve")
+        for px0, py0 in local_pts:
+            mdraw.ellipse([px0 - rad, py0 - rad, px0 + rad, py0 + rad], fill=255)
+    mask_arr = np.asarray(mask_img, dtype=np.uint8)
+    if family in ("redact", "blur", "pixelate"):
+        mask_arr = np.where(mask_arr > 0, np.uint8(255), np.uint8(0))
+    return (ix0, iy0, ix1, iy1, mask_arr)
+
+
+def apply_region_blur_rgb(
+    src_rgb: np.ndarray,
+    ix0: int,
+    iy0: int,
+    ix1: int,
+    iy1: int,
+    blur_radius: int,
+    *,
+    mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Applies a fast, region-bounded Gaussian blur strictly to `src_rgb[iy0:iy1, ix0:ix1]`
+    (sampling up to `2 * blur_radius` context padding within `src_rgb` bounds so borders do
+    not darken). Returns the blurred `(iy1 - iy0, ix1 - ix0, 3)` uint8 patch.
+    """
+    from PIL import ImageFilter
+
+    h, w, _ = src_rgb.shape
+    rad = max(1, int(blur_radius))
+    pad = min(96, rad * 2)
+    px0 = max(0, ix0 - pad)
+    py0 = max(0, iy0 - pad)
+    px1 = min(w, ix1 + pad)
+    py1 = min(h, iy1 + pad)
+
+    sub_patch = np.ascontiguousarray(src_rgb[py0:py1, px0:px1, :3], dtype=np.uint8)
+    pil_patch = Image.fromarray(sub_patch)
+    blurred_pil = pil_patch.filter(ImageFilter.GaussianBlur(radius=float(rad)))
+    blurred_arr = np.asarray(blurred_pil, dtype=np.uint8)
+    cropped_blur = np.ascontiguousarray(
+        blurred_arr[(iy0 - py0) : (iy1 - py0), (ix0 - px0) : (ix1 - px0), :3]
+    )
+    if mask is not None and mask.shape == cropped_blur.shape[:2]:
+        orig_sub = src_rgb[iy0:iy1, ix0:ix1, :3].astype(np.float32)
+        af = (mask.astype(np.float32) / 255.0)[:, :, None]
+        blended = orig_sub * (1.0 - af) + cropped_blur.astype(np.float32) * af
+        return np.clip(np.round(blended), 0, 255).astype(np.uint8)
+    return cropped_blur
+
+
+def apply_world_aligned_pixelation_rgb(
+    src_rgb: np.ndarray,
+    ix0: int,
+    iy0: int,
+    ix1: int,
+    iy1: int,
+    block_size: int,
+    *,
+    world_offset_x: int = 0,
+    world_offset_y: int = 0,
+    mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Applies a world-grid-anchored mosaic pixelation to `src_rgb[iy0:iy1, ix0:ix1]`.
+    Mosaic cell boundaries are snapped to global physical screenshot coordinates
+    `(world_offset_x + x, world_offset_y + y)` in multiples of `block_size` so moving or
+    resizing a pixelation annotation never causes the mosaic pattern to jitter or swim.
+    """
+    h, w, _ = src_rgb.shape
+    bsize = max(2, int(block_size))
+    out_patch = np.ascontiguousarray(src_rgb[iy0:iy1, ix0:ix1, :3].copy(), dtype=np.uint8)
+
+    # Compute global coordinate range [gx0, gx1), [gy0, gy1)
+    gx0 = world_offset_x + ix0
+    gy0 = world_offset_y + iy0
+    gx1 = world_offset_x + ix1
+    gy1 = world_offset_y + iy1
+
+    cell_gx_start = (gx0 // bsize) * bsize
+    cell_gy_start = (gy0 // bsize) * bsize
+
+    for cell_gy in range(cell_gy_start, gy1, bsize):
+        # Local y interval inside src_rgb (0..h) for sampling the full cell
+        sy0 = max(0, cell_gy - world_offset_y)
+        sy1 = min(h, cell_gy + bsize - world_offset_y)
+        # Local y interval inside out_patch (0..iy1-iy0)
+        dy0 = max(0, (cell_gy - world_offset_y) - iy0)
+        dy1 = min(iy1 - iy0, (cell_gy + bsize - world_offset_y) - iy0)
+        if sy1 <= sy0 or dy1 <= dy0:
+            continue
+
+        for cell_gx in range(cell_gx_start, gx1, bsize):
+            sx0 = max(0, cell_gx - world_offset_x)
+            sx1 = min(w, cell_gx + bsize - world_offset_x)
+            dx0 = max(0, (cell_gx - world_offset_x) - ix0)
+            dx1 = min(ix1 - ix0, (cell_gx + bsize - world_offset_x) - ix0)
+            if sx1 <= sx0 or dx1 <= dx0:
+                continue
+
+            cell_pixels = src_rgb[sy0:sy1, sx0:sx1, :3]
+            mean_rgb = np.round(cell_pixels.mean(axis=(0, 1))).astype(np.uint8)
+            out_patch[dy0:dy1, dx0:dx1, :] = mean_rgb
+
+    if mask is not None and mask.shape == out_patch.shape[:2]:
+        orig_sub = src_rgb[iy0:iy1, ix0:ix1, :3]
+        cond = (mask >= 128)[:, :, None]
+        return np.where(cond, out_patch, orig_sub)
+    return out_patch
+
+
+def apply_permanent_redaction_rgb(
+    dst_rgb: np.ndarray,
+    ix0: int,
+    iy0: int,
+    ix1: int,
+    iy1: int,
+    color_hex: str,
+    *,
+    mask: Optional[np.ndarray] = None,
+) -> None:
+    """
+    Overwrites `dst_rgb[iy0:iy1, ix0:ix1]` in-place with a 100% opaque solid replacement color.
+    Leaves zero original pixel information in any channel under the redacted region.
+    """
+    r, g, b = parse_hex_rgb(color_hex or DEFAULT_REDACT_COLOR)
+    solid = np.array([r, g, b], dtype=np.uint8)
+    if mask is None:
+        dst_rgb[iy0:iy1, ix0:ix1, 0] = r
+        dst_rgb[iy0:iy1, ix0:ix1, 1] = g
+        dst_rgb[iy0:iy1, ix0:ix1, 2] = b
+    else:
+        sub = dst_rgb[iy0:iy1, ix0:ix1]
+        active = mask > 0
+        sub[active] = solid
+
+
+def choose_high_contrast_text_rgb(fill_rgb: Sequence[int]) -> Tuple[int, int, int]:
+    """Selects crisp dark (#06182C) or pure white (#FFFFFF) text for maximum contrast on a callout badge."""
+    r, g, b = float(fill_rgb[0]), float(fill_rgb[1]), float(fill_rgb[2])
+    rel_luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+    return (6, 24, 44) if rel_luma >= 0.58 else (255, 255, 255)
+
+
+def get_next_callout_number(
+    annotations: Sequence[AnnotationItem],
+    manual_override: Optional[int] = None,
+) -> int:
+    """
+    Computes the next sequential callout number (`1, 2, 3...`).
+    Uses `max(existing callout_number) + 1` so deleting an earlier callout never silently
+    renumbers existing markers. Honors `manual_override` when explicitly set (`>= 1`).
+    """
+    if manual_override is not None and int(manual_override) >= 1:
+        return int(manual_override)
+    existing = [
+        int(it.callout_number)
+        for it in annotations
+        if it.effective_tool_kind()[0] == "callout" and int(getattr(it, "callout_number", 0)) >= 1
+    ]
+    return (max(existing) + 1) if existing else 1
+
+
+@dataclass
+class PixelInspectionSample:
+    """Structured pixel inspection & HDR luminance readout for the Eyedropper and Magnifier."""
+
+    x: int
+    y: int
+    rgb: Tuple[int, int, int]
+    hex_color: str
+    rgb_source_label: str
+    is_hdr_surface: bool = False
+    hdr_scrgb_rgb: Optional[Tuple[float, float, float]] = None
+    hdr_luma_nits: Optional[float] = None
+    hdr_peak_nits: Optional[float] = None
+    hdr_sdr_white_nits: Optional[float] = None
+
+    @property
+    def summary_text(self) -> str:
+        r, g, b = self.rgb
+        base = f"({self.x}, {self.y}) • RGB({r}, {g}, {b}) • {self.hex_color}"
+        if self.is_hdr_surface and self.hdr_luma_nits is not None:
+            return (
+                f"{base} • HDR: {self.hdr_luma_nits:.0f} nits "
+                f"(peak {self.hdr_peak_nits:.0f}n) [{self.rgb_source_label}]"
+            )
+        return f"{base} [{self.rgb_source_label}]"
+
+
+def sample_pixel_inspection_data(
+    frame: CapturedFrame,
+    phys_x: int,
+    phys_y: int,
+    *,
+    composited_rgb: Optional[np.ndarray] = None,
+    white_scale: Optional[float] = None,
+) -> PixelInspectionSample:
+    """
+    Samples exact pixel coordinates, RGB/HEX color, and (when available) physical HDR scRGB
+    luminance in nits (`1.0` linear scRGB = `80.0` nits). Explicitly labels whether the RGB
+    readout comes from the composited editor preview, tone-mapped sRGB image, or SDR capture.
+    """
+    src_arr = composited_rgb if composited_rgb is not None else frame.srgb_image
+    h, w = int(src_arr.shape[0]), int(src_arr.shape[1])
+    cx = max(0, min(w - 1, int(phys_x)))
+    cy = max(0, min(h - 1, int(phys_y)))
+    r = int(src_arr[cy, cx, 0])
+    g = int(src_arr[cy, cx, 1])
+    b = int(src_arr[cy, cx, 2])
+    hex_col = f"#{r:02X}{g:02X}{b:02X}"
+
+    if composited_rgb is not None:
+        source_label = "Composited Editor Preview"
+    elif getattr(frame, "is_hdr_surface", False):
+        source_label = "Tone-Mapped sRGB"
+    else:
+        source_label = "SDR Capture"
+
+    hdr_scrgb: Optional[Tuple[float, float, float]] = None
+    hdr_luma_nits: Optional[float] = None
+    hdr_peak_nits: Optional[float] = None
+    sdr_white_nits: Optional[float] = None
+
+    raw_hdr = getattr(frame, "raw_scrgb_float", None)
+    if getattr(frame, "is_hdr_surface", False) and raw_hdr is not None and raw_hdr.ndim == 3:
+        hh, hw = int(raw_hdr.shape[0]), int(raw_hdr.shape[1])
+        hx = max(0, min(hw - 1, int(round(cx * (hw / max(1.0, float(w)))))))
+        hy = max(0, min(hh - 1, int(round(cy * (hh / max(1.0, float(h)))))))
+        hr = float(raw_hdr[hy, hx, 0])
+        hg = float(raw_hdr[hy, hx, 1])
+        hb = float(raw_hdr[hy, hx, 2])
+        hdr_scrgb = (hr, hg, hb)
+        # Linear Rec.709 / scRGB luminance where 1.0 == 80.0 cd/m^2 (nits)
+        luma_lin = max(0.0, 0.2126 * hr + 0.7152 * hg + 0.0722 * hb)
+        peak_lin = max(0.0, max(hr, hg, hb))
+        hdr_luma_nits = luma_lin * 80.0
+        hdr_peak_nits = peak_lin * 80.0
+        ws = float(white_scale if white_scale is not None else getattr(frame, "detected_white_scale", 2.5))
+        sdr_white_nits = ws * 80.0
+
+    return PixelInspectionSample(
+        x=cx,
+        y=cy,
+        rgb=(r, g, b),
+        hex_color=hex_col,
+        rgb_source_label=source_label,
+        is_hdr_surface=bool(getattr(frame, "is_hdr_surface", False) and raw_hdr is not None),
+        hdr_scrgb_rgb=hdr_scrgb,
+        hdr_luma_nits=hdr_luma_nits,
+        hdr_peak_nits=hdr_peak_nits,
+        hdr_sdr_white_nits=sdr_white_nits,
+    )
 
 
 def composite_annotations_pil(
@@ -8433,11 +9114,13 @@ def composite_annotations_pil(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Non-destructive PIL/NumPy annotation compositor that renders all committed
-    `AnnotationItem`s (pen, rect, ellipse, line, arrow, text, and flood-fill masks)
+    `AnnotationItem`s (pen, rect, ellipse, line, arrow, text, flood-fill masks,
+    blur, world-grid pixelation, permanent redaction, and numbered callouts)
     onto a copy of `base_rgb` (or a cropped sub-region `crop_rect = (cx, cy, cw, ch)`).
     Never mutates `base_rgb`.
+    Also enforces irreversible redaction flattening at the end of export so redacted
+    regions contain ONLY the solid replacement color.
     Returns `(composited_rgb_uint8, vector_strokes_alpha_uint8)`.
-    Used by headless unit tests and as a fallback when Qt is unavailable.
     """
     from PIL import ImageDraw
 
@@ -8458,15 +9141,39 @@ def composite_annotations_pil(
 
     sx = float(px_scale_x) if px_scale_x > 0 else 1.0
     sy = float(px_scale_y) if px_scale_y > 0 else 1.0
+    scale_avg = max(0.25, 0.5 * (sx + sy))
 
     def _to_crop_pt(pt: Tuple[float, float]) -> Tuple[float, float]:
         return (pt[0] * sx - cx, pt[1] * sy - cy)
 
-    ordered_items = [it for it in annotations if it.tool == "fill"] + [
-        it for it in annotations if it.tool != "fill"
+    # Coherent 3-Pass Non-Destructive Layer Ordering:
+    # Pre-Pass: Scrub any Permanent Redaction ("redact") regions on the base image first so
+    #           subsequent Blur or Pixelate filters can never sample or smear hidden pixels.
+    # Pass 1:   Region image filters ("blur", "pixelate") in chronological order on the base screenshot.
+    # Pass 2:   Paint Bucket fills ("fill") in chronological order.
+    # Pass 3:   Vector shapes, pen strokes, lines, arrows, text, Callouts, and Permanent Redactions
+    #           in chronological order so Blur/Pixelate never overwrite or delete drawn annotations.
+    for pre_item in annotations:
+        if pre_item.effective_tool_kind()[0] == "redact":
+            pre_box = _compute_item_crop_bbox_and_mask(pre_item, cw, ch, cx, cy, sx, sy)
+            if pre_box is not None:
+                px0, py0, px1, py1, pmask = pre_box
+                apply_permanent_redaction_rgb(
+                    out_rgb, px0, py0, px1, py1, pre_item.color or DEFAULT_REDACT_COLOR, mask=pmask
+                )
+
+    filter_items = [it for it in annotations if it.effective_tool_kind()[0] in ("blur", "pixelate")]
+    fill_items = [it for it in annotations if it.effective_tool_kind()[0] == "fill"]
+    overlay_items = [
+        it for it in annotations if it.effective_tool_kind()[0] not in ("blur", "pixelate", "fill")
     ]
+    ordered_items = filter_items + fill_items + overlay_items
+    redaction_items: List[AnnotationItem] = []
+
     for item in ordered_items:
-        if item.tool == "fill":
+        family, mode = item.effective_tool_kind()
+
+        if family == "fill":
             op = clamp_fill_opacity(item.opacity)
             if op <= 0 or item.fill_bbox is None or not item.compressed_mask:
                 continue
@@ -8474,7 +9181,6 @@ def composite_annotations_pil(
             if mask is None:
                 continue
             bx, by, bw, bh = item.fill_bbox
-            # Intersect (bx, by, bw, bh) with (cx, cy, cw, ch)
             ix0 = max(cx, bx)
             iy0 = max(cy, by)
             ix1 = min(cx + cw, bx + bw)
@@ -8490,15 +9196,96 @@ def composite_annotations_pil(
             out_rgb[(iy0 - cy) : (iy1 - cy), (ix0 - cx) : (ix1 - cx)] = np.clip(
                 np.round(blended), 0, 255
             ).astype(np.uint8)
+
+        elif family == "blur":
+            box_res = _compute_item_crop_bbox_and_mask(item, cw, ch, cx, cy, sx, sy)
+            if box_res is None:
+                continue
+            ix0, iy0, ix1, iy1, mask_arr = box_res
+            scaled_rad = max(1, int(round(clamp_blur_radius(item.blur_radius) * scale_avg)))
+            blurred_sub = apply_region_blur_rgb(
+                out_rgb, ix0, iy0, ix1, iy1, scaled_rad, mask=mask_arr
+            )
+            out_rgb[iy0:iy1, ix0:ix1] = blurred_sub
+
+        elif family == "pixelate":
+            box_res = _compute_item_crop_bbox_and_mask(item, cw, ch, cx, cy, sx, sy)
+            if box_res is None:
+                continue
+            ix0, iy0, ix1, iy1, mask_arr = box_res
+            scaled_block = max(2, int(round(clamp_pixelate_size(item.pixel_size) * scale_avg)))
+            pix_sub = apply_world_aligned_pixelation_rgb(
+                out_rgb,
+                ix0,
+                iy0,
+                ix1,
+                iy1,
+                scaled_block,
+                world_offset_x=cx,
+                world_offset_y=cy,
+                mask=mask_arr,
+            )
+            out_rgb[iy0:iy1, ix0:ix1] = pix_sub
+
+        elif family == "redact":
+            redaction_items.append(item)
+            box_res = _compute_item_crop_bbox_and_mask(item, cw, ch, cx, cy, sx, sy)
+            if box_res is None:
+                continue
+            ix0, iy0, ix1, iy1, mask_arr = box_res
+            apply_permanent_redaction_rgb(
+                out_rgb, ix0, iy0, ix1, iy1, item.color or DEFAULT_REDACT_COLOR, mask=mask_arr
+            )
+
+        elif family == "callout" and item.points:
+            layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(layer)
+            pt_c = _to_crop_pt(item.points[0])
+            rad_px = max(8.0, float(clamp_callout_radius(item.callout_radius)) * scale_avg)
+            r, g, b = parse_hex_rgb(item.color)
+            or_r, or_g, or_b = parse_hex_rgb(getattr(item, "outline_color", "#FFFFFF") or "#FFFFFF")
+            tx_r, tx_g, tx_b = choose_high_contrast_text_rgb((r, g, b))
+            border_w = max(2, int(round(2.2 * scale_avg)))
+            draw.ellipse(
+                [pt_c[0] - rad_px, pt_c[1] - rad_px, pt_c[0] + rad_px, pt_c[1] + rad_px],
+                fill=(r, g, b, 255),
+                outline=(or_r, or_g, or_b, 255),
+                width=border_w,
+            )
+            num_str = str(max(1, int(getattr(item, "callout_number", 1))))
+            # Center numeral inside callout circle
+            bbox_t = draw.textbbox((0, 0), num_str)
+            tw = bbox_t[2] - bbox_t[0]
+            th = bbox_t[3] - bbox_t[1]
+            draw.text(
+                (pt_c[0] - tw / 2.0, pt_c[1] - th / 2.0 - 1.0),
+                num_str,
+                fill=(tx_r, tx_g, tx_b, 255),
+            )
+            rgba = np.asarray(layer, dtype=np.uint8)
+            a_ch = rgba[:, :, 3]
+            if np.any(a_ch > 0):
+                af = (a_ch.astype(np.float32) / 255.0)[:, :, None]
+                out_rgb = np.clip(
+                    np.round(out_rgb.astype(np.float32) * (1.0 - af) + rgba[:, :, :3].astype(np.float32) * af),
+                    0,
+                    255,
+                ).astype(np.uint8)
+                stroke_alpha = np.maximum(stroke_alpha, a_ch)
+
         else:
-            # Render vector/text item at 2x supersampling for smooth antialiasing
+            # Render vector/text item
             layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
             draw = ImageDraw.Draw(layer)
             r, g, b = parse_hex_rgb(item.color)
-            sw = max(1, int(round(clamp_stroke_thickness(item.thickness) * 0.5 * (sx + sy))))
-            if item.tool == "pen" and len(item.points) >= 2:
+            sw = max(1, int(round(clamp_stroke_thickness(item.thickness) * scale_avg)))
+            if item.tool == "pen" and len(item.points) >= 1:
                 pts = [_to_crop_pt(p) for p in item.points]
-                draw.line(pts, fill=(r, g, b, 255), width=sw, joint="curve")
+                if len(pts) == 1:
+                    rad = max(1, sw // 2)
+                    draw.ellipse([pts[0][0] - rad, pts[0][1] - rad, pts[0][0] + rad, pts[0][1] + rad], fill=(r, g, b, 255))
+                else:
+                    draw.line(pts, fill=(r, g, b, 255), width=sw, joint="curve")
             elif item.tool == "rect" and len(item.points) >= 2:
                 p1 = _to_crop_pt(item.points[0])
                 p2 = _to_crop_pt(item.points[-1])
@@ -8537,6 +9324,8 @@ def composite_annotations_pil(
                 ).astype(np.uint8)
                 stroke_alpha = np.maximum(stroke_alpha, a_ch)
 
+    # Each redaction has been applied in Pass 3 after all Pass 1 blur/pixelate and Pass 2 fill items
+    # using strictly binary opaque pixel replacement while preserving any vector annotations drawn on top of it.
     return out_rgb, stroke_alpha
 
 
@@ -8545,7 +9334,7 @@ _RESERVED_SCREENSHOT_PATHS: set = set()
 _ATOMIC_TMP_SEQ: int = 0
 
 
-def _unique_screenshot_path(save_dir: Path, prefix: str = "HDRSnipFusion") -> Path:
+def _unique_screenshot_path(save_dir: Path, prefix: str = DEFAULT_SCREENSHOT_PREFIX) -> Path:
     """
     Generates a collision-proof millisecond filename and reserves it in-memory under
     `_SCREENSHOT_PATH_LOCK` so concurrent or same-millisecond calls never return the
@@ -8718,7 +9507,7 @@ def save_pixmap_or_image_atomically(
 def save_screenshot_to_directory(
     image_obj: Any,
     save_dir_str: str,
-    prefix: str = "HDRSnipFusion",
+    prefix: str = DEFAULT_SCREENSHOT_PREFIX,
 ) -> Path:
     """
     Shared one-click screenshot saving implementation used by both ordinary Save (Ctrl+S)
@@ -9083,7 +9872,7 @@ if HAS_QT:
             self._badge_cached_rect: Optional[QRect] = None
             self._badge_frosted_pix: Optional[QPixmap] = None
 
-            # Tool state ("move", "pen", "rect", "ellipse", "line", "arrow", "fill", "text")
+            # Tool state ("move", "pen", "rect", "ellipse", "line", "arrow", "fill", "blur", "pixelate", "redact", "callout", "text", "eyedropper")
             self.active_tool: str = "move"
             self.stroke_color: QColor = QColor(config.default_color)
             self.stroke_width: int = clamp_stroke_thickness(config.default_thickness)
@@ -9096,6 +9885,28 @@ if HAS_QT:
             self.text_font_size: int = int(
                 getattr(config, "default_font_size", DEFAULT_TEXT_FONT_SIZE)
             )
+            self.blur_radius: int = clamp_blur_radius(
+                getattr(config, "default_blur_radius", DEFAULT_BLUR_RADIUS)
+            )
+            self.pixelate_size: int = clamp_pixelate_size(
+                getattr(config, "default_pixelate_size", DEFAULT_PIXELATE_SIZE)
+            )
+            self.filter_shape_mode: str = "rect"  # "rect" or "brush" for blur/pixelate/redact
+            self.redact_use_black: bool = True
+            self.redact_color: QColor = QColor(
+                getattr(config, "default_redact_color", DEFAULT_REDACT_COLOR)
+            )
+            self.callout_radius: int = clamp_callout_radius(
+                getattr(config, "default_callout_radius", DEFAULT_CALLOUT_RADIUS)
+            )
+            self.next_callout_number: int = 1
+            self.magnifier_zoom: int = clamp_magnifier_zoom(
+                getattr(config, "default_magnifier_zoom", DEFAULT_MAGNIFIER_ZOOM)
+            )
+            self.show_magnifier_always: bool = False
+            self.last_sampled_pixel: Optional[PixelInspectionSample] = None
+            self.dragging_annotation: Optional[AnnotationItem] = None
+            self.annotation_drag_last_pos: QPointF = QPointF()
             self.annotations: List[AnnotationItem] = []
             self.redo_stack: List[AnnotationItem] = []
             self.current_annotation: Optional[AnnotationItem] = None
@@ -9312,23 +10123,36 @@ if HAS_QT:
             tools = [
                 ("move", "Move (V)"),
                 ("pen", "Pen (P)"),
-                ("rect", "Rect (R)"),
-                ("ellipse", "Circle (E)"),
                 ("line", "Line (L)"),
                 ("arrow", "Arrow (A)"),
+                ("rect", "Rect (R)"),
+                ("ellipse", "Circle (E)"),
                 ("fill", "Fill (F)"),
+                ("blur", "Blur (B)"),
+                ("pixelate", "Pixel (X)"),
+                ("redact", "Redact (D)"),
+                ("callout", "123 (N)"),
                 ("text", "Text (T)"),
+                ("eyedropper", "Pick (I)"),
             ]
+            tool_tips = {
+                "move": "Move selection or drag existing annotations/callouts (V)",
+                "pen": "Freehand Pen (P) • [ / ] or Scroll Wheel adjusts thickness",
+                "line": "Straight Line (L) • Hold Shift for 45° snap",
+                "arrow": "Proportional Arrow (A) • Hold Shift for 45° snap",
+                "rect": "Rectangle Outline (R) • Hold Shift for 1:1 square",
+                "ellipse": "Ellipse / Circle Outline (E) • Hold Shift for 1:1 circle",
+                "fill": "Paint Bucket Flood Fill (F) • Non-destructively fills connected regions",
+                "blur": "Non-Destructive Blur (B) • Rectangle or Freehand Brush blur",
+                "pixelate": "World-Grid Pixelation (X) • Stable mosaic rectangle or brush",
+                "redact": "Permanent Redaction (D) • Irreversibly overwrites underlying pixels on export",
+                "callout": "Numbered Callouts (N) • Click to place sequential 1, 2, 3... markers; drag to reposition",
+                "text": "Text Label (T) • Click inside selection to add text",
+                "eyedropper": "Pixel Magnifier & Eyedropper (I) • Inspect X/Y, RGB, #HEX, HDR nits & sample color",
+            }
             for tool_id, label in tools:
                 btn = AeroGelButton(label, variant="glass", parent=self.toolbar)
-                if tool_id == "fill":
-                    btn.setToolTip(
-                        "Paint Bucket Flood Fill (F) • Non-destructively fills connected regions inside selection"
-                    )
-                else:
-                    btn.setToolTip(
-                        f"{label} • [ / ] or Scroll Wheel adjusts thickness • Hold Shift for snap • Hold Space to move box"
-                    )
+                btn.setToolTip(tool_tips.get(tool_id, label))
                 btn.setCheckable(True)
                 btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
                 btn.setChecked(tool_id == self.active_tool)
@@ -9561,6 +10385,136 @@ if HAS_QT:
 
             ctx_layout.addWidget(self.fill_group)
 
+            # --- Group C: Filter Shape Mode (Rect vs Brush) + Blur / Pixelate / Redact Controls ---
+            self.filter_group = QWidget(self.context_toolbar)
+            self.filter_group.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            flt_layout = QHBoxLayout(self.filter_group)
+            flt_layout.setContentsMargins(0, 0, 0, 0)
+            flt_layout.setSpacing(6)
+
+            self.mode_rect_btn = AeroGelButton("Rect Box", variant="glass", parent=self.filter_group)
+            self.mode_rect_btn.setCheckable(True)
+            self.mode_rect_btn.setChecked(self.filter_shape_mode == "rect")
+            self.mode_rect_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.mode_rect_btn.clicked.connect(lambda: self.set_filter_shape_mode("rect"))
+            flt_layout.addWidget(self.mode_rect_btn)
+
+            self.mode_brush_btn = AeroGelButton("Freehand Brush", variant="glass", parent=self.filter_group)
+            self.mode_brush_btn.setCheckable(True)
+            self.mode_brush_btn.setChecked(self.filter_shape_mode == "brush")
+            self.mode_brush_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.mode_brush_btn.clicked.connect(lambda: self.set_filter_shape_mode("brush"))
+            flt_layout.addWidget(self.mode_brush_btn)
+
+            self.filter_param_label = AeroToolbarLabel("Blur Radius:", tint_hex="#E4FFFF", parent=self.filter_group)
+            self.filter_param_label.setMinimumWidth(78)
+            flt_layout.addWidget(self.filter_param_label)
+
+            self.filter_param_slider = AeroLiquidSlider(Qt.Orientation.Horizontal, self.filter_group)
+            self.filter_param_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.filter_param_slider.setRange(MIN_BLUR_RADIUS, MAX_BLUR_RADIUS)
+            self.filter_param_slider.setFixedWidth(120)
+            self.filter_param_slider.setValue(self.blur_radius)
+            self.filter_param_slider.valueChanged.connect(self._on_filter_param_slider_changed)
+            self.filter_param_slider.sliderReleased.connect(self._persist_annotation_prefs)
+            flt_layout.addWidget(self.filter_param_slider)
+
+            self.filter_param_value = AeroToolbarLabel(f"{self.blur_radius} px", tint_hex="#FFFFFF", parent=self.filter_group)
+            self.filter_param_value.setFixedWidth(48)
+            flt_layout.addWidget(self.filter_param_value)
+
+            self.redact_black_btn = AeroGelButton("Solid Black (#000000)", variant="glass", parent=self.filter_group)
+            self.redact_black_btn.setCheckable(True)
+            self.redact_black_btn.setChecked(self.redact_use_black)
+            self.redact_black_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.redact_black_btn.setToolTip("Toggle between pure black (#000000) and the active swatch color for permanent redaction")
+            self.redact_black_btn.clicked.connect(self._toggle_redact_color_mode)
+            flt_layout.addWidget(self.redact_black_btn)
+
+            ctx_layout.addWidget(self.filter_group)
+
+            # --- Group D: Numbered Callout Controls (Next Number + Marker Radius) ---
+            self.callout_group = QWidget(self.context_toolbar)
+            self.callout_group.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            co_layout = QHBoxLayout(self.callout_group)
+            co_layout.setContentsMargins(0, 0, 0, 0)
+            co_layout.setSpacing(6)
+
+            co_num_lbl = AeroToolbarLabel("Next #:", tint_hex="#E4FFFF", parent=self.callout_group)
+            co_layout.addWidget(co_num_lbl)
+
+            self.callout_dec_btn = AeroGelButton("−", variant="glass", parent=self.callout_group)
+            self.callout_dec_btn.setFixedWidth(28)
+            self.callout_dec_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.callout_dec_btn.clicked.connect(lambda: self.set_next_callout_number(self.next_callout_number - 1))
+            co_layout.addWidget(self.callout_dec_btn)
+
+            self.callout_num_val = AeroToolbarLabel(str(self.next_callout_number), tint_hex="#FFFFFF", parent=self.callout_group)
+            self.callout_num_val.setFixedWidth(30)
+            co_layout.addWidget(self.callout_num_val)
+
+            self.callout_inc_btn = AeroGelButton("+", variant="glass", parent=self.callout_group)
+            self.callout_inc_btn.setFixedWidth(28)
+            self.callout_inc_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.callout_inc_btn.clicked.connect(lambda: self.set_next_callout_number(self.next_callout_number + 1))
+            co_layout.addWidget(self.callout_inc_btn)
+
+            self.callout_reset_btn = AeroGelButton("Reset 1", variant="glass", parent=self.callout_group)
+            self.callout_reset_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.callout_reset_btn.clicked.connect(lambda: self.set_next_callout_number(1))
+            co_layout.addWidget(self.callout_reset_btn)
+
+            co_sz_lbl = AeroToolbarLabel("Size:", tint_hex="#E4FFFF", parent=self.callout_group)
+            co_layout.addWidget(co_sz_lbl)
+
+            self.callout_size_slider = AeroLiquidSlider(Qt.Orientation.Horizontal, self.callout_group)
+            self.callout_size_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.callout_size_slider.setRange(MIN_CALLOUT_RADIUS, MAX_CALLOUT_RADIUS)
+            self.callout_size_slider.setFixedWidth(104)
+            self.callout_size_slider.setValue(self.callout_radius)
+            self.callout_size_slider.valueChanged.connect(lambda v: self.set_callout_radius(v, persist=False))
+            self.callout_size_slider.sliderReleased.connect(self._persist_annotation_prefs)
+            co_layout.addWidget(self.callout_size_slider)
+
+            self.callout_size_val = AeroToolbarLabel(f"{self.callout_radius} px", tint_hex="#FFFFFF", parent=self.callout_group)
+            self.callout_size_val.setFixedWidth(44)
+            co_layout.addWidget(self.callout_size_val)
+
+            ctx_layout.addWidget(self.callout_group)
+
+            # --- Group E: Eyedropper & Pixel Magnifier Controls ---
+            self.eyedropper_group = QWidget(self.context_toolbar)
+            self.eyedropper_group.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            eye_layout = QHBoxLayout(self.eyedropper_group)
+            eye_layout.setContentsMargins(0, 0, 0, 0)
+            eye_layout.setSpacing(6)
+
+            eye_zoom_lbl = AeroToolbarLabel("Zoom:", tint_hex="#E4FFFF", parent=self.eyedropper_group)
+            eye_layout.addWidget(eye_zoom_lbl)
+
+            self.magnifier_zoom_slider = AeroLiquidSlider(Qt.Orientation.Horizontal, self.eyedropper_group)
+            self.magnifier_zoom_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.magnifier_zoom_slider.setRange(MIN_MAGNIFIER_ZOOM, MAX_MAGNIFIER_ZOOM)
+            self.magnifier_zoom_slider.setFixedWidth(96)
+            self.magnifier_zoom_slider.setValue(self.magnifier_zoom)
+            self.magnifier_zoom_slider.valueChanged.connect(lambda v: self.set_magnifier_zoom(v, persist=False))
+            self.magnifier_zoom_slider.sliderReleased.connect(self._persist_annotation_prefs)
+            eye_layout.addWidget(self.magnifier_zoom_slider)
+
+            self.magnifier_zoom_val = AeroToolbarLabel(f"{self.magnifier_zoom}×", tint_hex="#FFFFFF", parent=self.eyedropper_group)
+            self.magnifier_zoom_val.setFixedWidth(32)
+            eye_layout.addWidget(self.magnifier_zoom_val)
+
+            self.eyedropper_readout_lbl = AeroToolbarLabel(
+                "Click any pixel to sample color (Shift+Click copies #HEX)",
+                tint_hex="#D8FFFF",
+                parent=self.eyedropper_group,
+            )
+            self.eyedropper_readout_lbl.setMinimumWidth(290)
+            eye_layout.addWidget(self.eyedropper_readout_lbl)
+
+            ctx_layout.addWidget(self.eyedropper_group)
+
             # Shared live brush / fill preview well at the right end of the context toolbar
             self.brush_preview_widget = AeroBrushPreviewWidget(self.context_toolbar)
             self.brush_preview_widget.setToolTip(
@@ -9575,29 +10529,190 @@ if HAS_QT:
             self.config.default_thickness = self.stroke_width
             self.config.default_fill_tolerance = self.fill_tolerance
             self.config.default_fill_opacity = self.fill_opacity
+            self.config.default_blur_radius = self.blur_radius
+            self.config.default_pixelate_size = self.pixelate_size
+            self.config.default_callout_radius = self.callout_radius
+            self.config.default_magnifier_zoom = self.magnifier_zoom
+            self.config.default_redact_color = (
+                DEFAULT_REDACT_COLOR if self.redact_use_black else self.stroke_color.name()
+            )
             try:
                 self.config.save()
             except Exception:
                 pass
 
+        def set_filter_shape_mode(self, mode: str) -> None:
+            norm = "brush" if str(mode).strip().lower() == "brush" else "rect"
+            self.filter_shape_mode = norm
+            if hasattr(self, "mode_rect_btn"):
+                self.mode_rect_btn.setChecked(norm == "rect")
+                self.mode_rect_btn.update()
+            if hasattr(self, "mode_brush_btn"):
+                self.mode_brush_btn.setChecked(norm == "brush")
+                self.mode_brush_btn.update()
+            self._sync_context_toolbar_mode()
+            self._reposition_toolbar()
+            self.update()
+
+        def _toggle_redact_color_mode(self) -> None:
+            self.redact_use_black = not self.redact_use_black
+            self.redact_color = QColor(DEFAULT_REDACT_COLOR) if self.redact_use_black else QColor(self.stroke_color)
+            if hasattr(self, "redact_black_btn"):
+                self.redact_black_btn.setChecked(self.redact_use_black)
+                self.redact_black_btn.setText(
+                    "Solid Black (#000000)" if self.redact_use_black else f"Active Color ({self.stroke_color.name().upper()})"
+                )
+            self._persist_annotation_prefs()
+            self._sync_context_toolbar_mode()
+            self.update()
+
+        def _on_filter_param_slider_changed(self, value: int) -> None:
+            if self.active_tool in BLUR_TOOLS:
+                self.set_blur_radius(value, persist=False)
+            elif self.active_tool in PIXELATE_TOOLS:
+                self.set_pixelate_size(value, persist=False)
+
+        def set_blur_radius(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_blur_radius(value)
+            self.blur_radius = clamped
+            self.config.default_blur_radius = clamped
+            if self.active_tool in BLUR_TOOLS and hasattr(self, "filter_param_slider"):
+                if self.filter_param_slider.value() != clamped:
+                    self.filter_param_slider.blockSignals(True)
+                    self.filter_param_slider.setValue(clamped)
+                    self.filter_param_slider.blockSignals(False)
+                self.filter_param_value.setText(f"{clamped} px")
+            if persist:
+                self._persist_annotation_prefs()
+            self.update()
+
+        def set_pixelate_size(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_pixelate_size(value)
+            self.pixelate_size = clamped
+            self.config.default_pixelate_size = clamped
+            if self.active_tool in PIXELATE_TOOLS and hasattr(self, "filter_param_slider"):
+                if self.filter_param_slider.value() != clamped:
+                    self.filter_param_slider.blockSignals(True)
+                    self.filter_param_slider.setValue(clamped)
+                    self.filter_param_slider.blockSignals(False)
+                self.filter_param_value.setText(f"{clamped} px")
+            if persist:
+                self._persist_annotation_prefs()
+            self.update()
+
+        def set_callout_radius(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_callout_radius(value)
+            self.callout_radius = clamped
+            self.config.default_callout_radius = clamped
+            if hasattr(self, "callout_size_slider") and self.callout_size_slider.value() != clamped:
+                self.callout_size_slider.blockSignals(True)
+                self.callout_size_slider.setValue(clamped)
+                self.callout_size_slider.blockSignals(False)
+            if hasattr(self, "callout_size_val"):
+                self.callout_size_val.setText(f"{clamped} px")
+            if persist:
+                self._persist_annotation_prefs()
+            self.update()
+
+        def set_next_callout_number(self, value: int) -> None:
+            self.next_callout_number = max(1, min(999, int(value)))
+            if hasattr(self, "callout_num_val"):
+                self.callout_num_val.setText(str(self.next_callout_number))
+            self.update()
+
+        def set_magnifier_zoom(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_magnifier_zoom(value)
+            self.magnifier_zoom = clamped
+            self.config.default_magnifier_zoom = clamped
+            if hasattr(self, "magnifier_zoom_slider") and self.magnifier_zoom_slider.value() != clamped:
+                self.magnifier_zoom_slider.blockSignals(True)
+                self.magnifier_zoom_slider.setValue(clamped)
+                self.magnifier_zoom_slider.blockSignals(False)
+            if hasattr(self, "magnifier_zoom_val"):
+                self.magnifier_zoom_val.setText(f"{clamped}×")
+            if persist:
+                self._persist_annotation_prefs()
+            self.update()
+
         def _sync_context_toolbar_mode(self) -> None:
             if not hasattr(self, "context_toolbar") or self.context_toolbar is None:
                 return
-            mode = "fill" if self.active_tool == "fill" else "stroke"
+            t = self.active_tool
+            preview_col = (
+                (QColor(DEFAULT_REDACT_COLOR) if self.redact_use_black else self.stroke_color)
+                if t in REDACT_TOOLS
+                else self.stroke_color
+            )
+            mode = "fill" if (t == "fill" or (t in REDACT_TOOLS and self.filter_shape_mode == "rect")) else "stroke"
             self.brush_preview_widget.set_preview_state(
                 thickness=self.stroke_width,
-                color=self.stroke_color,
+                color=preview_col,
                 mode=mode,
-                opacity=self.fill_opacity,
+                opacity=100 if t in REDACT_TOOLS else self.fill_opacity,
             )
-            if self.active_tool in STROKE_DRAWING_TOOLS:
-                self.fill_group.hide()
+
+            self.thickness_group.hide()
+            self.fill_group.hide()
+            self.filter_group.hide()
+            self.callout_group.hide()
+            self.eyedropper_group.hide()
+
+            if t in STROKE_DRAWING_TOOLS:
                 self.thickness_group.show()
-                self.context_toolbar.adjustSize()
-            elif self.active_tool == "fill":
-                self.thickness_group.hide()
+            elif t == "fill":
                 self.fill_group.show()
-                self.context_toolbar.adjustSize()
+            elif t in REGION_FILTER_TOOLS:
+                self.filter_group.show()
+                if t in BLUR_TOOLS:
+                    self.filter_param_label.setText("Blur Radius:")
+                    self.filter_param_label.show()
+                    self.filter_param_slider.blockSignals(True)
+                    self.filter_param_slider.setRange(MIN_BLUR_RADIUS, MAX_BLUR_RADIUS)
+                    self.filter_param_slider.setValue(self.blur_radius)
+                    self.filter_param_slider.blockSignals(False)
+                    self.filter_param_slider.show()
+                    self.filter_param_value.setText(f"{self.blur_radius} px")
+                    self.filter_param_value.show()
+                    self.redact_black_btn.hide()
+                elif t in PIXELATE_TOOLS:
+                    self.filter_param_label.setText("Block Size:")
+                    self.filter_param_label.show()
+                    self.filter_param_slider.blockSignals(True)
+                    self.filter_param_slider.setRange(MIN_PIXELATE_SIZE, MAX_PIXELATE_SIZE)
+                    self.filter_param_slider.setValue(self.pixelate_size)
+                    self.filter_param_slider.blockSignals(False)
+                    self.filter_param_slider.show()
+                    self.filter_param_value.setText(f"{self.pixelate_size} px")
+                    self.filter_param_value.show()
+                    self.redact_black_btn.hide()
+                elif t in REDACT_TOOLS:
+                    self.filter_param_label.hide()
+                    self.filter_param_slider.hide()
+                    self.filter_param_value.hide()
+                    self.redact_black_btn.setText(
+                        "Solid Black (#000000)" if self.redact_use_black else f"Active Color ({self.stroke_color.name().upper()})"
+                    )
+                    self.redact_black_btn.show()
+                if self.filter_shape_mode == "brush":
+                    self.thickness_group.show()
+            elif t == "callout":
+                self.callout_num_val.setText(str(self.next_callout_number))
+                self.callout_group.show()
+            elif t == "eyedropper":
+                self.eyedropper_group.show()
+            for grp in (
+                self.thickness_group,
+                self.fill_group,
+                self.filter_group,
+                self.callout_group,
+                self.eyedropper_group,
+            ):
+                if grp.isVisible() and grp.layout() is not None:
+                    grp.layout().activate()
+                    grp.adjustSize()
+            if self.context_toolbar.layout() is not None:
+                self.context_toolbar.layout().activate()
+            self.context_toolbar.adjustSize()
 
         def set_stroke_thickness(self, value: int, *, persist: bool = True) -> None:
             clamped = clamp_stroke_thickness(value)
@@ -9669,9 +10784,20 @@ if HAS_QT:
                 self.update(self._badge_cached_rect.adjusted(-6, -6, 6, 6))
 
         def set_tool(self, tool_id: str) -> None:
-            self.active_tool = tool_id
+            norm = str(tool_id or "move").strip().lower()
+            if norm in ("blur_rect", "pixelate_rect", "redact_rect"):
+                self.filter_shape_mode = "rect"
+                norm = norm.split("_")[0]
+            elif norm in ("blur_brush", "pixelate_brush", "redact_brush"):
+                self.filter_shape_mode = "brush"
+                norm = norm.split("_")[0]
+            self.active_tool = norm
+            if hasattr(self, "mode_rect_btn"):
+                self.mode_rect_btn.setChecked(self.filter_shape_mode == "rect")
+            if hasattr(self, "mode_brush_btn"):
+                self.mode_brush_btn.setChecked(self.filter_shape_mode == "brush")
             for tid, btn in self.tool_buttons.items():
-                btn.setChecked(tid == tool_id)
+                btn.setChecked(tid == norm)
                 btn.update()
             self._sync_context_toolbar_mode()
             self._reposition_toolbar()
@@ -9962,7 +11088,7 @@ if HAS_QT:
                 comp_rgb = np.full((ch, cw, 3), (bg_r, bg_g, bg_b), dtype=np.uint8)
                 return comp_rgb, None
 
-            # Render committed annotations onto a clean neutral canvas (without bg_pixmap)
+            # Render committed annotations onto a clean neutral canvas (without bg_pixmap or blur/pixelate filters)
             qimg = QImage(cw, ch, QImage.Format.Format_RGB888)
             qimg.fill(QColor(bg_r, bg_g, bg_b))
             p = QPainter(qimg)
@@ -9970,7 +11096,7 @@ if HAS_QT:
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             p.translate(-float(cx), -float(cy))
             p.scale(self._px_scale_x, self._px_scale_y)
-            self._draw_all_annotations(p, include_current=False)
+            self._draw_all_annotations(p, include_current=False, skip_region_filters=True)
             p.end()
 
             bpl = qimg.bytesPerLine()
@@ -9980,7 +11106,10 @@ if HAS_QT:
             comp_rgb = np.ascontiguousarray(raw_2d[:, : cw * 3].reshape((ch, cw, 3)).copy())
 
             # If there are committed vector/text strokes, capture their alpha mask for fringe blending
-            has_vector_strokes = any(it.tool != "fill" for it in self.annotations)
+            has_vector_strokes = any(
+                it.effective_tool_kind()[0] not in ("fill", "blur", "pixelate")
+                for it in self.annotations
+            )
             if not has_vector_strokes:
                 return comp_rgb, None
 
@@ -10198,7 +11327,11 @@ if HAS_QT:
             show_ctx = (
                 hasattr(self, "context_toolbar")
                 and self.context_toolbar is not None
-                and (self.active_tool in STROKE_DRAWING_TOOLS or self.active_tool == "fill")
+                and (
+                    self.active_tool in STROKE_DRAWING_TOOLS
+                    or self.active_tool in REGION_FILTER_TOOLS
+                    or self.active_tool in ("fill", "callout", "eyedropper")
+                )
             )
             if show_ctx:
                 self._sync_context_toolbar_mode()
@@ -10295,11 +11428,14 @@ if HAS_QT:
             if self.has_selection:
                 r = self.selection_rect.normalized()
 
-                # Outer soft cyan-aqua aura glow around crop box
+                # Theme-aware Frutiger Aqua aura glow around crop box
+                theme_spec = get_aqua_theme_spec(getattr(self.config, "aqua_theme", "ocean_current"))
+                br_r, br_g, br_b = theme_spec["border_rgb"]
+                bi_r, bi_g, bi_b = theme_spec["border_inner_rgb"]
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.setPen(QPen(QColor(0, 230, 255, 75), 5.0, Qt.PenStyle.SolidLine))
+                painter.setPen(QPen(QColor(br_r, br_g, br_b, 75), 5.0, Qt.PenStyle.SolidLine))
                 painter.drawRect(r)
-                painter.setPen(QPen(QColor(80, 245, 255, 185), 2.2, Qt.PenStyle.SolidLine))
+                painter.setPen(QPen(QColor(bi_r, bi_g, bi_b, 185), 2.2, Qt.PenStyle.SolidLine))
                 painter.drawRect(r)
                 painter.setPen(QPen(QColor(255, 255, 255, 235), 1.0, Qt.PenStyle.SolidLine))
                 painter.drawRect(r)
@@ -10318,9 +11454,9 @@ if HAS_QT:
                         center - QPointF(rad * 0.3, rad * 0.3), rad * 1.35
                     )
                     orb_grad.setColorAt(0.0, QColor(255, 255, 255, 255))
-                    orb_grad.setColorAt(0.38, QColor(125, 245, 255, 255))
-                    orb_grad.setColorAt(0.78, QColor(0, 145, 235, 255))
-                    orb_grad.setColorAt(1.0, QColor(0, 75, 155, 255))
+                    orb_grad.setColorAt(0.38, QColor(theme_spec["orb_mid_hex"]))
+                    orb_grad.setColorAt(0.78, QColor(theme_spec["orb_deep_hex"]))
+                    orb_grad.setColorAt(1.0, QColor(theme_spec["orb_dark_hex"]))
                     painter.setBrush(QBrush(orb_grad))
                     painter.setPen(QPen(QColor(255, 255, 255, 240), 1.3))
                     painter.drawEllipse(center, rad, rad)
@@ -10409,8 +11545,12 @@ if HAS_QT:
 
                 # Unobtrusive live circular brush-thickness cursor preview inside selection
                 # (Rendered only on the interactive overlay widget, NEVER in saved/copied exports)
-                if (
+                is_brush_tool = (
                     self.active_tool in STROKE_DRAWING_TOOLS
+                    or (self.active_tool in REGION_FILTER_TOOLS and self.filter_shape_mode == "brush")
+                )
+                if (
+                    is_brush_tool
                     and self.interaction_mode in ("none", "drawing")
                     and not self.space_held
                     and self._cursor_pos_local is not None
@@ -10428,26 +11568,322 @@ if HAS_QT:
                     painter.drawEllipse(c_pt, rad, rad)
                     painter.restore()
 
+            # 5. Live Frutiger Aqua Pixel Magnifier & Eyedropper Loupe
+            if self._cursor_pos_local is not None and (
+                self.active_tool == "eyedropper"
+                or self.interaction_mode in ("creating", "resizing")
+                or self.show_magnifier_always
+            ):
+                self._draw_pixel_magnifier_bubble(painter, self._cursor_pos_local)
+
+        def _get_or_render_filter_qimage(
+            self, item: AnnotationItem
+        ) -> Optional[Tuple[QRectF, QImage]]:
+            """
+            Computes and caches a region-bounded QImage for a Blur or Pixelate `AnnotationItem`
+            strictly clipped to the active selection bounds (when a selection exists).
+            Invalidates automatically only when the item's geometry, parameters, or tone-map revision changes.
+            """
+            family, mode = item.effective_tool_kind()
+            if family not in ("blur", "pixelate") or not item.points:
+                return None
+
+            self._sync_coordinate_scales()
+            src_rgb = self.frame.srgb_image
+            img_h, img_w = int(src_rgb.shape[0]), int(src_rgb.shape[1])
+            sx = max(1e-4, float(self._px_scale_x))
+            sy = max(1e-4, float(self._px_scale_y))
+
+            # Determine physical clip bounds (selection box if active, else full image)
+            if self.has_selection and self.selection_rect.width() > 2:
+                sel_r = self.selection_rect.normalized()
+                scx, scy, scw, sch = self.coord_mapper.local_rect_to_image_crop_rect(
+                    (sel_r.left(), sel_r.top(), sel_r.width(), sel_r.height())
+                )
+                clip_x0 = max(0, min(img_w, scx))
+                clip_y0 = max(0, min(img_h, scy))
+                clip_x1 = max(0, min(img_w, scx + scw))
+                clip_y1 = max(0, min(img_h, scy + sch))
+            else:
+                clip_x0, clip_y0, clip_x1, clip_y1 = 0, 0, img_w, img_h
+
+            if clip_x1 <= clip_x0 or clip_y1 <= clip_y0:
+                return None
+
+            step_stride = max(1, len(item.points) // 16)
+            pts_sig = (
+                len(item.points),
+                tuple((round(px, 1), round(py, 1)) for px, py in item.points[::step_stride]),
+                round(item.points[-1][0], 1),
+                round(item.points[-1][1], 1),
+            )
+            redact_count = sum(
+                1 for it in self.annotations if it.effective_tool_kind()[0] == "redact"
+            )
+            cache_key = (
+                family,
+                mode,
+                pts_sig,
+                int(item.blur_radius),
+                int(item.pixel_size),
+                int(item.thickness),
+                (clip_x0, clip_y0, clip_x1, clip_y1),
+                round(sx, 4),
+                round(sy, 4),
+                int(self._render_revision),
+                bool(getattr(self.frame, "is_preview", False)),
+                redact_count,
+            )
+            if item._cached_qimage is not None and item._cached_cache_key == cache_key:
+                return item._cached_qimage
+
+            box_res = _compute_item_crop_bbox_and_mask(item, img_w, img_h, 0, 0, sx, sy)
+            if box_res is None:
+                return None
+            ix0, iy0, ix1, iy1, mask_arr = box_res
+
+            # Intersect with selection clip bounds
+            cx0 = max(ix0, clip_x0)
+            cy0 = max(iy0, clip_y0)
+            cx1 = min(ix1, clip_x1)
+            cy1 = min(iy1, clip_y1)
+            if cx1 <= cx0 or cy1 <= cy0:
+                return None
+
+            sub_mask = (
+                mask_arr[(cy0 - iy0) : (cy1 - iy0), (cx0 - ix0) : (cx1 - ix0)]
+                if mask_arr is not None
+                else None
+            )
+            scale_avg = 0.5 * (sx + sy)
+            if family == "blur":
+                rad_px = max(1, int(round(clamp_blur_radius(item.blur_radius) * scale_avg)))
+                patch_rgb = apply_region_blur_rgb(
+                    src_rgb, cx0, cy0, cx1, cy1, rad_px, mask=None
+                )
+            else:
+                blk_px = max(2, int(round(clamp_pixelate_size(item.pixel_size) * scale_avg)))
+                patch_rgb = apply_world_aligned_pixelation_rgb(
+                    src_rgb,
+                    cx0,
+                    cy0,
+                    cx1,
+                    cy1,
+                    blk_px,
+                    world_offset_x=0,
+                    world_offset_y=0,
+                    mask=None,
+                )
+
+            ph, pw, _ = patch_rgb.shape
+            if sub_mask is not None and sub_mask.shape == (ph, pw):
+                # Freehand brush mode: use premultiplied ARGB32 where pixels outside the brush
+                # stroke have alpha == 0 (100% transparent), so the bounding box never overwrites
+                # or deletes existing annotations or earlier filter strokes.
+                alpha = np.where(sub_mask > 0, np.uint8(255), np.uint8(0))
+                a16 = alpha.astype(np.uint16)
+                bgra = np.empty((ph, pw, 4), dtype=np.uint8)
+                bgra[:, :, 0] = ((a16 * patch_rgb[:, :, 2].astype(np.uint16) + 127) // 255).astype(np.uint8)
+                bgra[:, :, 1] = ((a16 * patch_rgb[:, :, 1].astype(np.uint16) + 127) // 255).astype(np.uint8)
+                bgra[:, :, 2] = ((a16 * patch_rgb[:, :, 0].astype(np.uint16) + 127) // 255).astype(np.uint8)
+                bgra[:, :, 3] = alpha
+                qimg = QImage(
+                    bgra.data, pw, ph, pw * 4, QImage.Format.Format_ARGB32_Premultiplied
+                ).copy()
+            else:
+                qimg = QImage(
+                    patch_rgb.data, pw, ph, pw * 3, QImage.Format.Format_RGB888
+                ).copy()
+            target_rc = QRectF(
+                float(cx0) / sx,
+                float(cy0) / sy,
+                float(pw) / sx,
+                float(ph) / sy,
+            )
+            result = (target_rc, qimg)
+            item._cached_qimage = result
+            item._cached_cache_key = cache_key
+            return result
+
+        def _draw_pixel_magnifier_bubble(
+            self, painter: QPainter, cursor_pos: QPointF
+        ) -> None:
+            """
+            Renders the Frutiger Aqua magnification loupe and pixel readout card near `cursor_pos`.
+            Uses crisp nearest-neighbor pixel magnification (4x–16x), center-pixel crosshair,
+            live physical (X, Y) coordinates, RGB/#HEX values, and accurate HDR scRGB nit readout.
+            Never appears in exported screenshots.
+            """
+            self._sync_coordinate_scales()
+            sx = max(1e-4, float(self._px_scale_x))
+            sy = max(1e-4, float(self._px_scale_y))
+            phys_x = int(round(cursor_pos.x() * sx))
+            phys_y = int(round(cursor_pos.y() * sy))
+
+            sample = sample_pixel_inspection_data(
+                self.frame,
+                phys_x,
+                phys_y,
+                white_scale=self.current_white_scale,
+            )
+            self.last_sampled_pixel = sample
+            if hasattr(self, "eyedropper_readout_lbl") and self.active_tool == "eyedropper":
+                self.eyedropper_readout_lbl.setText(sample.summary_text)
+
+            zoom = clamp_magnifier_zoom(self.magnifier_zoom)
+            half_cells = max(3, min(11, 48 // zoom))
+            grid_cells = half_cells * 2 + 1  # Odd number of cells so center pixel is exact
+            cell_px = float(zoom)
+            loupe_side = grid_cells * cell_px
+
+            card_w = max(218.0, loupe_side + 24.0)
+            card_h = loupe_side + (76.0 if sample.is_hdr_surface else 58.0)
+
+            # Position bubble offset from cursor without leaving screen bounds
+            bx = cursor_pos.x() + 22.0
+            by = cursor_pos.y() + 22.0
+            if bx + card_w > self.width() - 8:
+                bx = cursor_pos.x() - card_w - 22.0
+            if by + card_h > self.height() - 8:
+                by = cursor_pos.y() - card_h - 22.0
+            bx = max(8.0, min(float(self.width() - card_w - 8), bx))
+            by = max(8.0, min(float(self.height() - card_h - 8), by))
+            card_rect = QRectF(bx, by, card_w, card_h)
+
+            painter.save()
+            draw_frutiger_glass_panel(
+                painter,
+                card_rect,
+                radius=14.0,
+                frosted_pixmap=None,
+                tint_style="dialog",
+            )
+
+            # Extract (grid_cells x grid_cells) physical patch around (sample.x, sample.y)
+            src_img = self.frame.srgb_image
+            ih, iw = int(src_img.shape[0]), int(src_img.shape[1])
+            patch = np.zeros((grid_cells, grid_cells, 3), dtype=np.uint8)
+            for dy in range(-half_cells, half_cells + 1):
+                py = max(0, min(ih - 1, sample.y + dy))
+                for dx in range(-half_cells, half_cells + 1):
+                    px = max(0, min(iw - 1, sample.x + dx))
+                    patch[dy + half_cells, dx + half_cells] = src_img[py, px, :3]
+
+            qpatch = QImage(
+                patch.data,
+                grid_cells,
+                grid_cells,
+                grid_cells * 3,
+                QImage.Format.Format_RGB888,
+            ).copy()
+
+            loupe_x = card_rect.left() + (card_w - loupe_side) * 0.5
+            loupe_y = card_rect.top() + 10.0
+            loupe_rect = QRectF(loupe_x, loupe_y, loupe_side, loupe_side)
+
+            # Render nearest-neighbor (SmoothPixmapTransform explicitly OFF)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+            painter.drawImage(loupe_rect, qpatch)
+
+            # Subtle pixel grid lines when zoom >= 8x
+            if zoom >= 8:
+                painter.setPen(QPen(QColor(255, 255, 255, 42), 1.0))
+                for i in range(1, grid_cells):
+                    gx = loupe_x + i * cell_px
+                    gy = loupe_y + i * cell_px
+                    painter.drawLine(QPointF(gx, loupe_y), QPointF(gx, loupe_y + loupe_side))
+                    painter.drawLine(QPointF(loupe_x, gy), QPointF(loupe_x + loupe_side, gy))
+
+            # Outer border around loupe + high-contrast crosshair on center pixel
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(255, 255, 255, 230), 1.5))
+            painter.drawRect(loupe_rect)
+
+            center_cell = QRectF(
+                loupe_x + half_cells * cell_px,
+                loupe_y + half_cells * cell_px,
+                cell_px,
+                cell_px,
+            )
+            painter.setPen(QPen(QColor(0, 0, 0, 230), 2.2))
+            painter.drawRect(center_cell.adjusted(-1.0, -1.0, 1.0, 1.0))
+            painter.setPen(QPen(QColor(0, 245, 255, 255), 1.2))
+            painter.drawRect(center_cell)
+
+            # Readout text rows beneath loupe
+            info_top = loupe_rect.bottom() + 6.0
+            swatch_rc = QRectF(card_rect.left() + 10.0, info_top + 2.0, 16.0, 16.0)
+            painter.setPen(QPen(QColor(255, 255, 255, 235), 1.2))
+            painter.setBrush(QColor(*sample.rgb))
+            painter.drawRoundedRect(swatch_rc, 4.0, 4.0)
+
+            font_main = QFont("Segoe UI", 8, QFont.Weight.Bold)
+            painter.setFont(font_main)
+            painter.setPen(QColor(255, 255, 255, 250))
+            line1 = f"({sample.x}, {sample.y})  {sample.hex_color}  RGB{sample.rgb}"
+            painter.drawText(
+                QRectF(swatch_rc.right() + 6.0, info_top, card_w - 36.0, 18.0),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                line1,
+            )
+
+            font_sub = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
+            painter.setFont(font_sub)
+            painter.setPen(QColor(180, 248, 255, 240))
+            if sample.is_hdr_surface and sample.hdr_luma_nits is not None:
+                line2 = f"HDR scRGB: {sample.hdr_luma_nits:.0f} nits (peak {sample.hdr_peak_nits:.0f}n)"
+                line3 = f"Source: {sample.rgb_source_label} • {zoom}×"
+                painter.drawText(
+                    QRectF(card_rect.left() + 10.0, info_top + 19.0, card_w - 20.0, 16.0),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    line2,
+                )
+                painter.drawText(
+                    QRectF(card_rect.left() + 10.0, info_top + 35.0, card_w - 20.0, 16.0),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    line3,
+                )
+            else:
+                line2 = f"Source: {sample.rgb_source_label} • {zoom}×"
+                painter.drawText(
+                    QRectF(card_rect.left() + 10.0, info_top + 19.0, card_w - 20.0, 16.0),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    line2,
+                )
+            painter.restore()
+
         def _draw_all_annotations(
             self,
             painter: QPainter,
             *,
             include_current: bool = True,
             only_vector_strokes: bool = False,
+            skip_region_filters: bool = False,
         ) -> None:
             raw_items = list(self.annotations)
             if include_current and self.current_annotation is not None:
                 raw_items.append(self.current_annotation)
-            # Coherent two-layer compositing model:
-            # Pass 1 renders Paint Bucket fills in chronological order; Pass 2 renders
-            # vector & text strokes in chronological order on top so bounding outlines
-            # stay crisp and seamless with zero dark inner border.
-            items = [it for it in raw_items if it.tool == "fill"] + [
-                it for it in raw_items if it.tool != "fill"
+            # Coherent 3-Pass Non-Destructive Layer Stack:
+            # Pass 1 renders region image filters (Blur, Pixelate) on the base screenshot;
+            # Pass 2 renders Paint Bucket fills ("fill") in chronological order;
+            # Pass 3 renders vector shapes, pen strokes, lines, arrows, text, Callouts, and
+            # Permanent Redactions in chronological order so Blur/Pixelate never overwrite or
+            # delete Redactions, Circles, Rectangles, Callouts, Fills, or other annotations.
+            filter_items = [
+                it for it in raw_items if it.effective_tool_kind()[0] in ("blur", "pixelate")
             ]
+            fill_items = [
+                it for it in raw_items if it.effective_tool_kind()[0] == "fill"
+            ]
+            overlay_items = [
+                it for it in raw_items if it.effective_tool_kind()[0] not in ("blur", "pixelate", "fill")
+            ]
+            items = filter_items + fill_items + overlay_items
 
             for item in items:
-                if item.tool == "fill":
+                family, mode = item.effective_tool_kind()
+
+                if family == "fill":
                     if only_vector_strokes:
                         continue
                     qimg = item.get_or_create_qimage()
@@ -10466,6 +11902,90 @@ if HAS_QT:
                     else:
                         continue
                     painter.drawImage(target_rc, qimg)
+                    continue
+
+                if family in ("blur", "pixelate"):
+                    if only_vector_strokes or skip_region_filters:
+                        continue
+                    cached = self._get_or_render_filter_qimage(item)
+                    if cached is not None:
+                        target_rc, qimg = cached
+                        painter.save()
+                        if family == "pixelate":
+                            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+                        painter.drawImage(target_rc, qimg)
+                        painter.restore()
+                    continue
+
+                if family == "redact":
+                    r_col = QColor(item.color or DEFAULT_REDACT_COLOR)
+                    r_col.setAlpha(255)
+                    painter.save()
+                    # Disable antialiasing for rectangular redaction so edges are 100% solid opaque
+                    if mode == "rect" and len(item.points) >= 2:
+                        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                        p1 = QPointF(*item.points[0])
+                        p2 = QPointF(*item.points[-1])
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QBrush(r_col))
+                        painter.drawRect(QRectF(p1, p2).normalized())
+                    elif mode == "brush" and item.points:
+                        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                        sw = float(max(4, clamp_stroke_thickness(item.thickness)))
+                        if len(item.points) == 1:
+                            pt = QPointF(*item.points[0])
+                            painter.setPen(Qt.PenStyle.NoPen)
+                            painter.setBrush(QBrush(r_col))
+                            painter.drawEllipse(pt, sw / 2.0, sw / 2.0)
+                        else:
+                            pen = QPen(
+                                r_col,
+                                sw,
+                                Qt.PenStyle.SolidLine,
+                                Qt.PenCapStyle.RoundCap,
+                                Qt.PenJoinStyle.RoundJoin,
+                            )
+                            painter.setPen(pen)
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            path = QPainterPath(QPointF(*item.points[0]))
+                            for pt in item.points[1:]:
+                                path.lineTo(QPointF(*pt))
+                            painter.drawPath(path)
+                    painter.restore()
+                    continue
+
+                if family == "callout" and item.points:
+                    pt = QPointF(*item.points[0])
+                    rad = float(clamp_callout_radius(item.callout_radius))
+                    fill_col = QColor(item.color)
+                    out_col = QColor(getattr(item, "outline_color", "#FFFFFF") or "#FFFFFF")
+                    tx_rgb = choose_high_contrast_text_rgb(parse_hex_rgb(item.color))
+                    painter.save()
+                    # Drop shadow
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor(0, 18, 38, 145))
+                    painter.drawEllipse(pt + QPointF(0.0, 2.0), rad + 1.0, rad + 1.0)
+                    # Main badge disc
+                    painter.setBrush(QBrush(fill_col))
+                    painter.setPen(QPen(out_col, 2.2))
+                    painter.drawEllipse(pt, rad, rad)
+                    # Subtle top Frutiger Aqua gloss crescent
+                    gloss_rc = QRectF(pt.x() - rad * 0.68, pt.y() - rad * 0.82, rad * 1.36, rad * 0.82)
+                    gloss_grad = QLinearGradient(gloss_rc.topLeft(), gloss_rc.bottomLeft())
+                    gloss_grad.setColorAt(0.0, QColor(255, 255, 255, 165))
+                    gloss_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(gloss_grad))
+                    painter.drawEllipse(gloss_rc)
+                    # Centered sequential number
+                    num_str = str(max(1, int(getattr(item, "callout_number", 1))))
+                    f_px = max(9, int(round(rad * (0.95 if len(num_str) <= 2 else 0.76))))
+                    font = QFont("Segoe UI", f_px, QFont.Weight.Bold)
+                    painter.setFont(font)
+                    painter.setPen(QColor(*tx_rgb))
+                    text_rc = QRectF(pt.x() - rad, pt.y() - rad, rad * 2.0, rad * 2.0)
+                    painter.drawText(text_rc, Qt.AlignmentFlag.AlignCenter, num_str)
+                    painter.restore()
                     continue
 
                 col = QColor(item.color)
@@ -10588,11 +12108,43 @@ if HAS_QT:
                     self.context_toolbar.hide()
                 return
 
-            # 4. Inside selection box: move, Paint Bucket flood fill, text, or stroke drawing
+            # 3b. If Eyedropper tool is active, allow sampling from anywhere on the screen
+            if self.active_tool == "eyedropper" and not self.space_held:
+                self._sync_coordinate_scales()
+                phys_x = int(round(pos.x() * self._px_scale_x))
+                phys_y = int(round(pos.y() * self._px_scale_y))
+                sample = sample_pixel_inspection_data(
+                    self.frame, phys_x, phys_y, white_scale=self.current_white_scale
+                )
+                self.last_sampled_pixel = sample
+                sampled_qcol = QColor(sample.hex_color)
+                self.stroke_color = sampled_qcol
+                self.config.default_color = sample.hex_color
+                self.config.save()
+                self.color_btn.set_swatch_color(sampled_qcol)
+                if not self.redact_use_black:
+                    self.redact_color = sampled_qcol
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    QApplication.clipboard().setText(sample.hex_color)
+                self._sync_context_toolbar_mode()
+                self.update()
+                self.setFocus()
+                return
+
+            # 4. Inside selection box: move/drag annotation, Paint Bucket, Callout, Blur/Pixelate/Redact, Text, or Stroke
             sel_norm = self.selection_rect.normalized()
             if sel_norm.contains(pos):
                 if self.active_tool == "move" or self.space_held:
                     self.cancel_active_flood_fill()
+                    # Check if user clicked an existing movable annotation (e.g., callout, blur, pixelate, rect)
+                    if not self.space_held:
+                        for existing_it in reversed(self.annotations):
+                            if existing_it.tool != "fill" and existing_it.hit_test(pos.x(), pos.y()):
+                                self.interaction_mode = "moving_annotation"
+                                self.dragging_annotation = existing_it
+                                self.annotation_drag_last_pos = pos
+                                self.update()
+                                return
                     self.interaction_mode = "moving"
                     self.drag_start_pos = pos
                     self.rect_at_drag_start = QRectF(sel_norm)
@@ -10601,6 +12153,32 @@ if HAS_QT:
                         self.context_toolbar.hide()
                 elif self.active_tool == "fill":
                     self._start_flood_fill_at(pos)
+                    self.setFocus()
+                elif self.active_tool == "callout":
+                    # If clicking an existing callout marker, allow dragging it to reposition!
+                    for existing_it in reversed(self.annotations):
+                        if existing_it.effective_tool_kind()[0] == "callout" and existing_it.hit_test(pos.x(), pos.y()):
+                            self.interaction_mode = "moving_annotation"
+                            self.dragging_annotation = existing_it
+                            self.annotation_drag_last_pos = pos
+                            self.update()
+                            return
+                    c_num = self.next_callout_number
+                    self.annotations.append(
+                        AnnotationItem(
+                            tool="callout",
+                            color=self.stroke_color.name(),
+                            thickness=self.stroke_width,
+                            points=[(pos.x(), pos.y())],
+                            callout_number=c_num,
+                            callout_radius=self.callout_radius,
+                            outline_color="#FFFFFF",
+                        )
+                    )
+                    self.redo_stack.clear()
+                    self.set_next_callout_number(c_num + 1)
+                    self._invalidate_all_toolbars()
+                    self.update()
                     self.setFocus()
                 elif self.active_tool == "text":
                     text, ok = QInputDialog.getText(
@@ -10623,11 +12201,19 @@ if HAS_QT:
                     self.setFocus()
                 else:
                     self.interaction_mode = "drawing"
+                    eff_color = (
+                        (DEFAULT_REDACT_COLOR if self.redact_use_black else self.stroke_color.name())
+                        if self.active_tool in REDACT_TOOLS
+                        else self.stroke_color.name()
+                    )
                     self.current_annotation = AnnotationItem(
                         tool=self.active_tool,
-                        color=self.stroke_color.name(),
+                        color=eff_color,
                         thickness=self.stroke_width,
                         points=[(pos.x(), pos.y())],
+                        blur_radius=self.blur_radius,
+                        pixel_size=self.pixelate_size,
+                        shape_mode=self.filter_shape_mode,
                     )
                     self.update()
             else:
@@ -10664,7 +12250,13 @@ if HAS_QT:
                 else:
                     self.setCursor(Qt.CursorShape.CrossCursor)
 
-                if self.has_selection and self.active_tool in STROKE_DRAWING_TOOLS:
+                if self.active_tool == "eyedropper" or self.show_magnifier_always:
+                    self.update()
+                    return
+                if self.has_selection and (
+                    self.active_tool in STROKE_DRAWING_TOOLS
+                    or (self.active_tool in REGION_FILTER_TOOLS and self.filter_shape_mode == "brush")
+                ):
                     r_pad = int(self.stroke_width) + 14
                     dirty = QRect(
                         int(pos.x()) - r_pad,
@@ -10719,12 +12311,25 @@ if HAS_QT:
                 self.update()
 
             elif (
+                self.interaction_mode == "moving_annotation"
+                and self.dragging_annotation is not None
+            ):
+                dx = pos.x() - self.annotation_drag_last_pos.x()
+                dy = pos.y() - self.annotation_drag_last_pos.y()
+                self.dragging_annotation.translate(dx, dy)
+                self.annotation_drag_last_pos = pos
+                self._invalidate_all_toolbars()
+                self.update()
+
+            elif (
                 self.interaction_mode == "drawing"
                 and self.current_annotation is not None
             ):
                 target_pt = (pos.x(), pos.y())
-                if self.current_annotation.tool == "pen":
+                family, mode = self.current_annotation.effective_tool_kind()
+                if self.current_annotation.tool == "pen" or mode == "brush":
                     self.current_annotation.points.append(target_pt)
+                    self.current_annotation.invalidate_render_cache()
                 else:
                     if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                         target_pt = self._apply_shift_constraint(
@@ -10736,6 +12341,7 @@ if HAS_QT:
                         self.current_annotation.points.append(target_pt)
                     else:
                         self.current_annotation.points[-1] = target_pt
+                    self.current_annotation.invalidate_render_cache()
                 self.update()
 
         def mouseReleaseEvent(self, event) -> None:
@@ -10746,14 +12352,17 @@ if HAS_QT:
                 self.interaction_mode == "drawing"
                 and self.current_annotation is not None
             ):
+                _, mode = self.current_annotation.effective_tool_kind()
                 if (
                     len(self.current_annotation.points) >= 2
                     or self.current_annotation.tool == "pen"
+                    or mode == "brush"
                 ):
                     self.annotations.append(self.current_annotation)
                     self.redo_stack.clear()
                 self.current_annotation = None
 
+            self.dragging_annotation = None
             self.interaction_mode = "none"
             self.active_handle = -1
             self._reposition_toolbar()
@@ -10822,6 +12431,19 @@ if HAS_QT:
                 self.set_tool("arrow")
             elif key == Qt.Key.Key_F:
                 self.set_tool("fill")
+            elif key == Qt.Key.Key_B:
+                self.set_tool("blur")
+            elif key == Qt.Key.Key_X and not (mods & Qt.KeyboardModifier.ControlModifier):
+                self.set_tool("pixelate")
+            elif key == Qt.Key.Key_D and not (mods & Qt.KeyboardModifier.ControlModifier):
+                self.set_tool("redact")
+            elif key == Qt.Key.Key_N and not (mods & Qt.KeyboardModifier.ControlModifier):
+                self.set_tool("callout")
+            elif key == Qt.Key.Key_I:
+                self.set_tool("eyedropper")
+            elif key == Qt.Key.Key_M:
+                self.show_magnifier_always = not self.show_magnifier_always
+                self.update()
             elif key == Qt.Key.Key_T:
                 self.set_tool("text")
 
@@ -10890,6 +12512,73 @@ if HAS_QT:
             painter.scale(self._px_scale_x, self._px_scale_y)
             self._draw_all_annotations(painter)
             painter.end()
+
+            # Enforce irreversible permanent redaction flattening on final exported pixels
+            # while preserving any vector annotations (e.g., circles, callouts, arrows) drawn AFTER a redaction.
+            has_redaction = any(
+                it.effective_tool_kind()[0] == "redact" for it in self.annotations
+            )
+            if has_redaction:
+                overlay_items = [
+                    it
+                    for it in self.annotations
+                    if it.effective_tool_kind()[0] not in ("blur", "pixelate", "fill")
+                ]
+                last_redact_idx = max(
+                    idx
+                    for idx, it in enumerate(overlay_items)
+                    if it.effective_tool_kind()[0] == "redact"
+                )
+                trailing_vectors = overlay_items[last_redact_idx + 1 :]
+                qimg = out_canvas.toImage().convertToFormat(QImage.Format.Format_RGB888)
+                cw = qimg.width()
+                ch = qimg.height()
+                bpl = qimg.bytesPerLine()
+                ptr = qimg.bits()
+                ptr.setsize(ch * bpl)
+                raw_2d = np.frombuffer(ptr, dtype=np.uint8).reshape((ch, bpl))
+                rgb_arr = np.ascontiguousarray(raw_2d[:, : cw * 3].reshape((ch, cw, 3)).copy())
+                for red_item in overlay_items[: last_redact_idx + 1]:
+                    if red_item.effective_tool_kind()[0] == "redact":
+                        box_res = _compute_item_crop_bbox_and_mask(
+                            red_item,
+                            cw,
+                            ch,
+                            crop_rect.x(),
+                            crop_rect.y(),
+                            self._px_scale_x,
+                            self._px_scale_y,
+                        )
+                        if box_res is not None:
+                            ix0, iy0, ix1, iy1, mask_arr = box_res
+                            apply_permanent_redaction_rgb(
+                                rgb_arr,
+                                ix0,
+                                iy0,
+                                ix1,
+                                iy1,
+                                red_item.color or DEFAULT_REDACT_COLOR,
+                                mask=mask_arr,
+                            )
+                clean_qimg = QImage(
+                    rgb_arr.data, cw, ch, cw * 3, QImage.Format.Format_RGB888
+                ).copy()
+                out_pix = QPixmap.fromImage(clean_qimg)
+                if trailing_vectors:
+                    saved_ann = self.annotations
+                    try:
+                        self.annotations = list(trailing_vectors)
+                        tp = QPainter(out_pix)
+                        tp.setRenderHint(QPainter.RenderHint.Antialiasing)
+                        tp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                        tp.translate(-float(crop_rect.x()), -float(crop_rect.y()))
+                        tp.scale(self._px_scale_x, self._px_scale_y)
+                        self._draw_all_annotations(tp, include_current=False, skip_region_filters=True)
+                        tp.end()
+                    finally:
+                        self.annotations = saved_ann
+                return out_pix
+
             return out_canvas
 
         def copy_snip(self) -> None:
@@ -10909,7 +12598,7 @@ if HAS_QT:
             """
             DIAG_LOG.error("SAVE_SNIP", f"Failed to save screenshot to '{target_desc}'", exc)
             msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("HDRSnip Fusion — Screenshot Save Failed")
+            msg_box.setWindowTitle(f"{APP_NAME} — Screenshot Save Failed")
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setText(
                 f"Could not save the screenshot to:\n{target_desc}\n\n"
@@ -10946,7 +12635,7 @@ if HAS_QT:
                 target_dir_str = str(self.config.save_directory or "").strip()
                 try:
                     out_path = save_screenshot_to_directory(
-                        pix, target_dir_str, prefix="HDRSnipFusion"
+                        pix, target_dir_str, prefix=getattr(self.config, "screenshot_prefix", DEFAULT_SCREENSHOT_PREFIX)
                     )
                     if copy_to_clipboard:
                         QApplication.clipboard().setPixmap(pix)
@@ -10987,7 +12676,8 @@ if HAS_QT:
                 else self.render_final_cropped_pixmap()
             )
             stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")[:-3]
-            fallback_name = f"HDRSnipFusion_{stamp}.png"
+            pref = getattr(self.config, "screenshot_prefix", DEFAULT_SCREENSHOT_PREFIX) or DEFAULT_SCREENSHOT_PREFIX
+            fallback_name = f"{pref}_{stamp}.png"
             try:
                 cfg_dir = Path(self.config.save_directory).expanduser()
                 if cfg_dir.exists() and cfg_dir.is_dir():
@@ -11035,7 +12725,7 @@ if HAS_QT:
                     )
                     retry_ans = QMessageBox.warning(
                         self,
-                        "HDRSnip Fusion — Save As Failed",
+                        f"{APP_NAME} — Save As Failed",
                         f"Could not write screenshot to:\n{chosen_path}\n\n"
                         f"Reason: {exc}\n\n"
                         "Would you like to choose a different location?",
@@ -11626,15 +13316,32 @@ def _extract_asset_sha256(
     return (final_sha, "ok")
 
 
+def resolve_preferred_release_asset_names(
+    installed_exe_path: Optional[Path] = None,
+) -> Tuple[str, ...]:
+    """
+    Determines the preferred release asset search order based on the installed executable name.
+    Supports both `Prismwake.exe` and `HDRSnipFusion.exe` across v0.1.2 -> v0.1.3+ transitions.
+    """
+    try:
+        exe_name = Path(installed_exe_path or get_current_executable_path()).name.strip().lower()
+    except Exception:
+        exe_name = ""
+    if exe_name == LEGACY_RELEASE_ASSET_NAME.lower():
+        return (LEGACY_RELEASE_ASSET_NAME, PRIMARY_RELEASE_ASSET_NAME)
+    return (PRIMARY_RELEASE_ASSET_NAME, LEGACY_RELEASE_ASSET_NAME)
+
+
 def parse_github_release_payload(
     payload: Any,
     current_version: str = APP_VERSION,
+    preferred_asset_names: Optional[Sequence[str]] = None,
 ) -> UpdateCheckResult:
     """
     Validates a parsed JSON object from `/repos/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest`
     and returns a structured `UpdateCheckResult`.
-    Strictly ignores draft releases, pre-releases, releases from other repositories,
-    source archives, and releases where `HDRSnipFusion.exe` is not yet uploaded.
+    Supports both `Prismwake.exe` and `HDRSnipFusion.exe` release assets while strictly ignoring
+    draft releases, pre-releases, releases from other repositories, and source archives.
     """
     if not isinstance(payload, dict):
         return UpdateCheckResult(
@@ -11691,13 +13398,24 @@ def parse_github_release_payload(
     if not isinstance(assets, list):
         assets = []
 
-    matched_asset: Optional[Dict[str, Any]] = None
+    candidate_names = (
+        tuple(preferred_asset_names)
+        if preferred_asset_names is not None
+        else resolve_preferred_release_asset_names()
+    )
+    asset_by_name: Dict[str, Dict[str, Any]] = {}
     for item in assets:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        if name == EXPECTED_RELEASE_ASSET_NAME:
-            matched_asset = item
+        if isinstance(item, dict):
+            nm = str(item.get("name") or "").strip()
+            if nm in SUPPORTED_RELEASE_ASSET_NAMES and nm not in asset_by_name:
+                asset_by_name[nm] = item
+
+    matched_asset: Optional[Dict[str, Any]] = None
+    matched_asset_name: str = EXPECTED_RELEASE_ASSET_NAME
+    for cand_name in candidate_names:
+        if cand_name in asset_by_name:
+            matched_asset = asset_by_name[cand_name]
+            matched_asset_name = cand_name
             break
 
     if matched_asset is None:
@@ -11710,8 +13428,8 @@ def parse_github_release_payload(
             release_url=html_url,
             published_at=published_at,
             message=(
-                f"Release v{clean_latest} is published, but {EXPECTED_RELEASE_ASSET_NAME} "
-                "is still being built and attached by GitHub Actions."
+                f"Release v{clean_latest} is published, but Windows executable assets "
+                f"({PRIMARY_RELEASE_ASSET_NAME} / {LEGACY_RELEASE_ASSET_NAME}) are still being attached."
             ),
         )
 
@@ -11726,21 +13444,21 @@ def parse_github_release_payload(
             release_url=html_url,
             published_at=published_at,
             message=(
-                f"Release v{clean_latest} asset {EXPECTED_RELEASE_ASSET_NAME} is still uploading "
+                f"Release v{clean_latest} asset {matched_asset_name} is still uploading "
                 f"(state='{asset_state}')."
             ),
         )
 
     dl_url = str(matched_asset.get("browser_download_url") or "").strip()
     if not is_valid_github_url(dl_url, require_repo_prefix=True) or not dl_url.endswith(
-        "/" + EXPECTED_RELEASE_ASSET_NAME
+        "/" + matched_asset_name
     ):
         return UpdateCheckResult(
             status="error",
             current_version=current_version,
             latest_version=clean_latest,
             release_url=html_url,
-            message=f"Rejected invalid download URL for {EXPECTED_RELEASE_ASSET_NAME}: {dl_url}",
+            message=f"Rejected invalid download URL for {matched_asset_name}: {dl_url}",
         )
 
     try:
@@ -11755,13 +13473,13 @@ def parse_github_release_payload(
             latest_version=clean_latest,
             release_url=html_url,
             message=(
-                f"Release asset {EXPECTED_RELEASE_ASSET_NAME} has invalid size "
+                f"Release asset {matched_asset_name} has invalid size "
                 f"({asset_size:,} bytes)."
             ),
         )
 
     sha256_hex, sha_reason = _extract_asset_sha256(
-        matched_asset, release_body=release_body, asset_name=EXPECTED_RELEASE_ASSET_NAME
+        matched_asset, release_body=release_body, asset_name=matched_asset_name
     )
     if not sha256_hex:
         return UpdateCheckResult(
@@ -11780,11 +13498,11 @@ def parse_github_release_payload(
         release_notes=release_body,
         release_url=html_url,
         download_url=dl_url,
-        asset_name=EXPECTED_RELEASE_ASSET_NAME,
+        asset_name=matched_asset_name,
         asset_size=asset_size,
         expected_sha256=sha256_hex,
         published_at=published_at,
-        message=f"HDRSnip Fusion v{clean_latest} is available.",
+        message=f"{APP_NAME} v{clean_latest} is available.",
     )
 
 
@@ -11880,9 +13598,10 @@ def download_and_stage_release_asset(
     """
     if not check_result.is_update_ready:
         raise UpdateVerificationError("UpdateCheckResult does not contain a downloadable verified release.")
-    if check_result.asset_name != EXPECTED_RELEASE_ASSET_NAME:
+    asset_filename = str(check_result.asset_name or "").strip()
+    if asset_filename not in SUPPORTED_RELEASE_ASSET_NAMES:
         raise UpdateVerificationError(
-            f"Unexpected release asset name '{check_result.asset_name}' (expected '{EXPECTED_RELEASE_ASSET_NAME}')."
+            f"Unexpected release asset name '{asset_filename}' (expected one of {SUPPORTED_RELEASE_ASSET_NAMES})."
         )
     if not is_valid_github_url(check_result.download_url, require_repo_prefix=True):
         raise UpdateVerificationError(
@@ -11897,8 +13616,8 @@ def download_and_stage_release_asset(
     version_dir = Path(staging_root).resolve() / f"v{clean_ver}"
     version_dir.mkdir(parents=True, exist_ok=True)
 
-    final_staged_exe = version_dir / EXPECTED_RELEASE_ASSET_NAME
-    part_path = version_dir / f"{EXPECTED_RELEASE_ASSET_NAME}.{os.getpid()}.part"
+    final_staged_exe = version_dir / asset_filename
+    part_path = version_dir / f"{asset_filename}.{os.getpid()}.part"
 
     # If already staged and verified on disk with exact SHA-256 and valid PE64 structure, reuse it
     if final_staged_exe.exists():
@@ -11995,7 +13714,7 @@ def download_and_stage_release_asset(
         meta_path = version_dir / "staged_metadata.json"
         meta_payload = {
             "version": clean_ver,
-            "asset_name": EXPECTED_RELEASE_ASSET_NAME,
+            "asset_name": asset_filename,
             "asset_size": bytes_read,
             "sha256": expected_sha,
             "release_url": check_result.release_url,
@@ -13774,7 +15493,7 @@ if HAS_QT:
 
             title_row = QHBoxLayout()
             title_lbl = QLabel(
-                f"✦  HDRSnip Fusion v{check_result.latest_version} is available"
+                f"✦  {APP_NAME} v{check_result.latest_version} is available"
             )
             title_lbl.setStyleSheet(
                 "font-size: 14px; font-weight: bold; color: #FFFFFF;"
@@ -13828,7 +15547,7 @@ if HAS_QT:
             notes_box.setFixedHeight(130)
             notes_content = (
                 check_result.release_notes.strip()
-                or f"HDRSnip Fusion v{check_result.latest_version} stable release."
+                or f"{APP_NAME} v{check_result.latest_version} stable release."
             )
             notes_box.setPlainText(notes_content)
             card_vbox.addWidget(notes_box)
@@ -13989,6 +15708,7 @@ if HAS_QT:
             self.controller = controller
             self._original_intensity = config.animation_intensity
             self._original_transparency = config.glass_transparency
+            self._original_theme = getattr(config, "aqua_theme", "ocean_current")
             self._selected_save_directory: str = str(
                 config.save_directory or DEFAULT_SAVE_DIR
             )
@@ -14011,7 +15731,7 @@ if HAS_QT:
             )
 
             self.setWindowTitle(
-                f"HDRSnip Fusion v{APP_VERSION} • Frutiger Aqua Settings"
+                f"{APP_NAME} v{APP_VERSION} • Frutiger Aqua Settings"
             )
             self.setMinimumWidth(568)
             self.setWindowFlags(
@@ -14188,7 +15908,7 @@ if HAS_QT:
             title_row = QHBoxLayout()
             title_row.setContentsMargins(2, 0, 2, 2)
             title_lbl = QLabel(
-                f"✦  HDRSnip Fusion v{APP_VERSION} — Frutiger Aqua Settings"
+                f"✦  {APP_NAME} v{APP_VERSION} — {APP_TAGLINE}"
             )
             title_lbl.setStyleSheet(
                 "font-size: 14px; font-weight: bold; color: #FFFFFF;"
@@ -14329,9 +16049,21 @@ if HAS_QT:
             vis_vbox.setContentsMargins(14, 9, 14, 10)
             vis_vbox.setSpacing(7)
 
-            vis_hdr = QLabel("◆  FRUTIGER AQUA GLASS & ANIMATION", visuals_card)
+            vis_hdr = QLabel("◆  FRUTIGER AQUA THEME, GLASS & ANIMATION", visuals_card)
             vis_hdr.setObjectName("SectionHeader")
             vis_vbox.addWidget(vis_hdr)
+
+            self.theme_combo = QComboBox()
+            for th_key in AQUA_THEME_NAMES:
+                th_spec = AQUA_THEMES[th_key]
+                self.theme_combo.addItem(
+                    f"{th_spec['label']} — {th_spec['description']}", th_key
+                )
+            th_idx = self.theme_combo.findData(normalize_aqua_theme(getattr(config, "aqua_theme", "ocean_current")))
+            if th_idx >= 0:
+                self.theme_combo.setCurrentIndex(th_idx)
+            self.theme_combo.currentIndexChanged.connect(self._on_theme_preview)
+            _add_labeled_row(vis_vbox, "Frutiger Aqua Theme:", self.theme_combo)
 
             self.anim_combo = QComboBox()
             self.anim_combo.addItem("Off — Static Frutiger Aqua Glass", "off")
@@ -14816,6 +16548,14 @@ if HAS_QT:
                 except Exception:
                     os.startfile(str(CONFIG_DIR))
 
+        def _on_theme_preview(self) -> None:
+            theme_key = self.theme_combo.currentData()
+            if theme_key:
+                self._cached_base_pix = None
+                self._water_dirty = True
+                AeroAnimationDirector.instance().set_theme(str(theme_key))
+                self.update()
+
         def _on_anim_intensity_preview(self) -> None:
             level = self.anim_combo.currentData()
             if level:
@@ -14908,6 +16648,7 @@ if HAS_QT:
             director.apply_config_flags(self.config)
             director.set_intensity(self._original_intensity)
             director.set_transparency(self._original_transparency)
+            director.set_theme(self._original_theme)
             super().reject()
 
         def paintEvent(self, event) -> None:
@@ -14992,11 +16733,14 @@ if HAS_QT:
             chosen_save_dir = str(self._selected_save_directory or "").strip()
             if chosen_save_dir:
                 self.config.save_directory = chosen_save_dir
+            theme_key = normalize_aqua_theme(self.theme_combo.currentData() or "ocean_current")
+            self.config.aqua_theme = theme_key
             anim_level = str(self.anim_combo.currentData() or "medium")
             self.config.animation_intensity = anim_level
             trans_pct = max(10, min(95, int(self.trans_slider.value())))
             self.config.glass_transparency = trans_pct
             director = AeroAnimationDirector.instance()
+            director.set_theme(theme_key)
             director.set_intensity(anim_level)
             director.set_transparency(trans_pct)
             self.config.tone_map_mode = self.mode_combo.currentData()
@@ -15063,10 +16807,14 @@ if HAS_QT:
         p.setBrush(QBrush(bounce_grad))
         p.drawEllipse(center, radius - 1.5, radius - 1.5)
 
-        # Inner glowing viewfinder reticle
+        # Inner glowing viewfinder reticle + Prismwake crystal triangle
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor(255, 255, 255, 240), 3.0))
-        p.drawRoundedRect(QRectF(19.0, 19.0, 26.0, 26.0), 6.0, 6.0)
+        p.setPen(QPen(QColor(195, 250, 255, 210), 2.2))
+        p.drawRoundedRect(QRectF(17.0, 17.0, 30.0, 30.0), 7.0, 7.0)
+        prism_poly = QPolygonF([QPointF(32.0, 16.0), QPointF(45.0, 42.0), QPointF(19.0, 42.0)])
+        p.setBrush(QColor(150, 252, 255, 190))
+        p.setPen(QPen(QColor(255, 255, 255, 250), 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        p.drawPolygon(prism_poly)
 
         # Top glossy white specular reflection cap (classic Frutiger Aero orb shine)
         cap_grad = QLinearGradient(QPointF(32.0, 7.0), QPointF(32.0, 31.0))
@@ -15105,8 +16853,10 @@ if HAS_QT:
                 Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
             )
             self.app = QApplication(sys.argv)
-            self.app.setApplicationName("HDRSnip Fusion")
+            self.app.setApplicationName(APP_NAME)
+            self.app.setApplicationDisplayName(f"{APP_NAME} — {APP_TAGLINE}")
             self.app.setApplicationVersion(APP_VERSION)
+            self.app.setWindowIcon(create_tray_icon_pixmap())
             self.app.setQuitOnLastWindowClosed(False)
             self.config = AppConfig.load()
             self._snip_in_progress: bool = False
@@ -15223,7 +16973,7 @@ if HAS_QT:
             self.menu.addAction(self.settings_action)
 
             self.menu.addSeparator()
-            quit_action = QAction("Exit HDRSnip Fusion", self.menu)
+            quit_action = QAction(f"Exit {APP_NAME}", self.menu)
             quit_action.triggered.connect(self.quit_app)
             self.menu.addAction(quit_action)
 
@@ -15236,7 +16986,7 @@ if HAS_QT:
             self.hotkey_listener.hotkey_triggered.connect(self.trigger_snip)
             self.hotkey_listener.hotkey_failed.connect(
                 lambda msg: self.tray.showMessage(
-                    "HDRSnip Fusion Hotkey",
+                    f"{APP_NAME} Hotkey",
                     msg,
                     QSystemTrayIcon.MessageIcon.Warning,
                     7000,
@@ -15245,7 +16995,7 @@ if HAS_QT:
             self.hotkey_listener.start()
 
             self.tray.showMessage(
-                f"HDRSnip Fusion v{APP_VERSION} (Frutiger Aqua Edition)",
+                f"{APP_NAME} v{APP_VERSION} — {APP_TAGLINE}",
                 f"Press {self.config.hotkey_str} to capture an HDR-corrected snip.",
                 QSystemTrayIcon.MessageIcon.Information,
                 2500,
@@ -15435,7 +17185,7 @@ if HAS_QT:
                 else:
                     self._pending_update_prompt_result = result
                     self.tray.showMessage(
-                        f"HDRSnip Fusion v{result.latest_version} is available",
+                        f"{APP_NAME} v{result.latest_version} is available",
                         "A new stable version is ready. Click here or open Settings to review and install.",
                         QSystemTrayIcon.MessageIcon.Information,
                         7500,
@@ -15444,7 +17194,7 @@ if HAS_QT:
                 # Manual check invoked from tray menu
                 QMessageBox.information(
                     None,
-                    f"HDRSnip Fusion v{APP_VERSION} — Updates",
+                    f"{APP_NAME} v{APP_VERSION} — Updates",
                     result.message or f"You're running the latest version (v{APP_VERSION}).",
                 )
 
@@ -15541,7 +17291,7 @@ if HAS_QT:
                         sha256,
                     )
                     self.tray.showMessage(
-                        f"HDRSnip Fusion v{version} Ready",
+                        f"{APP_NAME} v{version} Ready",
                         "Update verified and will install as soon as you finish your current screenshot.",
                         QSystemTrayIcon.MessageIcon.Information,
                         5000,
@@ -15562,7 +17312,7 @@ if HAS_QT:
                     self._pending_update_prompt_result = check_result
                     if not self.is_snip_session_active():
                         self.tray.showMessage(
-                            f"HDRSnip Fusion v{version} Downloaded & Verified",
+                            f"{APP_NAME} v{version} Downloaded & Verified",
                             "Click here or open Settings to restart and install the verified update.",
                             QSystemTrayIcon.MessageIcon.Information,
                             7500,
@@ -15587,7 +17337,7 @@ if HAS_QT:
                 )
                 ans = QMessageBox.warning(
                     None,
-                    "HDRSnip Fusion — Update Failed",
+                    f"{APP_NAME} — Update Failed",
                     f"Could not download or verify the update automatically:\n{err_msg}\n\n"
                     f"Would you like to open the official GitHub Release page ({rel_url})?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -15640,7 +17390,7 @@ if HAS_QT:
                 if restart_after_update:
                     ans = QMessageBox.warning(
                         None,
-                        "HDRSnip Fusion — Automatic Update Failed",
+                        f"{APP_NAME} — Automatic Update Failed",
                         f"Could not replace the installed executable automatically:\n{exc}\n\n"
                         "Would you like to open the official GitHub Releases page to download manually?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -15661,7 +17411,7 @@ if HAS_QT:
         def _update_tray_tooltip(self) -> None:
             sm_tag = " • [SAFE MODE]" if self.config.is_safe_mode_active else ""
             self.tray.setToolTip(
-                f"HDRSnip Fusion v{APP_VERSION} ({self.config.hotkey_str}){sm_tag}"
+                f"{APP_NAME} v{APP_VERSION} ({self.config.hotkey_str}){sm_tag}"
             )
 
         def open_screenshots_folder(self) -> None:
@@ -15674,7 +17424,7 @@ if HAS_QT:
                 DIAG_LOG.error("OPEN_FOLDER", f"Could not open folder '{save_dir}'", exc)
                 QMessageBox.warning(
                     None,
-                    "HDRSnip Fusion — Folder Error",
+                    f"{APP_NAME} — Folder Error",
                     f"Could not open screenshots folder:\n{save_dir}\n\nReason: {exc}",
                 )
 
@@ -15720,7 +17470,7 @@ if HAS_QT:
             ):
                 res = self._pending_update_prompt_result
                 self.tray.showMessage(
-                    f"HDRSnip Fusion v{res.latest_version} is available",
+                    f"{APP_NAME} v{res.latest_version} is available",
                     "A new stable version is ready. Click here or open Settings to review and install.",
                     QSystemTrayIcon.MessageIcon.Information,
                     7500,
@@ -15787,7 +17537,7 @@ if HAS_QT:
                 print(f"[HDRSnip Fusion] Capture error: {exc}")
                 DIAG_LOG.error("TRIGGER_SNIP", "Failed to capture and open overlay", exc)
                 self.tray.showMessage(
-                    "HDRSnip Fusion Capture Failed",
+                    f"{APP_NAME} Capture Failed",
                     str(exc),
                     QSystemTrayIcon.MessageIcon.Warning,
                     7500,
@@ -15859,6 +17609,10 @@ if HAS_QT:
             return self.app.exec()
 
 
+if HAS_QT:
+    PrismwakeApplication = HDRSnipFusionApplication
+
+
 def _extract_cli_option_value(args: Sequence[str], flag: str) -> Optional[str]:
     """Extracts `<value>` from `[..., flag, value]` or `[..., f"{flag}={value}"]`."""
     prefix = flag + "="
@@ -15878,7 +17632,9 @@ def write_compiled_version_file(target_file: Path) -> None:
     `PyInstaller --windowed` verification where `sys.stdout` is unavailable.
     """
     payload = {
-        "app": "HDRSnip Fusion",
+        "app": APP_NAME,
+        "legacy_app": LEGACY_APP_NAME,
+        "tagline": APP_TAGLINE,
         "version": APP_VERSION,
         "tag": f"v{APP_VERSION}",
         "packaged": is_packaged_exe(),
@@ -15912,7 +17668,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 write_compiled_version_file(Path(env_ver_file))
             except Exception:
                 return 2
-        print(f"HDRSnip Fusion v{APP_VERSION}")
+        print(f"{APP_NAME} v{APP_VERSION} (formerly {LEGACY_APP_NAME})")
         return 0
 
     # 3. Early out-of-process staged updater helper mode (exits before Qt/hotkey/mutex init)
