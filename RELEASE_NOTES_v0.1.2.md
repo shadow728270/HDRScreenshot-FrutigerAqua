@@ -1,9 +1,11 @@
-# 💧 HDRSnip Fusion v0.1.2
+# 💧 Prismwake release archive · v0.1.2
+_Archived v0.1.2 release, originally distributed under the previous app name. The executable and internal updater identifiers are unchanged._
+
 ### More control over every pixel.
 
 > **New:** adjustable stroke thickness, a non-destructive Paint Bucket, and refined annotation controls. HDR capture and the Frutiger Aqua interface remain intact.
 
-![HDRSnip Fusion Aqua screenshot editor](https://raw.githubusercontent.com/shadow728270/HDRScreenshot-FrutigerAqua/main/docs/assets/hdrsnip-capture-overlay.webp)
+![Original Aqua screenshot editor](https://raw.githubusercontent.com/shadow728270/HDRScreenshot-FrutigerAqua/main/docs/assets/hdrsnip-capture-overlay.webp)
 
 *Earlier toolbar screenshot. The new v0.1.2 annotation controls aren't shown here.*
 
