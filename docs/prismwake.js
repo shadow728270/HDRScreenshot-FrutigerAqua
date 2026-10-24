@@ -62,42 +62,113 @@
    return sampledPixels;
  }
  fillTolerance.addEventListener("input",()=>{fillToleranceValue.textContent=fillTolerance.value});
+
+ // Render existing annotations against the photo before deciding which pixels are connected.
+ // A separate solid stroke mask ensures drawn outlines form reliable fill barriers even
+ // when a high tolerance would otherwise match their colors.
+ function renderAnnotation(ctx,el,asBarrier=false){
+   if(el.tagName.toLowerCase()==="image"){
+     if(!asBarrier&&el._fillCanvas)ctx.drawImage(el._fillCanvas,0,0,VIEW_W,VIEW_H);
+     return;
+   }
+   ctx.save();
+   ctx.lineWidth=5;ctx.lineCap="round";ctx.lineJoin="round";
+   ctx.strokeStyle=asBarrier?"#fff":(el.getAttribute("stroke")||"#5affd7");
+   ctx.fillStyle=asBarrier?"#fff":(el.getAttribute("fill")||"#fbfff7");
+   const tag=el.tagName.toLowerCase();
+   if(tag==="rect"){
+     const x=+el.getAttribute("x"),y=+el.getAttribute("y"),w=+el.getAttribute("width"),h=+el.getAttribute("height");
+     ctx.beginPath();
+     if(ctx.roundRect)ctx.roundRect(x,y,w,h,Math.min(4,w/2,h/2));
+     else ctx.rect(x,y,w,h);
+     ctx.stroke();
+   }else if(tag==="polyline"){
+     const pts=(el.getAttribute("points")||"").trim().split(/[,\s]+/).map(Number);
+     if(pts.length>=2){ctx.beginPath();ctx.moveTo(pts[0],pts[1]);for(let i=2;i+1<pts.length;i+=2)ctx.lineTo(pts[i],pts[i+1]);ctx.stroke()}
+   }else if(tag==="line"){
+     const x1=+el.getAttribute("x1"),y1=+el.getAttribute("y1"),x2=+el.getAttribute("x2"),y2=+el.getAttribute("y2");
+     ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+     const theta=Math.atan2(y2-y1,x2-x1),length=19;
+     ctx.beginPath();ctx.moveTo(x2,y2);
+     ctx.lineTo(x2-length*Math.cos(theta-.43),y2-length*Math.sin(theta-.43));
+     ctx.lineTo(x2-length*Math.cos(theta+.43),y2-length*Math.sin(theta+.43));
+     ctx.closePath();ctx.fill();
+   }else if(tag==="text"){
+     ctx.font='800 33px "Segoe UI",sans-serif';ctx.textBaseline="alphabetic";
+     const x=+el.getAttribute("x"),y=+el.getAttribute("y");
+     ctx.fillText(el.textContent||"",x,y);
+     if(!asBarrier){ctx.lineWidth=1;ctx.strokeStyle="#04476d";ctx.strokeText(el.textContent||"",x,y)}
+   }
+   ctx.restore();
+ }
+ function composeForFill(basePixels){
+   const frame=document.createElement("canvas");frame.width=FILL_W;frame.height=FILL_H;
+   const barrierCanvas=document.createElement("canvas");barrierCanvas.width=FILL_W;barrierCanvas.height=FILL_H;
+   const context=frame.getContext("2d",{willReadFrequently:true});
+   const maskContext=barrierCanvas.getContext("2d",{willReadFrequently:true});
+   if(!context||!maskContext)return null;
+   const img=context.createImageData(FILL_W,FILL_H);img.data.set(basePixels);context.putImageData(img,0,0);
+   const b=selectionBounds();
+   for(const ctx of [context,maskContext]){
+     ctx.setTransform(FILL_W/VIEW_W,0,0,FILL_H/VIEW_H,0,0);
+     ctx.beginPath();
+     if(ctx.roundRect)ctx.roundRect(b.x,b.y,b.width,b.height,Math.min(10,b.width/2,b.height/2));
+     else ctx.rect(b.x,b.y,b.width,b.height);
+     ctx.clip();
+   }
+   for(const el of annotationLayer.children){
+     renderAnnotation(context,el);
+     renderAnnotation(maskContext,el,true);
+   }
+   return {colors:context.getImageData(0,0,FILL_W,FILL_H).data,
+           barrier:maskContext.getImageData(0,0,FILL_W,FILL_H).data};
+ }
+ fillTolerance.addEventListener("input",()=>{fillToleranceValue.textContent=fillTolerance.value});
  function floodFillAt(point){
-   const source=sampleDemoPixels();
-   if(!source){hint.textContent="The demo image is still loading. Try again.";return}
-   const w=FILL_W,h=FILL_H,total=w*h;
+   if(!withinSelection(point)){hint.textContent="Fill only works inside your selected region.";return}
+   const original=sampleDemoPixels();
+   if(!original){hint.textContent="The demo image is still loading. Try again.";return}
+   const composite=composeForFill(original);
+   if(!composite){hint.textContent="Couldn't prepare the image for filling.";return}
+   const {colors:source,barrier}=composite;
+   const w=FILL_W,h=FILL_H,total=w*h,b=selectionBounds();
+   const minX=Math.max(0,Math.floor(b.x/VIEW_W*w));
+   const maxX=Math.min(w-1,Math.ceil((b.x+b.width)/VIEW_W*w)-1);
+   const minY=Math.max(0,Math.floor(b.y/VIEW_H*h));
+   const maxY=Math.min(h-1,Math.ceil((b.y+b.height)/VIEW_H*h)-1);
    const sx=Math.min(w-1,Math.max(0,Math.floor(point.x/VIEW_W*w)));
    const sy=Math.min(h-1,Math.max(0,Math.floor(point.y/VIEW_H*h)));
    const seed=sy*w+sx,off=seed*4;
+   if(sx<minX||sx>maxX||sy<minY||sy>maxY||barrier[off+3]>40){
+     hint.textContent="Click an unpainted area inside the selection, not on a drawn line.";return;
+   }
    const sr=source[off],sg=source[off+1],sb=source[off+2],t=+fillTolerance.value;
-   // RGB distance from the seed color, not iterative neighbor drift.
    const thresholdSq=3*t*t;
-   const mark=new Uint8Array(total),stack=new Int32Array(total),result=new Uint8ClampedArray(total*4);
+   const seen=new Uint8Array(total),stack=new Int32Array(total),result=new Uint8ClampedArray(total*4);
    let top=0,filled=0;
-   mark[seed]=1;stack[top++]=seed;
-   const hex=fillColor.value;
-   const fr=parseInt(hex.slice(1,3),16),fg=parseInt(hex.slice(3,5),16),fb=parseInt(hex.slice(5,7),16);
+   seen[seed]=1;stack[top++]=seed;
+   const hex=fillColor.value,fr=parseInt(hex.slice(1,3),16),fg=parseInt(hex.slice(3,5),16),fb=parseInt(hex.slice(5,7),16);
    while(top>0){
-     const index=stack[--top],i=index*4,dr=source[i]-sr,dg=source[i+1]-sg,db=source[i+2]-sb;
+     const index=stack[--top],i=index*4,x=index%w,y=(index/w)|0;
+     if(barrier[i+3]>40)continue;
+     const dr=source[i]-sr,dg=source[i+1]-sg,db=source[i+2]-sb;
      if(dr*dr+dg*dg+db*db>thresholdSq)continue;
      result[i]=fr;result[i+1]=fg;result[i+2]=fb;result[i+3]=174;filled++;
-     const x=index%w,y=(index/w)|0;
-     // Mark at enqueue time; each source pixel enters at most once.
      let next;
-     if(x>0){next=index-1;if(!mark[next]){mark[next]=1;stack[top++]=next}}
-     if(x<w-1){next=index+1;if(!mark[next]){mark[next]=1;stack[top++]=next}}
-     if(y>0){next=index-w;if(!mark[next]){mark[next]=1;stack[top++]=next}}
-     if(y<h-1){next=index+w;if(!mark[next]){mark[next]=1;stack[top++]=next}}
+     if(x>minX){next=index-1;if(!seen[next]){seen[next]=1;stack[top++]=next}}
+     if(x<maxX){next=index+1;if(!seen[next]){seen[next]=1;stack[top++]=next}}
+     if(y>minY){next=index-w;if(!seen[next]){seen[next]=1;stack[top++]=next}}
+     if(y<maxY){next=index+w;if(!seen[next]){seen[next]=1;stack[top++]=next}}
    }
-   if(!filled){hint.textContent="No matching pixels. Increase the tolerance.";return}
+   if(!filled){hint.textContent="No matching pixels. Adjust the fill tolerance.";return}
    const overlay=document.createElement("canvas");overlay.width=w;overlay.height=h;
    const ctx=overlay.getContext("2d");if(!ctx)return;
    const data=ctx.createImageData(w,h);data.data.set(result);ctx.putImageData(data,0,0);
    const element=make("image",{x:0,y:0,width:VIEW_W,height:VIEW_H,preserveAspectRatio:"none"});
+   element._fillCanvas=overlay;
    element.setAttribute("href",overlay.toDataURL("image/png"));
-   // Keep the dashed capture selection and all subsequent annotations visible.
    annotationLayer.appendChild(element);keep(element);
-   hint.textContent="Filled "+filled.toLocaleString()+" connected pixels · use ↶ to undo";
+   hint.textContent="Filled "+filled.toLocaleString()+" connected pixels within the selection · ↶ to undo";
  }
  stage.addEventListener("pointerdown",e=>{
    if(e.pointerType==="mouse"&&e.button!==0)return;
