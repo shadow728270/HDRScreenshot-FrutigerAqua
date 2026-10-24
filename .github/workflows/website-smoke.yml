@@ -1,0 +1,103 @@
+name: Validate Prismwake website
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/website-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  website-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify JavaScript syntax and page assets
+        run: |
+          node --check docs/prismwake.js
+          test -s docs/prismwake.css
+          test -s docs/assets/prismwake-mark.svg
+          test -s docs/assets/hdrsnip-capture-overlay.webp
+          test -s docs/assets/hdrsnip-settings.webp
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,json
+          html=Path('docs/index.html').read_text()
+          class P(HTMLParser):
+              def __init__(self):super().__init__();self.ids=set();self.hrefs=[];self.srcs=[]
+              def handle_starttag(self,tag,attrs):
+                  attrs=dict(attrs)
+                  if 'id' in attrs:self.ids.add(attrs['id'])
+                  if 'href' in attrs:self.hrefs.append(attrs['href'])
+                  if 'src' in attrs:self.srcs.append(attrs['src'])
+          p=P();p.feed(html)
+          assert all(x[1:] in p.ids for x in p.hrefs if x.startswith('#'))
+          assert all(Path('docs',x).exists() for x in p.srcs if not x.startswith(('http:','https:')))
+          assert "Prismwake" in html
+          assert "<canvas" not in html
+          assert "requestAnimationFrame" not in Path('docs/prismwake.js').read_text()
+          assert "backdrop-filter" not in Path('docs/prismwake.css').read_text()
+          print("HTML links, images, branding and idle-performance checks: PASS")
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Exercise desktop, mobile and interactive features
+        run: |
+          cat > /tmp/prismwake-smoke.mjs <<'JS'
+          import {chromium} from 'playwright';
+          import {spawn} from 'node:child_process';
+          import fs from 'node:fs';
+          const server=spawn('python3',['-m','http.server','8765','--directory','docs'],{stdio:'ignore'});
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          await sleep(1100);
+          const browser=await chromium.launch({headless:true});
+          fs.mkdirSync('screenshots',{recursive:true});
+          try{
+            for(const size of [{width:1366,height:900,id:'desktop'},{width:390,height:844,id:'mobile'}]){
+              const page=await browser.newPage({viewport:{width:size.width,height:size.height},deviceScaleFactor:1});
+              const errors=[];page.on('pageerror',e=>errors.push(e.message));
+              await page.route('https://api.github.com/repos/**',route=>route.fulfill({status:200,contentType:'application/json',
+                body:JSON.stringify([{tag_name:'v0.1.2',name:'Stroke and Paint Bucket',html_url:'https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.2',published_at:'2026-10-24T06:16:17Z'}])}));
+              await page.goto('http://127.0.0.1:8765/',{waitUntil:'networkidle'});
+              await page.screenshot({path:'screenshots/'+size.id+'.png',fullPage:true});
+              const metrics=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth-innerWidth,screenWidth:innerWidth,logo:document.querySelector('.brand')?.textContent?.trim(),cards:document.querySelectorAll('.lab-card').length,raf:typeof window.requestAnimationFrame}));
+              if(metrics.overflow>2)throw Error(size.id+' horizontal overflow: '+JSON.stringify(metrics));
+              if(metrics.cards!==4)throw Error('Expected 4 lab cards');
+              await page.locator('[data-theme-choice=emerald]').click();
+              if(await page.locator('#themePreview').getAttribute('data-theme')!=='emerald')throw Error('Theme selector failed');
+              await page.locator('#themeOpacity').evaluate(el=>{el.value='66';el.dispatchEvent(new Event('input',{bubbles:true}))});
+              if(await page.locator('#opacityValue').textContent()!=='66%')throw Error('Opacity control failed');
+              await page.locator('#compareRange').evaluate(el=>{el.value='73';el.dispatchEvent(new Event('input',{bubbles:true}))});
+              if(!String(await page.locator('#compare').getAttribute('style')).includes('73%'))throw Error('Comparison slider failed');
+              await page.locator('[data-tool=rect]').click();
+              const stage=await page.locator('#demoStage').boundingBox();
+              await page.mouse.move(stage.x+stage.width*.25,stage.y+stage.height*.3);
+              await page.mouse.down();await page.mouse.move(stage.x+stage.width*.7,stage.y+stage.height*.65,{steps:4});await page.mouse.up();
+              if(await page.locator('#demoSvg > rect').count()<2)throw Error('Demo shape drawing failed');
+              await page.locator('#demoUndo').click();
+              if(await page.locator('#demoSvg > rect').count()!==1)throw Error('Undo failed');
+              await page.locator('#refreshReleases').click();
+              await page.waitForTimeout(200);
+              if(!(await page.locator('#releaseList').innerText()).includes('v0.1.2'))throw Error('Live release list missing');
+              if(errors.length)throw Error('JS errors: '+JSON.stringify(errors));
+              console.log(size.id+' PASS '+JSON.stringify(metrics));
+              await page.close();
+            }
+          }finally{await browser.close();server.kill();}
+          JS
+          node /tmp/prismwake-smoke.mjs
+      - name: Upload visual captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prismwake-web-desktop-mobile
+          path: screenshots/
+          if-no-files-found: ignore
