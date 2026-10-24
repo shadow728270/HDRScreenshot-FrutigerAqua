@@ -2,332 +2,423 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="google-site-verification" content="iuPKEcffbqYl1JJVl-o-oTPcG6KzTISQYFHipFWzvV4" />
-  <title>HDRSnip Fusion | Frutiger Aqua HDR Screenshot Tool for Windows</title>
-  <meta name="description" content="Download HDRSnip Fusion: a free, open-source Windows screenshot tool with HDR and Auto HDR capture, annotation, custom hotkeys, and a Frutiger Aqua interface.">
-  <meta name="theme-color" content="#073b51">
-  <link rel="icon" type="image/png" sizes="48x48" href="favicon.png">
-  <link rel="shortcut icon" type="image/png" href="favicon.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="google-site-verification" content="iuPKEcffbqYl1JJVl-o-oTPcG6KzTISQYFHipFWzvV4">
+  <title>HDRSnip Fusion | HDR Screenshots, Without the Glare</title>
+  <meta name="description" content="Free HDR and Auto HDR screenshot capture for Windows. Select, annotate, fill, copy and save with HDRSnip Fusion's Frutiger Aqua interface.">
+  <meta name="theme-color" content="#063c5c">
   <meta name="robots" content="index,follow,max-image-preview:large">
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="canonical" href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
+  <link rel="sitemap" type="application/xml" href="sitemap.xml">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="HDRSnip Fusion | Frutiger Aqua HDR Screenshot Tool">
-  <meta property="og:description" content="Free, open-source HDR and Auto HDR screenshot capture, annotation tools, and a Frutiger Aqua-inspired interface for Windows.">
+  <meta property="og:title" content="HDRSnip Fusion | Capture the Glow">
+  <meta property="og:description" content="A free Windows HDR screenshot tool with Frutiger Aqua personality, precision annotations, and one-click saving.">
   <meta property="og:url" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
   <meta property="og:site_name" content="HDRSnip Fusion">
-  <meta property="og:locale" content="en_US">
   <meta property="og:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
-  <meta property="og:image:alt" content="HDRSnip Fusion HDR screenshot selection overlay with Aqua toolbar and editing tools">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="HDRSnip Fusion | Frutiger Aqua HDR Screenshot Tool">
+  <meta name="twitter:title" content="HDRSnip Fusion | Capture the Glow">
   <meta name="twitter:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
-  <meta name="twitter:description" content="HDR/Auto HDR screenshots, annotations and a Frutiger Aqua interface for Windows.">
-  <link rel="sitemap" type="application/xml" href="sitemap.xml">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "HDRSnip Fusion",
-    "alternateName": "HDRScreenshot FrutigerAqua",
-    "description": "A free, open-source Windows screenshot and annotation application with HDR and Auto HDR capture, configurable tone mapping, system-tray hotkeys, and a Frutiger Aqua-inspired interface.",
+    "description": "A free open-source Windows HDR screenshot and annotation tool with region capture, Paint Bucket, stroke controls, and an Aqua interface.",
     "url": "https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/",
     "codeRepository": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua",
-    "sameAs": ["https://github.com/shadow728270/HDRScreenshot-FrutigerAqua"],
-    "image": "https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/favicon.png",
-    "downloadUrl": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe",
-    "softwareVersion": "0.1.1",
+    "downloadUrl": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/download/v0.1.2/HDRSnipFusion.exe",
+    "image": "https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp",
+    "softwareVersion": "0.1.2",
     "operatingSystem": "Windows 10, Windows 11",
     "applicationCategory": "UtilitiesApplication",
     "license": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/LICENSE",
-    "author": {"@type":"Person","name":"shadow728270","url":"https://github.com/shadow728270"},
     "offers": {"@type":"Offer","price":"0","priceCurrency":"USD"}
   }
   </script>
   <style>
-    :root { color-scheme: dark; --deep:#041e30; --sea:#0b4961; --cyan:#a8fcf7; --text:#e7fcfa; --muted:#b9d5dc; --line:rgba(200,255,255,.19); --glass:rgba(12,70,90,.50); font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif; }
-    * { box-sizing:border-box; }
-    html { scroll-behavior:smooth; }
-    body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(ellipse at 80% 5%, #155a79 0%, transparent 45%),radial-gradient(ellipse at 12% 37%, #096274 0%, transparent 35%),linear-gradient(140deg, #041b30, #063249 45%, #031923); line-height:1.6; }
-    body::before { content:""; z-index:-1; pointer-events:none; position:fixed; inset:0; opacity:.18; background-image:repeating-linear-gradient(130deg, transparent 0 48px,rgba(120,246,241,.08) 49px 51px,transparent 52px 88px); }
-    a { color:#a8f8fa; }
-    a:hover { color:white; }
-    .wrap { max-width:1090px; padding:0 24px; margin:0 auto; }
-    .nav { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:25px 0; border-bottom:1px solid var(--line); }
-    .brand { display:inline-flex; align-items:center; gap:11px; color:#ecffff; text-decoration:none; font-weight:750; letter-spacing:-.04em; font-size:1.12rem; }
-    .brand-icon { display:block; width:38px; height:38px; border-radius:10px; flex:0 0 38px; box-shadow:0 0 0 1px rgba(197,255,252,.45),0 6px 22px rgba(30,210,240,.17); }
-    .brand span { color:#9efaf1; }
-    .nav-links { display:flex; gap:20px; flex-wrap:wrap; font-size:.91rem; }
-    .nav-links a { text-decoration:none; color:var(--muted); }
-    .nav-links a:hover { color:white; }
-    .hero { display:grid; grid-template-columns:1.3fr .7fr; align-items:center; gap:5%; padding:85px 0 75px; }
-    .eyebrow { letter-spacing:.16em; font-size:.76rem; font-weight:800; text-transform:uppercase; color:#adefe8; }
-    h1 { font-size:clamp(2.65rem,6.4vw,5.1rem); line-height:1.06; letter-spacing:-.064em; font-weight:800; margin:16px 0 22px; }
-    h1 em { font-style:normal; color:#a9fdf2; }
-    .intro { font-size:1.13rem; max-width:610px; color:#c6e1e6; }
-    .buttons { display:flex; flex-wrap:wrap; gap:12px; margin-top:30px; }
-    .btn { display:inline-flex; align-items:center; justify-content:center; padding:13px 20px; border-radius:13px; min-height:48px; font-weight:750; text-decoration:none; border:1px solid var(--line); transition:transform .15s,background .15s; }
-    .btn:hover { transform:translateY(-2px); }
-    .primary { background:linear-gradient(155deg,#c2fffa,#65dfdc); color:#034356; box-shadow:0 8px 30px rgba(31,221,222,.18); border-color:rgba(255,255,255,.5); }
-    .primary:hover { color:#013641; background:#f2ffff; }
-    .secondary { background:var(--glass); color:#e9ffff; }
-    .micro { font-size:.83rem; color:#aacdd4; margin-top:16px; }
-    .art { aspect-ratio:1; position:relative; display:grid; place-items:center; filter:drop-shadow(0 22px 60px rgba(44,222,228,.16)); }
-    .orb { aspect-ratio:1; width:86%; border-radius:50%; background:radial-gradient(circle at 30% 20%, rgba(255,255,255,.96),transparent 13%),radial-gradient(circle at 65% 80%, rgba(0,68,124,.6),transparent 48%),radial-gradient(circle at 36% 25%, #b8fcf1, #39d2d7 26%, #0e799a 62%, #063b64 95%); box-shadow:inset 0 13px 25px rgba(255,255,255,.44),inset -13px -24px 40px rgba(0,12,41,.56),0 0 0 1px rgba(185,255,255,.48),0 0 70px rgba(16,223,230,.15); position:relative; overflow:hidden; }
-    .orb::after { content:""; display:block; position:absolute; inset:13% -30% auto; border-radius:50%; border-top:4px solid rgba(255,255,255,.76); height:70%; transform:rotate(-24deg); box-shadow:0 -22px 50px rgba(255,255,255,.25); }
-    .glasslabel { position:absolute; bottom:8%; left:-2%; right:-2%; text-align:center; padding:14px; border:1px solid rgba(225,255,255,.55); border-radius:99px; background:linear-gradient(110deg,rgba(197,255,252,.40),rgba(23,151,173,.22)); backdrop-filter:blur(16px); box-shadow:inset 0 2px 0 rgba(255,255,255,.44),0 13px 26px rgba(0,0,0,.24); font-size:.8rem; letter-spacing:.16em; font-weight:800; text-transform:uppercase; }
-    section { padding:52px 0; }
-    .screenshots-grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(250px,.7fr); gap:18px; align-items:start; }
-    figure.shot { margin:0; padding:14px; border:1px solid var(--line); border-radius:19px; background:rgba(4,40,62,.54); }
-    .shot img { display:block; max-width:100%; height:auto; border-radius:12px; border:1px solid rgba(156,245,245,.25); }
-    .shot figcaption { margin-top:14px; color:#c2dce1; font-size:.9rem; }
-    .shot.settings img { max-height:570px; margin:0 auto; }
-    h2 { font-size:clamp(1.7rem,3vw,2.3rem); line-height:1.2; letter-spacing:-.04em; margin:0 0 16px; }
-    .section-intro { color:var(--muted); max-width:720px; margin:0 0 28px; }
-    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
-    .panel { padding:24px; border:1px solid var(--line); border-radius:19px; background:linear-gradient(150deg,rgba(120,237,235,.10),rgba(4,42,67,.65)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08); }
-    .panel h3 { margin:0 0 8px; font-size:1.06rem; color:white; }
-    .panel p { margin:0; color:#c2dce1; font-size:.94rem; }
-    .steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
-    .step { padding:12px 0; }
-    .number { display:inline-grid; place-items:center; border-radius:50%; background:rgba(106,229,223,.15); border:1px solid #71d9d3; width:35px; height:35px; font-weight:800; color:#b3fff4; }
-    .step p { color:var(--muted); }
-    kbd { font-family:inherit; border:1px solid #8abcc8; border-bottom-width:3px; background:rgba(0,14,27,.35); padding:4px 8px; border-radius:6px; white-space:nowrap; }
-    details { border-top:1px solid var(--line); padding:17px 4px; }
-    details:last-child { border-bottom:1px solid var(--line); }
-    summary { cursor:pointer; font-weight:720; }
-    details p { color:#c6dfe4; max-width:860px; }
-    .callout { padding:24px; border-radius:20px; border:1px solid rgba(191,253,251,.30); background:rgba(86,213,223,.09); }
-    .callout p { color:var(--muted); margin-top:7px; }
-    footer { border-top:1px solid var(--line); padding:28px 0 55px; color:var(--muted); font-size:.89rem; }
-    footer .foot { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; }
-    footer a { margin-right:18px; }
-    @media (max-width:760px) { .screenshots-grid{grid-template-columns:1fr} .hero{grid-template-columns:1fr; padding:50px 0 40px} .art{max-width:310px; margin:14px auto 0; width:80%} .grid,.steps{grid-template-columns:1fr} .nav{align-items:flex-start;flex-direction:column} }
-    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }
-  </style>
-  <style>
-
-/* Site-wide ocean parallax. Decorative depth layers, never a separate playground. */
-:root {--wave-x:0px;--wave-y:0px;--wave-scroll:0px}
-body {overflow-x:hidden;isolation:isolate;background:linear-gradient(165deg,#077ca5,#075c8e 32%,#054271 67%,#012746)!important;color:#eaffff}
-body::before{display:none!important}
-.aqua-depth {position:fixed;inset:-14vh -12vw;z-index:-1;overflow:hidden;pointer-events:none;contain:paint}
-.aqua-depth > i {position:absolute;inset:-14%;display:block;will-change:transform}
-.aqua-depth .sky {background:radial-gradient(ellipse 40% 39% at 53% 0%,rgba(233,255,255,.87),rgba(158,250,253,.26) 61%,transparent 96%),radial-gradient(ellipse 60% 80% at 3% 54%,rgba(23,229,244,.38),transparent 95%),radial-gradient(ellipse 44% 67% at 90% 66%,rgba(16,167,237,.47),transparent 97%),linear-gradient(#0085ae,#076894 49%,#04375f);transform:translate3d(calc(var(--wave-x)*-.08),calc(var(--wave-y)*-.04 + var(--wave-scroll)*.03),0)}
-.aqua-depth .sunshafts {opacity:.62;background:conic-gradient(from 200deg at 51% -8%,transparent 0deg,rgba(236,255,255,.31) 7deg,transparent 11deg,transparent 29deg,rgba(190,255,255,.16) 37deg,transparent 48deg,transparent 67deg,rgba(219,255,255,.19) 73deg,transparent 87deg);filter:blur(11px);mix-blend-mode:screen;transform:translate3d(calc(var(--wave-x)*-.18),calc(var(--wave-y)*-.10 + var(--wave-scroll)*.07),0);animation:aquaBreathe 12s ease-in-out infinite alternate}
-.aqua-depth .waves {opacity:.62;background:radial-gradient(ellipse 92% 24% at 18% 21%,transparent 49%,rgba(211,255,252,.30) 50%,transparent 52%,transparent 60%,rgba(244,255,252,.16) 62%,transparent 64%),radial-gradient(ellipse 81% 38% at 84% 72%,transparent 44%,rgba(221,255,255,.34) 46%,transparent 49%,transparent 58%,rgba(255,255,255,.14) 60%,transparent 62%);background-size:100% 70%,113% 65%;mix-blend-mode:screen;filter:blur(1.8px);transform:translate3d(calc(var(--wave-x)*-.27),calc(var(--wave-y)*-.19 + var(--wave-scroll)*-.12),0);animation:aquaTide 16s ease-in-out infinite alternate}
-.aqua-depth .caustics {opacity:.38;background:repeating-radial-gradient(ellipse 78% 48% at 19% 25%,transparent 0 30px,rgba(219,255,253,.21) 32px 33px,transparent 36px 78px),repeating-radial-gradient(ellipse 89% 68% at 91% 83%,transparent 0 36px,rgba(147,251,251,.19) 38px 39px,transparent 43px 93px);background-size:880px 620px,1050px 750px;filter:blur(3px);mix-blend-mode:screen;transform:translate3d(calc(var(--wave-x)*-.37),calc(var(--wave-y)*-.29 + var(--wave-scroll)*-.18),0) rotate(-4deg);animation:causticShift 19s ease-in-out infinite alternate}
-.aqua-depth .sparkles {opacity:.5;background:radial-gradient(circle at 10% 32%,#eaffff 0 2px,transparent 3px),radial-gradient(circle at 77% 66%,#b9ffff 0 3px,transparent 4px),radial-gradient(circle at 41% 89%,#dcffff 0 2px,transparent 3px);background-size:720px 620px;filter:drop-shadow(0 0 8px #baffff);transform:translate3d(calc(var(--wave-x)*-.41),calc(var(--wave-y)*-.33 + var(--wave-scroll)*-.24),0)}
-.wrap{position:relative;z-index:2;max-width:1130px}
-.nav{position:sticky;top:12px;z-index:20;margin-top:16px;padding:14px 20px;border:1px solid rgba(226,255,255,.59);border-radius:22px;background:linear-gradient(180deg,rgba(167,250,250,.30),rgba(6,80,125,.69) 54%,rgba(3,43,85,.80));box-shadow:inset 0 2px rgba(255,255,255,.45),0 15px 38px rgba(0,14,51,.23);backdrop-filter:blur(23px) saturate(140%);-webkit-backdrop-filter:blur(23px) saturate(140%)}
-.nav-links a{color:#edffff}
-.hero{margin-top:25px;padding:49px 33px 62px;min-height:540px;grid-template-columns:1.25fr .75fr;gap:3%;border-radius:31px;border:1px solid rgba(226,255,255,.53);background:linear-gradient(147deg,rgba(141,239,250,.25),rgba(7,86,133,.54) 62%,rgba(4,47,100,.61));box-shadow:inset 0 2px rgba(255,255,255,.45),inset 0 -8px 25px rgba(2,29,80,.17),0 23px 55px rgba(1,23,59,.18);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-h1{font-size:clamp(2.9rem,6.2vw,5.3rem);text-shadow:0 4px 26px rgba(0,23,61,.36)}
-h1 em{color:#c6fff8;text-shadow:0 0 30px rgba(130,255,247,.45)}
-.intro{color:#e5f7fc}
-.eyebrow{display:inline-block;padding:6px 12px;border:1px solid rgba(220,255,255,.35);border-radius:99px;background:rgba(4,57,100,.42)}
-.btn{border-radius:17px;box-shadow:inset 0 2px rgba(255,255,255,.46),0 11px 24px rgba(0,19,52,.25);transition:transform .2s,filter .2s}
-.btn:hover{transform:translateY(-3px);filter:brightness(1.11)}
-.primary{color:#004358;background:linear-gradient(180deg,#efffff,#affaf0 42%,#59e2e6 67%,#22b3d0)}
-.secondary{border-color:rgba(220,255,255,.55);background:linear-gradient(rgba(175,251,253,.25),rgba(7,68,108,.66))}
-.orb{animation:orbHover 8s ease-in-out infinite;box-shadow:inset 0 18px 31px rgba(255,255,255,.42),inset -14px -28px 40px rgba(0,15,65,.57),0 0 2px 2px rgba(217,255,255,.69),0 0 71px rgba(75,238,243,.34)}
-.art{transform:translate3d(calc(var(--wave-x)*.045),calc(var(--wave-y)*.033),0)}
-.glasslabel{background:linear-gradient(180deg,rgba(202,255,255,.47),rgba(17,131,170,.36) 53%,rgba(2,45,87,.68));border-color:rgba(236,255,255,.7)}
-.panel,figure.shot,.callout,.step{border:1px solid rgba(224,255,255,.35);border-radius:23px;background:linear-gradient(144deg,rgba(124,233,247,.25),rgba(6,52,101,.68) 84%);box-shadow:inset 0 2px rgba(245,255,255,.26),0 13px 25px rgba(0,22,57,.17);backdrop-filter:blur(13px);-webkit-backdrop-filter:blur(13px)}
-.panel{transition:transform .22s}
-.panel:hover{transform:translateY(-4px)}
-.panel p,.shot figcaption,.section-intro,.step p,.callout p{color:#d8eef5}
-.step{padding:21px}
-.shot img{border:1px solid rgba(233,255,255,.39);box-shadow:0 11px 28px rgba(0,17,52,.32)}
-section{scroll-margin-top:125px}
-@keyframes orbHover{0%,100%{transform:translateY(7px) rotate(-1deg)}50%{transform:translateY(-10px) rotate(1deg)}}
-@keyframes aquaBreathe{0%{opacity:.31}100%{opacity:.72}}
-@keyframes aquaTide{0%{background-position:0% 0%,0% 0%}100%{background-position:3% 8%,-4% 5%}}
-@keyframes causticShift{0%{background-position:0 0,0 0;opacity:.22}100%{background-position:65px 51px,-43px 70px;opacity:.42}}
-@media(max-width:760px){.nav{top:3px;padding:11px 14px;border-radius:17px}.hero{min-height:0;padding:34px 20px;grid-template-columns:1fr}.hero .art{max-width:310px;margin:18px auto 0;transform:none}.step{padding:18px}}
-@media(prefers-reduced-motion:reduce){.aqua-depth>i,.orb{animation:none!important}.art{transform:none!important}}
-
-
-
-  /* Whole-page transparent water surface: no standalone interactive playground. */
-  #aqua-caustic-canvas {position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.67;mix-blend-mode:screen;filter:blur(.65px)}
-  .aqua-depth{z-index:0!important;opacity:.92}
-  .wrap{z-index:2}
-  body{background:linear-gradient(163deg,#039dc0 0%,#07779f 22%,#074c7c 63%,#031d49 100%)!important}
-  .aqua-depth .sky{animation:waterSunPulse 17s ease-in-out infinite alternate}
-  .aqua-depth .waves{animation:aquaTide 13s ease-in-out infinite alternate}
-  .aqua-depth .caustics{animation:causticShift 17s ease-in-out infinite alternate}
-  .hero, .nav, .panel, figure.shot, .callout,.step{position:relative;isolation:isolate}
-  .hero::before,.panel::before,figure.shot::before,.nav::before{
-    content:"";position:absolute;inset:1px;pointer-events:none;border-radius:inherit;
-    background:linear-gradient(128deg,rgba(255,255,255,.15),transparent 27%,transparent 75%,rgba(135,255,253,.09));
-    mask-image:linear-gradient(to bottom,black,transparent 85%);z-index:-1
-  }
-  @keyframes waterSunPulse{from{filter:brightness(.97) saturate(1)}to{filter:brightness(1.2) saturate(1.17)}}
-  @media(prefers-reduced-motion:reduce){#aqua-caustic-canvas{display:none}.aqua-depth .sky{animation:none}}
-  @media(max-width:760px){#aqua-caustic-canvas{opacity:.36}}
-
+    /* No JavaScript animations, canvas, backdrop-filter stacks, or animated page backgrounds.
+       Visual richness comes from static layered gradients and just one composited small float. */
+    :root {
+      color-scheme: dark;
+      --ink:#eaffff; --muted:#b0dce6; --navy:#062844; --night:#021b32;
+      --cyan:#55f6f2; --aqua:#9dfff2; --outline:rgba(213,255,252,.28);
+      font-family:"Trebuchet MS","Segoe UI",Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth;scroll-padding-top:26px}
+    body{margin:0;min-width:320px;overflow-x:hidden;color:var(--ink);
+      background:
+        radial-gradient(ellipse 720px 650px at 88% 4%,rgba(112,246,235,.50),transparent 75%),
+        radial-gradient(ellipse 850px 870px at -12% 18%,rgba(18,186,213,.65),transparent 76%),
+        linear-gradient(180deg,#0eafc4 0%,#0a789e 22%,#04517b 47%,#032f54 73%,#021b34 100%);
+      line-height:1.55;-webkit-font-smoothing:antialiased}
+    body::before{content:"";position:absolute;top:0;left:0;right:0;height:800px;pointer-events:none;z-index:0;
+      background:
+        radial-gradient(ellipse 75% 55% at 74% -22%,rgba(255,255,255,.55),transparent 63%),
+        repeating-linear-gradient(106deg,transparent 0 95px,rgba(238,255,248,.028) 103px 109px,transparent 122px 204px);
+      mask-image:linear-gradient(#000,transparent)}
+    a{color:inherit} a:hover{color:#fff}
+    .skip{position:absolute;left:-9999px;top:8px;z-index:200;padding:10px 15px;background:#fff;color:#062844}
+    .skip:focus{left:12px}
+    :focus-visible{outline:3px solid #f7ffd1;outline-offset:4px}
+    .wrap{width:min(1216px,calc(100% - 64px));margin-inline:auto;position:relative}
+    .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;font-weight:800}
+    .eyebrow .point{width:8px;height:8px;border-radius:50%;background:#adffdf;box-shadow:0 0 0 4px rgba(178,255,230,.18)}
+    .nav{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:23px;padding:12px 15px 12px 17px;
+      background:linear-gradient(180deg,#d5ffff 0%,#8ae9ed 9%,#389fba 52%,#075078 55%,#083a63 100%);
+      border:1px solid rgba(233,255,255,.88);border-radius:23px;
+      box-shadow:inset 0 2px 0 rgba(255,255,255,.92),inset 0 -3px 0 rgba(4,37,85,.33),0 12px 30px rgba(0,41,73,.16)}
+    .logo{display:flex;align-items:center;gap:11px;text-decoration:none;font-size:1.12rem;font-weight:900;white-space:nowrap;
+      letter-spacing:-.05em;text-shadow:0 1px 2px rgba(0,22,54,.4)}
+    .logo img{width:43px;height:43px;border-radius:12px;box-shadow:0 2px 12px rgba(0,25,64,.4),0 0 0 1px rgba(255,255,255,.45)}
+    .logo b{color:#dffff8}
+    .navlinks{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:5px;font-size:.82rem;font-weight:700}
+    .navlinks a{padding:10px 13px;border-radius:12px;text-decoration:none;color:#ecffff;transition:background .17s}
+    .navlinks a:hover{background:rgba(220,255,255,.13)}
+    .navlinks .nav-dl{border:1px solid rgba(236,255,255,.65);background:rgba(199,255,250,.18)}
+    .hero{min-height:662px;display:grid;grid-template-columns:minmax(0,.98fr) minmax(0,1.12fr);gap:30px;align-items:center;
+      padding:78px 0 98px;position:relative}
+    .hero::before{content:"";position:absolute;top:45px;right:-11%;width:55%;height:520px;border-radius:50%;z-index:-1;
+      background:radial-gradient(circle,rgba(118,247,249,.24),transparent 67%)}
+    .hero-copy{position:relative;z-index:2;padding:20px 0 25px}
+    .version{display:inline-flex;align-items:center;gap:10px;border:1px solid rgba(225,255,248,.6);
+      background:linear-gradient(180deg,rgba(222,255,253,.29),rgba(18,105,140,.19));box-shadow:inset 0 1px rgba(255,255,255,.38);
+      padding:8px 14px;border-radius:999px;color:#f5fffc}
+    .hero h1{font-family:"Segoe UI","Trebuchet MS",sans-serif;font-size:clamp(3.65rem,6.35vw,6.7rem);
+      letter-spacing:-.078em;line-height:.98;margin:26px 0 23px;font-weight:850;text-shadow:0 7px 30px rgba(1,57,91,.17)}
+    .hero h1 span{display:block}
+    .hero h1 .shine{background:linear-gradient(180deg,#fff 8%,#caffed 33%,#81ffff 53%,#e0fff6 73%,#53cced 99%);
+      color:transparent;-webkit-background-clip:text;background-clip:text;text-shadow:none}
+    .hero-desc{max-width:470px;font-size:1.095rem;line-height:1.77;color:#e4fdff;margin:0 0 28px}
+    .cta-row{display:flex;gap:12px;flex-wrap:wrap}
+    .button{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:11px;min-height:57px;
+      padding:14px 23px;border-radius:18px;font-size:.93rem;font-weight:900;line-height:1.2;text-align:center;text-decoration:none;
+      transition:transform .18s ease,filter .18s ease;box-shadow:0 9px 22px rgba(0,24,55,.21)}
+    .button:hover{transform:translateY(-2px);filter:brightness(1.06)}
+    .button.primary{color:#004055;border:1px solid #eaffff;background:linear-gradient(180deg,#f7ffff 0%,#e6ffff 20%,#a5fff1 43%,#47dfdc 50%,#08adc9 100%);
+      box-shadow:inset 0 2px 0 #fff,inset 0 -3px 0 rgba(0,99,141,.42),0 11px 25px rgba(0,30,71,.22)}
+    .button.secondary{border:1px solid rgba(219,255,255,.67);background:linear-gradient(180deg,rgba(232,255,254,.30) 0%,rgba(25,143,172,.32) 49%,rgba(7,58,104,.54) 50%,rgba(4,53,92,.74) 100%);color:#f1ffff;box-shadow:inset 0 1px rgba(255,255,255,.48),0 8px 22px rgba(0,31,66,.12)}
+    .button svg{width:19px;height:19px;flex:none}
+    .hero-sub{font-size:.79rem;color:#d2f5f7;margin:18px 0 0}
+    .mini-proof{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:35px;font-size:.75rem;font-weight:800;color:#eaffff}
+    .mini-proof span{display:inline-flex;gap:7px;align-items:center}
+    .mini-proof span+span::before{content:"•";color:#8effed;margin-right:2px}
+    .hero-art{position:relative;min-width:0}
+    .hero-art::before{content:"";position:absolute;z-index:0;width:80%;height:66%;top:5%;right:1%;border-radius:50%;
+      background:radial-gradient(circle,rgba(202,255,238,.67),rgba(29,224,231,.21) 37%,transparent 70%);filter:blur(30px)}
+    .bubble{position:absolute;z-index:0;border-radius:50%;pointer-events:none;aspect-ratio:1;
+      background:radial-gradient(circle at 31% 24%,#fff 0 3%,rgba(235,255,255,.86) 5%,transparent 16%),
+      radial-gradient(circle at 67% 81%,rgba(8,73,147,.85),transparent 48%),
+      radial-gradient(circle at 39% 27%,rgba(219,255,246,.9),rgba(83,238,227,.50) 28%,rgba(9,95,163,.47) 62%,rgba(7,49,104,.78));
+      border:1px solid rgba(243,255,255,.9);box-shadow:inset 3px 6px 10px rgba(255,255,255,.5),inset -5px -10px 17px rgba(0,21,76,.45),0 13px 42px rgba(0,49,104,.25)}
+    .bubble::after{content:"";position:absolute;inset:8% 16% 55%;border-radius:50%;border-top:2px solid rgba(250,255,255,.96);transform:rotate(-22deg)}
+    .bubble.a{width:105px;top:-43px;right:22px;animation:floatBubble 8s ease-in-out infinite alternate}
+    .bubble.b{width:44px;bottom:6%;left:-32px;opacity:.88}
+    .bubble.c{width:21px;top:22%;left:7%;opacity:.8}
+    @keyframes floatBubble{from{transform:translateY(0)}to{transform:translateY(-11px)}}
+    .preview{position:relative;z-index:1;padding:9px;border-radius:26px;border:1px solid rgba(245,255,255,.9);
+      background:linear-gradient(137deg,rgba(241,255,255,.85),rgba(121,225,240,.38) 38%,rgba(5,84,132,.79) 95%);
+      box-shadow:inset 0 2px 0 #fff,inset 0 -3px 1px rgba(2,62,111,.4),0 29px 68px rgba(0,28,65,.29);transform:rotate(-1.5deg)}
+    .preview-inner{border-radius:18px;overflow:hidden;border:1px solid rgba(8,94,132,.35);background:#053458}
+    .preview-top{height:45px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 15px;
+      background:linear-gradient(180deg,#e9ffff 0%,#b8faff 42%,#65bdce 46%,#2b88b0 100%);color:#075075}
+    .preview-dots{display:flex;gap:6px}.preview-dots i{width:10px;height:10px;border-radius:50%;
+      background:linear-gradient(145deg,#fff,#6bdddb);border:1px solid rgba(5,89,114,.45);box-shadow:inset 0 1px white}
+    .preview-top strong{font-size:.71rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .preview-top .state{font-size:.6rem;white-space:nowrap;font-weight:900;letter-spacing:.1em;padding:5px 8px;
+      border-radius:99px;background:rgba(228,255,255,.68);border:1px solid rgba(26,116,133,.35)}
+    .preview-img{display:block;width:100%;height:auto;aspect-ratio:1600/757;object-fit:contain;background:#165d82}
+    .preview-caption{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 15px;font-size:.7rem;font-weight:800;
+      letter-spacing:.03em;color:#dffbfb;background:linear-gradient(180deg,#075f8e,#043a66)}
+    .preview-caption .light{display:inline-flex;align-items:center;gap:7px;color:#c5fff5}
+    .preview-caption .light::before{content:"";width:7px;height:7px;border-radius:50%;background:#6dffcb;box-shadow:0 0 11px #52ffc5}
+    .float-tag{position:absolute;z-index:3;right:-18px;bottom:-29px;display:flex;align-items:center;gap:12px;
+      border:1px solid #e4ffff;border-radius:20px;padding:10px 15px;background:linear-gradient(180deg,#e5ffff,#83eee8 45%,#2cadd2 52%,#075a8b);
+      box-shadow:inset 0 2px 0 rgba(255,255,255,.94),0 14px 28px rgba(0,29,65,.38);transform:rotate(2deg);
+      font-size:.78rem;font-weight:900;color:#073f5a}
+    .float-tag b{font-size:1.05rem}
+    .features-rail{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid rgba(220,255,255,.46);border-radius:19px;
+      overflow:hidden;background:linear-gradient(180deg,rgba(15,115,154,.72),rgba(3,59,101,.7));box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 15px 30px rgba(0,24,61,.10)}
+    .features-rail div{padding:16px 20px;display:flex;align-items:center;gap:12px;color:#e7ffff;font-size:.77rem;font-weight:800}
+    .features-rail div+div{border-left:1px solid rgba(185,249,252,.22)}
+    .features-rail strong{font-size:1.5rem;font-weight:900;color:#a8fff0;letter-spacing:-.07em}
+    section{scroll-margin-top:28px}
+    .light-section{margin:93px 0 20px;padding:60px;border-radius:38px;position:relative;overflow:hidden;
+      color:#073852;background:
+        radial-gradient(ellipse 380px 280px at 95% 6%,rgba(255,255,255,.9),transparent 80%),
+        radial-gradient(ellipse 550px 450px at 0% 110%,rgba(31,193,205,.30),transparent 78%),
+        linear-gradient(140deg,#eafff7 0%,#a7f1ed 47%,#72cedc 100%);
+      border:1px solid #f0ffff;box-shadow:inset 0 2px rgba(255,255,255,.87),0 21px 55px rgba(1,24,52,.18)}
+    .light-section::after{content:"";position:absolute;pointer-events:none;right:-130px;top:-240px;width:560px;height:560px;border-radius:50%;
+      border:47px solid rgba(255,255,255,.13);box-shadow:0 0 0 46px rgba(255,255,255,.06),inset 0 0 0 37px rgba(0,147,162,.04)}
+    .section-title{font-family:"Segoe UI",Arial,sans-serif;font-size:clamp(2.45rem,4.6vw,4.65rem);line-height:1.05;font-weight:850;letter-spacing:-.065em;margin:15px 0 18px}
+    .section-lead{max-width:625px;font-size:1.04rem;margin:0;line-height:1.78}
+    .light-section .eyebrow{color:#157080}
+    .bento{display:grid;grid-template-columns:1.16fr .84fr;gap:17px;margin-top:36px;position:relative;z-index:1}
+    .tile{padding:27px 29px;border-radius:25px;position:relative;min-height:188px;overflow:hidden;
+      background:linear-gradient(150deg,rgba(255,255,255,.85),rgba(228,255,255,.47));
+      border:1px solid rgba(255,255,255,.85);box-shadow:inset 0 1px rgba(255,255,255,.86),0 8px 21px rgba(6,68,94,.08)}
+    .tile h3{font-size:1.42rem;font-weight:900;letter-spacing:-.04em;line-height:1.2;margin:12px 0 7px}
+    .tile p{margin:0;font-size:.91rem;line-height:1.7;max-width:38rem;color:#285968}
+    .tile .tile-label{font-weight:900;font-size:.7rem;letter-spacing:.13em;color:#168092;text-transform:uppercase}
+    .tile.dark{color:#eaffff;background:linear-gradient(135deg,#0d84a8,#065376 65%,#07355c);border-color:rgba(228,255,255,.6);
+      box-shadow:inset 0 2px rgba(210,255,255,.23),0 10px 25px rgba(10,88,108,.18)}
+    .tile.dark p{color:#d4f1f8}.tile.dark .tile-label{color:#a3ffee}
+    .tile.big{min-height:252px;background:linear-gradient(120deg,#106c99 0%,#07577c 56%,#053b62);color:#f2ffff}
+    .tile.big .tile-label{color:#affff2}.tile.big h3{font-size:2.1rem;max-width:360px;margin-top:18px}
+    .tile.big p{color:#d5f9fc;max-width:370px}
+    .tile.big::after{content:"";position:absolute;width:195px;height:195px;border-radius:50%;right:-39px;bottom:-67px;
+      background:radial-gradient(circle at 30% 27%,#fff 0 2%,#b6fff7 3%,transparent 18%),radial-gradient(circle at 37% 29%,rgba(186,255,250,.95),rgba(32,197,216,.8) 37%,rgba(5,70,150,.76) 75%);border:2px solid rgba(220,255,255,.55);
+      box-shadow:inset -9px -20px 20px rgba(0,20,62,.35),inset 6px 9px 15px rgba(255,255,255,.5),0 0 35px rgba(79,240,235,.25)}
+    .tile.new{background:linear-gradient(130deg,#f5ffdb 0%,#d8fff4 46%,#9bebea 100%)}
+    .tile.new::after{content:"";position:absolute;right:-26px;bottom:-35px;border-radius:49% 49% 41% 53%;width:152px;height:152px;
+      background:radial-gradient(circle at 25% 23%,rgba(255,255,255,.95),transparent 25%),linear-gradient(145deg,#63eede,#2aabda 50%,#1470b4);transform:rotate(-16deg);box-shadow:inset 7px 9px 13px rgba(255,255,255,.54)}
+    .tile.new h3,.tile.new p{position:relative;z-index:1;max-width:75%}
+    .tile.wide{grid-column:1 / -1;min-height:142px;display:flex;align-items:center;justify-content:space-between;gap:22px}
+    .tile.wide .wide-copy{max-width:720px}
+    .tile.wide h3{margin:0 0 8px}.tile.wide p{max-width:600px}
+    .pill-mini{display:inline-block;flex:none;padding:12px 16px;border-radius:999px;font-size:.74rem;white-space:nowrap;font-weight:900;
+      border:1px solid rgba(7,123,132,.27);background:rgba(98,234,217,.28)}
+    .showcase{padding:110px 0 95px;display:grid;grid-template-columns:minmax(0,.88fr) minmax(0,1.12fr);gap:75px;align-items:center}
+    .showcase .section-title{max-width:500px}
+    .showcase p{color:#caebf3}
+    .showcase .eyebrow{color:#a3fff1}
+    .benefit-list{list-style:none;padding:0;margin:29px 0 0}
+    .benefit-list li{display:flex;align-items:flex-start;gap:12px;padding:13px 0;border-bottom:1px solid rgba(198,251,254,.20);font-size:.91rem;color:#e3f8fb}
+    .benefit-list b{color:#b9fff2;font-size:1.16rem}
+    .settings-stage{position:relative;min-width:0;display:grid;place-items:center;padding:37px 10px}
+    .settings-stage::before{content:"";position:absolute;inset:7% 0 12% 0;border:1px solid rgba(218,255,254,.37);border-radius:45% 55% 42% 58%;
+      transform:rotate(-17deg);background:radial-gradient(ellipse at 47% 23%,#a6fcf5 0%,#33bacb 40%,#064d84 80%,#04274c 100%);
+      box-shadow:inset 12px 24px 35px rgba(239,255,255,.45),inset -24px -18px 40px rgba(0,16,54,.48),0 18px 65px rgba(2,17,50,.25)}
+    .settings-frame{position:relative;width:min(345px,90%);margin:auto;padding:11px;border-radius:25px;
+      border:1px solid #e0ffff;background:linear-gradient(140deg,rgba(242,255,255,.88),rgba(105,206,231,.55) 40%,rgba(3,79,122,.75));
+      box-shadow:inset 0 2px rgba(255,255,255,.75),0 25px 55px rgba(0,16,52,.35);transform:rotate(3deg)}
+    .settings-frame img{display:block;width:100%;height:auto;border-radius:14px;object-fit:contain;border:1px solid rgba(234,255,255,.62)}
+    .settings-note{position:absolute;bottom:9%;left:-6%;padding:11px 16px;border-radius:16px;border:1px solid #e0ffff;
+      background:linear-gradient(180deg,#ebffff,#8eecdf 44%,#268db9 48%,#064876);color:#fff;font-size:.72rem;font-weight:900;box-shadow:0 10px 23px rgba(0,19,53,.25)}
+    .start{border-radius:34px;padding:53px 55px 51px;color:#05364f;
+      background:linear-gradient(155deg,#eefff7,#aaf7f1 41%,#53cbdb);border:1px solid #e9ffff;
+      box-shadow:inset 0 2px #fff,0 20px 55px rgba(0,18,50,.21)}
+    .start .eyebrow{color:#087180}
+    .steps{margin-top:31px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}
+    .step{border-top:2px solid rgba(7,96,122,.28);padding-top:19px}
+    .step strong{display:block;font-size:3.15rem;letter-spacing:-.09em;font-weight:900;line-height:1;color:#16a8bd}
+    .step h3{font-size:1.11rem;margin:12px 0 7px;letter-spacing:-.035em}
+    .step p{margin:0;color:#29677b;font-size:.9rem;line-height:1.65}
+    .faq{padding:93px 0 105px;max-width:940px}
+    .faq .section-title{margin-bottom:29px}
+    .faq details{padding:0;border-top:1px solid rgba(203,255,254,.24)}
+    .faq details:last-child{border-bottom:1px solid rgba(203,255,254,.24)}
+    .faq summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:16px;
+      padding:20px 1px;font-size:.98rem;font-weight:800}
+    .faq summary::-webkit-details-marker{display:none}
+    .faq summary::after{content:"+";font-family:Arial,sans-serif;font-size:1.5rem;line-height:1;font-weight:400;color:#abfff0}
+    .faq details[open] summary::after{content:"−"}
+    .faq details p{max-width:760px;margin:0 0 19px;color:#c9eaf2;line-height:1.72;font-size:.92rem}
+    .last-cta{position:relative;overflow:hidden;padding:50px 52px;border-radius:31px;border:1px solid rgba(244,255,255,.84);
+      background:linear-gradient(115deg,#a7fff0 0%,#66e6e4 42%,#118eb5 82%,#06577e);
+      box-shadow:inset 0 2px rgba(255,255,255,.83),0 20px 42px rgba(0,18,45,.27);color:#043b53}
+    .last-cta::before{content:"";position:absolute;right:28px;top:-87px;width:260px;height:260px;pointer-events:none;border-radius:50%;
+      border:34px solid rgba(227,255,255,.19);box-shadow:0 0 0 34px rgba(206,255,251,.10),inset 0 0 20px rgba(255,255,255,.12)}
+    .last-cta h2{position:relative;margin:0 0 12px;font-family:"Segoe UI",Arial,sans-serif;font-size:clamp(2.25rem,4vw,3.6rem);letter-spacing:-.065em;line-height:1.1}
+    .last-cta p{position:relative;margin:0 0 26px;max-width:625px;font-size:.99rem;line-height:1.7;color:#15536a}
+    .last-cta .button{position:relative}
+    footer{padding:40px 0 45px;display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+      color:#abd9e5;font-size:.78rem}
+    footer a{margin-left:20px;text-underline-offset:4px}
+    @media(max-width:1050px){
+      .navlinks a{padding:9px}
+      .hero{gap:24px}.hero h1{font-size:clamp(3.35rem,6vw,5.5rem)}
+      .features-rail div{padding:13px 12px;gap:8px}
+      .showcase{gap:36px}
+    }
+    @media(max-width:800px){
+      .wrap{width:min(100% - 38px,680px)}
+      .nav{flex-wrap:wrap;justify-content:center}.navlinks{justify-content:center}
+      .hero{grid-template-columns:1fr;gap:26px;padding:53px 0 73px;min-height:0}
+      .hero-copy{padding:0}.hero h1{font-size:clamp(3.5rem,11vw,5.7rem);max-width:620px}
+      .hero-art{width:min(100% - 12px,600px);margin:30px auto 0}
+      .hero-desc{max-width:610px}
+      .bubble.a{right:-10px}.float-tag{right:-10px}
+      .features-rail{grid-template-columns:repeat(2,1fr)}
+      .features-rail div:nth-child(3){border-left:none;border-top:1px solid rgba(185,249,252,.22)}
+      .features-rail div:nth-child(4){border-top:1px solid rgba(185,249,252,.22)}
+      .light-section{padding:39px 27px;border-radius:29px;margin-top:70px}
+      .bento{grid-template-columns:1fr 1fr;gap:12px}
+      .tile{padding:23px 21px}.tile.big{min-height:265px}
+      .tile.big h3{font-size:1.8rem}
+      .showcase{grid-template-columns:1fr;gap:15px;padding:75px 0}
+      .settings-stage{max-width:550px;width:100%;margin:0 auto}
+      .start{padding:39px 28px}.steps{gap:18px}
+      .faq{padding:70px 0}
+    }
+    @media(max-width:550px){
+      body::before{height:450px}
+      .wrap{width:calc(100% - 28px)}
+      .nav{padding:12px 9px;gap:10px;margin-top:13px}
+      .logo{font-size:1.02rem}.logo img{width:34px;height:34px}
+      .navlinks{gap:2px;font-size:.73rem}.navlinks a{padding:7px 9px}
+      .hero{padding-top:37px;padding-bottom:68px}
+      .hero h1{font-size:clamp(3.15rem,12vw,4.55rem);margin:20px 0}
+      .hero-desc{font-size:1rem;line-height:1.65}
+      .cta-row .button{width:100%}.mini-proof{gap:7px;margin-top:23px}
+      .hero-art{width:calc(100% - 14px);margin-top:26px}
+      .preview{padding:5px;border-radius:18px;transform:rotate(-.6deg)}.preview-inner{border-radius:12px}
+      .preview-top{height:34px;padding:0 9px}.preview-top strong{font-size:.6rem}.preview-top .state{font-size:.5rem}
+      .preview-dots i{width:7px;height:7px}.preview-caption{padding:8px 10px;font-size:.6rem}
+      .bubble.a{width:62px;top:-33px}.bubble.b{left:-13px;width:31px}
+      .float-tag{padding:7px 11px;font-size:.63rem;border-radius:13px;bottom:-26px;right:-9px}
+      .features-rail strong{font-size:1.25rem}.features-rail div{font-size:.67rem;padding:13px 9px;gap:7px}
+      .light-section{padding:35px 18px 20px;margin-top:55px;border-radius:23px}
+      .section-title{font-size:clamp(2.2rem,10vw,3.1rem)}
+      .bento{grid-template-columns:1fr}.tile{min-height:0;padding:24px}.tile.big{min-height:244px}
+      .tile.new h3,.tile.new p{max-width:78%}.tile.new::after{width:115px;height:115px;right:-34px}
+      .tile.wide{grid-column:auto;display:block}.pill-mini{margin-top:16px}
+      .showcase{padding:63px 0}.settings-note{left:0}
+      .start{padding:31px 20px;border-radius:22px}.steps{grid-template-columns:1fr;gap:13px;margin-top:22px}
+      .step{display:grid;grid-template-columns:62px 1fr;column-gap:7px;row-gap:0}
+      .step strong{grid-row:span 2;font-size:2.55rem;align-self:center}
+      .step h3{margin:0 0 5px}.step p{font-size:.86rem}
+      .faq{padding:61px 0 75px}.faq summary{font-size:.92rem}
+      .last-cta{padding:33px 23px;border-radius:23px}.last-cta .button{width:100%}
+      footer{padding:30px 0 35px}footer a{margin:0 17px 0 0}
+    }
+    @media(prefers-reduced-motion:reduce){
+      *,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}
+    }
   </style>
 </head>
 <body>
-  <canvas id="aqua-caustic-canvas" aria-hidden="true"></canvas>
-  <div class="aqua-depth" aria-hidden="true"><i class="sky"></i><i class="sunshafts"></i><i class="waves"></i><i class="caustics"></i><i class="sparkles"></i></div>
+  <a class="skip" href="#main">Skip to content</a>
   <div class="wrap">
     <header class="nav">
-      <a class="brand" href="./" aria-label="HDRSnip Fusion home"><img class="brand-icon" src="favicon.png" width="38" height="38" alt="">HDR<span>Snip</span> Fusion</a>
-      <nav class="nav-links" aria-label="Primary navigation">
-        <a href="#features">Features</a>
-        <a href="#screenshots">Screenshots</a>
-        <a href="#download">Download</a>
-        <a href="#questions">FAQ</a>
-        <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub Repository ↗</a>
+      <a class="logo" href="./" aria-label="HDRSnip Fusion home"><img src="favicon.png" alt="" width="43" height="43">HDR<b>Snip</b> Fusion</a>
+      <nav class="navlinks" aria-label="Primary navigation">
+        <a href="#features">Features</a><a href="#screenshots">The app</a><a href="#how-it-works">How it works</a><a href="#faq">FAQ</a>
+        <a class="nav-dl" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.2">Get v0.1.2 ↗</a>
       </nav>
     </header>
-    <main>
-      <div class="hero">
-        <div>
-          <p class="eyebrow">Free · Open source · Windows 10 &amp; 11</p>
-          <h1>HDR screenshots.<br><em>Aqua personality.</em></h1>
-          <p class="intro">HDRSnip Fusion is a free Windows screenshot tool for capturing HDR, Auto HDR, and SDR screen content, selecting a region, adding annotations, and saving or copying the result. Wrapped in a Frutiger Aqua-inspired glass interface.</p>
-          <div class="buttons">
-            <a class="btn primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe">↓ Download for Windows</a>
-            <a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua" aria-label="View the official HDRSnip Fusion open-source GitHub repository">★ View on GitHub ↗</a>
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <div class="version eyebrow"><span class="point"></span> V0.1.2 AVAILABLE NOW <span aria-hidden="true">✦</span> FREE &amp; OPEN SOURCE</div>
+          <h1 id="hero-title"><span>Capture</span><span>the <span class="shine" style="display:inline">glow.</span></span><span>Keep the</span><span>detail.</span></h1>
+          <p class="hero-desc">HDR screenshots without the blown-out highlights. Select a region, add annotations, and save or copy in a click. All wrapped in a glossy, Frutiger Aqua-inspired Windows app.</p>
+          <div class="cta-row">
+            <a class="button primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/download/v0.1.2/HDRSnipFusion.exe" aria-label="Download HDRSnip Fusion version 0.1.2 for Windows">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></svg>Download for Windows
+            </a>
+            <a class="button secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">View source <span aria-hidden="true">↗</span></a>
           </div>
-          <p class="micro">v0.1.2 · 64-bit Windows EXE · No Python installation required · MIT License</p>
-          <p class="micro">Official open-source GitHub repository: <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">shadow728270/HDRScreenshot-FrutigerAqua</a> · <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">Releases &amp; changelog</a></p>
+          <p class="hero-sub">Windows 10 / 11 · 64-bit · No Python required · MIT licensed</p>
+          <div class="mini-proof"><span>◈ HDR + Auto HDR</span><span>✎ Annotate</span><span>↗ One-click save</span></div>
         </div>
-        <div class="art" aria-hidden="true">
-          <div class="orb"></div>
-          <div class="glasslabel">Capture · Annotate · Save</div>
+        <div class="hero-art">
+          <div class="bubble a" aria-hidden="true"></div><div class="bubble b" aria-hidden="true"></div><div class="bubble c" aria-hidden="true"></div>
+          <div class="preview">
+            <div class="preview-inner">
+              <div class="preview-top"><div class="preview-dots" aria-hidden="true"><i></i><i></i><i></i></div><strong>HDRSnip Fusion · Aqua Capture</strong><span class="state">HDR AWARE</span></div>
+              <img class="preview-img" src="assets/hdrsnip-capture-overlay.webp" width="1600" height="757" alt="Earlier HDRSnip Fusion screenshot showing an Aqua annotation toolbar over a selected region of a bright HDR desktop" fetchpriority="high">
+              <div class="preview-caption"><span>LIVE APP PREVIEW <span aria-hidden="true">✦</span></span><span class="light">Capture · Mark up · Save</span></div>
+            </div>
+          </div>
+          <div class="float-tag"><span aria-hidden="true">✦</span><span>Made for <b>HDR</b></span></div>
         </div>
+      </section>
+
+      <div class="features-rail" aria-label="Highlights">
+        <div><strong>16-bit</strong><span>scRGB capture path</span></div>
+        <div><strong>1–40</strong><span>px stroke control</span></div>
+        <div><strong>F</strong><span>Paint Bucket tool</span></div>
+        <div><strong>0$</strong><span>Free and open-source</span></div>
       </div>
-      <section id="features" aria-labelledby="features-title">
-        <h2 id="features-title">Built for HDR screenshots, not just screen grabs.</h2>
-        <p class="section-intro">A focused region-capture workflow with configurable HDR-to-SDR conversion, annotation tools, and a distinct Frutiger Aqua design.</p>
-        <div class="grid">
-          <div class="panel"><h3>HDR &amp; Auto HDR</h3><p>Uses DXGI Desktop Duplication with scRGB capture and configurable tone mapping to make viewable SDR PNG screenshots from HDR-capable screen content.</p></div>
-          <div class="panel"><h3>Region capture</h3><p>Select, reposition, and resize the desired area on your monitor before copying or saving the result.</p></div>
-          <div class="panel"><h3>Annotation tools</h3><p>Draw with a pen or add rectangles, ellipses, lines, arrows, and text. v0.1.2 introduces adjustable line thickness and a non-destructive Paint Bucket.</p></div>
-          <div class="panel"><h3>Frutiger Aqua interface</h3><p>Transparent glass, water caustics, and soft glossy jelly-like controls with adjustable animation intensity.</p></div>
-          <div class="panel"><h3>Hotkey &amp; system tray</h3><p>Press Ctrl + Shift + X by default, customize your shortcut, and optionally start minimized to the tray when you sign in.</p></div>
-          <div class="panel"><h3>Multi-monitor awareness</h3><p>Targets the monitor under your cursor, including mixed DPI/scaling setups. Capture behavior can depend on drivers and display settings.</p></div>
-          <div class="panel"><h3>One-click screenshot saving</h3><p>Choose your preferred save folder once in Settings. Click Save or press Ctrl+S to save a unique PNG immediately; Ctrl+Alt+S opens Save As.</p></div>
-          <div class="panel"><h3>GitHub release updates</h3><p>Check for new stable releases in Settings, verify the download, and confirm the update and restart when ready.</p></div>
+
+      <section class="light-section" id="features" aria-labelledby="features-title">
+        <div class="eyebrow"><span class="point"></span> WHAT MAKES IT DIFFERENT</div>
+        <h2 class="section-title" id="features-title">More than a screenshot.<br>It's your screen, your way.</h2>
+        <p class="section-lead">The fast capture workflow you expect, with HDR-aware color processing and a screenshot editor designed to feel right at home on your desktop.</p>
+        <div class="bento">
+          <article class="tile big">
+            <span class="tile-label">01 / THE IMPORTANT PART</span>
+            <h3>Bright highlights.<br>No nuclear-white sky.</h3>
+            <p>Captures HDR and Auto HDR screen content using DXGI and tone-maps it into shareable SDR PNGs. Fine-tune the result to suit your display.</p>
+          </article>
+          <article class="tile new">
+            <span class="tile-label">NEW IN V0.1.2 · 🪣</span>
+            <h3>Meet your new Paint Bucket.</h3>
+            <p>Fill connected areas without modifying the original screenshot. Adjustable tolerance, opacity and undo support.</p>
+          </article>
+          <article class="tile">
+            <span class="tile-label">PRECISION DRAWING</span>
+            <h3>Make your point.</h3>
+            <p>Pen, arrows, lines, rectangles, ellipses and text, now with adjustable 1–40 px line thickness.</p>
+          </article>
+          <article class="tile dark">
+            <span class="tile-label">ALWAYS ONE HOTKEY AWAY</span>
+            <h3>Quietly in the tray.</h3>
+            <p>Set your shortcut, capture the screen under your cursor, then get straight back to whatever you were doing.</p>
+          </article>
+          <article class="tile wide">
+            <div class="wide-copy"><span class="tile-label">DESIGNED TO STAY OUT OF THE WAY</span><h3>Copy it. Save it. Keep moving.</h3>
+              <p>One-click saving to your chosen folder, quick-save and copy, high-DPI region selection, and built-in GitHub release update checks.</p></div>
+            <span class="pill-mini">Ctrl + Shift + X ↗</span>
+          </article>
         </div>
       </section>
-      <section id="screenshots" aria-labelledby="screenshots-title">
-        <h2 id="screenshots-title">See HDRSnip Fusion in action</h2>
-        <p class="section-intro">Real screenshots from the application, including the HDR-aware selection overlay and the Frutiger Aqua settings window.</p>
-        <div class="screenshots-grid">
-          <figure class="shot">
-            <img src="assets/hdrsnip-capture-overlay.webp" alt="HDRSnip Fusion selecting an HDR region on a Windows desktop, with Aqua glass annotation toolbar and save, copy and drawing controls" width="1600" height="757" loading="lazy" decoding="async">
-            <figcaption><strong>HDR screenshot selection.</strong> Drag a region, adjust the selection, use the drawing toolbar, and copy or save the screenshot.</figcaption>
-          </figure>
-          <figure class="shot settings">
-            <img src="assets/hdrsnip-settings.webp" alt="HDRSnip Fusion Settings showing custom capture hotkey, Frutiger Aqua animation intensity, HDR tone mapping and safety controls" width="706" height="817" loading="lazy" decoding="async">
-            <figcaption><strong>Customizable Aqua settings.</strong> This screenshot shows a user-set Ctrl+X shortcut; the default for new installations is <strong>Ctrl+Shift+X</strong>.</figcaption>
-          </figure>
+
+      <section class="showcase" id="screenshots" aria-labelledby="showcase-title">
+        <div>
+          <div class="eyebrow"><span class="point"></span> LIQUID GLASS, REAL TOOLS</div>
+          <h2 class="section-title" id="showcase-title">A little nostalgia.<br>A lot of utility.</h2>
+          <p class="section-lead">Frosted Aqua-inspired controls with adjustable visual intensity. Underneath the glossy surface, the editing and HDR settings stay practical.</p>
+          <ul class="benefit-list">
+            <li><b>✧</b><span>Customizable HDR tone mapping and Windows SDR white-level detection</span></li>
+            <li><b>✧</b><span>Monitor-under-cursor capture with mixed-DPI support</span></li>
+            <li><b>✧</b><span>Resizing and repositioning selections without losing annotations</span></li>
+            <li><b>✧</b><span>Persistent settings, diagnostics and optional auto-updating</span></li>
+          </ul>
+        </div>
+        <div class="settings-stage">
+          <div class="settings-frame">
+            <img src="assets/hdrsnip-settings.webp" width="706" height="817" loading="lazy" decoding="async" alt="HDRSnip Fusion Aqua-themed settings window, showing capture hotkey, tone mapping and visual settings">
+          </div>
+          <div class="settings-note">THE AQUA INTERFACE ✧</div>
         </div>
       </section>
-      <section id="download" aria-labelledby="download-title">
-        <h2 id="download-title">Take your first screenshot</h2>
+
+      <section class="start" id="how-it-works" aria-labelledby="start-title">
+        <div class="eyebrow"><span class="point"></span> THREE SIMPLE STEPS</div>
+        <h2 class="section-title" id="start-title">From screen to screenshot.</h2>
         <div class="steps">
-          <div class="step"><span class="number">1</span><h3>Download the EXE</h3><p>Get the Windows binary from the official <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest">GitHub Release</a>.</p></div>
-          <div class="step"><span class="number">2</span><h3>Open HDRSnip Fusion</h3><p>Launch the executable and find its icon in the Windows notification area or hidden tray icons.</p></div>
-          <div class="step"><span class="number">3</span><h3>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd></h3><p>Select the area, annotate if you want, and copy the result or save a PNG.</p></div>
+          <div class="step"><strong>01</strong><h3>Download</h3><p>Grab the free Windows EXE from the <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.2">official v0.1.2 release</a>.</p></div>
+          <div class="step"><strong>02</strong><h3>Press your hotkey</h3><p>Find HDRSnip Fusion in your tray and press <b>Ctrl + Shift + X</b>, or set your own shortcut.</p></div>
+          <div class="step"><strong>03</strong><h3>Capture &amp; create</h3><p>Resize the selection, annotate your shot, then copy or save a PNG. Done.</p></div>
         </div>
-        <div class="callout"><strong>Early, unsigned public release</strong><p>The build is available as source and EXE, but hardware compatibility is still being evaluated. Windows SmartScreen may show a warning. HDR screenshot results vary with display configuration, games, and GPU drivers. Output is a tone-mapped SDR PNG, not a native HDR image file.</p></div>
       </section>
-      <section id="questions" aria-labelledby="faq-title">
-        <h2 id="faq-title">Frequently asked questions</h2>
-        <details><summary>Can HDRSnip Fusion capture an HDR game or Auto HDR desktop?</summary><p>It is designed to do so using DXGI Desktop Duplication and tone mapping. Success and output appearance can vary based on graphics drivers, Windows HDR settings, and a game's presentation mode.</p></details>
-        <details><summary>Does the app combine several exposures into an HDR screenshot?</summary><p>No. HDRSnip Fusion captures the GPU framebuffer with DXGI Desktop Duplication, then tone-maps HDR content to a conventional SDR image. It does not stitch or merge multiple differently exposed screenshots.</p></details>
-        <details><summary>Will the screenshot preserve actual HDR metadata?</summary><p>No. The current export is a conventional PNG with configurable HDR-to-SDR tone mapping. It is intended to avoid washed-out or clipped-looking captures on supported configurations, not to save native HDR images.</p></details>
-        <details><summary>Is it free and open source?</summary><p>Yes. The application is free, and the Python source is published under the <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/LICENSE">MIT License</a>.</p></details>
-        <details><summary>Do I need Python or an installer?</summary><p>No. Download the standalone Windows EXE from the GitHub Releases page. Python is only required if you choose to run or build the source code.</p></details>
-        <details><summary>What if the hotkey doesn't work?</summary><p>Check the tray icon, open Settings to view the configured hotkey, and make sure another app isn't using the same shortcut. A previously saved hotkey can override Ctrl + Shift + X.</p></details>
+
+      <section class="faq" id="faq" aria-labelledby="faq-title">
+        <div class="eyebrow"><span class="point"></span> GOOD TO KNOW</div>
+        <h2 class="section-title" id="faq-title">Frequently asked questions.</h2>
+        <details><summary>Does HDRSnip Fusion work with Windows Auto HDR?</summary><p>It's designed for HDR and Auto HDR content using DXGI Desktop Duplication and adjustable tone mapping. Actual capture behavior depends on your monitor, driver, and the game's display mode. Borderless fullscreen is generally safer than exclusive fullscreen.</p></details>
+        <details><summary>Are screenshots saved in real HDR?</summary><p>Not currently. HDRSnip Fusion uses an HDR-aware capture path, then converts the image into a conventional tone-mapped SDR PNG for sharing. The exported file does not preserve native HDR metadata.</p></details>
+        <details><summary>Is v0.1.2 free? Is the code open source?</summary><p>Yes. The application is free and the code is available on <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub</a> under the MIT License.</p></details>
+        <details><summary>Do I need Python or an installer?</summary><p>No. Download and launch HDRSnipFusion.exe on Windows 10 or 11. Python is only necessary if you want to run or build the source yourself.</p></details>
+        <details><summary>What about Windows SmartScreen?</summary><p>This early public EXE is unsigned, so Windows SmartScreen may warn. Use the official GitHub release and SHA-256 checksum to verify the file. Avoid downloading lookalike copies from unofficial sources.</p></details>
+        <details><summary>My hotkey doesn't work. What should I check?</summary><p>Open Settings from the tray icon to check the configured hotkey. Another program might already be using that combination, and a saved hotkey may be different from the default Ctrl + Shift + X.</p></details>
       </section>
-      <section>
-        <h2>Built in the open</h2>
-        <p class="section-intro">The complete Python source, build workflow, and issue tracker are public. Found a bug, want a feature, or have a screenshot to share?</p>
-        <div class="buttons"><a class="btn primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">Explore GitHub Repository ↗</a><a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Report an issue ↗</a><a class="btn secondary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/README.md">Read project docs ↗</a></div>
-      </section>
+
+      <aside class="last-cta" aria-label="Download HDRSnip Fusion">
+        <h2>Go on. Capture something beautiful.</h2>
+        <p>One tiny tray app, one very glossy personality. Free, open source and ready for HDR screenshots on Windows.</p>
+        <a class="button primary" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/download/v0.1.2/HDRSnipFusion.exe">↓ Get HDRSnip Fusion v0.1.2</a>
+      </aside>
     </main>
-    <footer><div class="foot"><span>© HDRSnip Fusion contributors · MIT License · Independent open-source project</span><span><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub</a><a href="sitemap.xml">Sitemap</a></span></div></footer>
+    <footer>
+      <span>© HDRSnip Fusion contributors · MIT License · An independent open-source project.</span>
+      <span><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub</a><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Report an issue</a><a href="sitemap.xml">Sitemap</a></span>
+    </footer>
   </div>
-<script>
-
-(()=>{"use strict";
-const root=document.documentElement;
-const reduced=window.matchMedia("(prefers-reduced-motion: reduce)");
-let x=0,y=0,scroll=0,queued=false;
-function paint(){queued=false;root.style.setProperty("--wave-x",reduced.matches?"0px":x.toFixed(1)+"px");root.style.setProperty("--wave-y",reduced.matches?"0px":y.toFixed(1)+"px");root.style.setProperty("--wave-scroll",reduced.matches?"0px":scroll+"px");}
-function schedule(){if(!queued&&!document.hidden){queued=true;requestAnimationFrame(paint);}}
-window.addEventListener("pointermove",e=>{if(reduced.matches)return;x=(e.clientX/innerWidth-.5)*70;y=(e.clientY/innerHeight-.5)*56;schedule();},{passive:true});
-window.addEventListener("scroll",()=>{scroll=Math.min(window.scrollY,3000);schedule();},{passive:true});
-window.addEventListener("resize",schedule,{passive:true});
-document.addEventListener("visibilitychange",schedule);
-if(reduced.addEventListener)reduced.addEventListener("change",schedule);
-schedule();
-})();
-</script>
-
-<script>
-/* Ambient refracting water caustics across the entire page, never an extra feature panel.
-   Mouse movement and scrolling affect flow; pointer taps create brief optical ripples. */
-(()=>{"use strict";
- const canvas=document.getElementById("aqua-caustic-canvas"),ctx=canvas?.getContext("2d",{alpha:true});
- if(!ctx)return;
- const reduced=matchMedia("(prefers-reduced-motion: reduce)");
- let w=0,h=0,dpr=1,px=.5,py=.5,scroll=0,phase=0,last=0,raf=0;
- const ripples=[],strokes=[];
- function resize(){
-   dpr=Math.min(devicePixelRatio||1,1.5);
-   w=innerWidth;h=innerHeight;
-   canvas.width=Math.ceil(w*dpr);canvas.height=Math.ceil(h*dpr);
-   ctx.setTransform(dpr,0,0,dpr,0,0);
-   strokes.length=0;
-   const step=Math.max(56,Math.min(100,w/13));
-   for(let y=-step;y<h+step*2;y+=step)for(let x=-step;x<w+step*2;x+=step){
-     const seed=Math.sin(x*.043+y*.061)*43758.5453, f=seed-Math.floor(seed);
-     strokes.push({x,y,seed:f,width:step*(.65+f*.7)});
-   }
- }
- function render(t){
-   raf=requestAnimationFrame(render);
-   if(reduced.matches||document.hidden||t-last<40)return;
-   last=t;phase+=.013;
-   ctx.clearRect(0,0,w,h);
-   ctx.lineCap="round";ctx.globalCompositeOperation="screen";
-   const mx=(px-.5)*20,my=(py-.5)*16;
-   for(const p of strokes){
-     const q=phase+p.seed*6.283;
-     const x=p.x+Math.sin(q*.78+p.y*.015)*22+mx*(.3+p.seed);
-     const y=p.y+Math.cos(q*.62+p.x*.017)*16+my*.65-scroll*.025;
-     const a=.038+.063*(.5+.5*Math.sin(q*1.3));
-     ctx.strokeStyle="rgba(210,255,254,"+a.toFixed(3)+")";
-     ctx.lineWidth=.9+p.seed*1.25;
-     ctx.shadowBlur=10;ctx.shadowColor="rgba(90,250,250,.19)";
-     ctx.beginPath();ctx.moveTo(x-p.width*.56,y-7);
-     ctx.bezierCurveTo(x-p.width*.08,y-27,x+p.width*.16,y+22,x+p.width*.55,y+2);ctx.stroke();
-     ctx.beginPath();ctx.ellipse(x+18,y+5,p.width*.42,10+7*p.seed,q*.07,0,Math.PI*.88);ctx.stroke();
-   }
-   ctx.shadowBlur=0;
-   for(let i=ripples.length-1;i>=0;i--){
-     let p=ripples[i],life=(t-p.t)/1250;
-     if(life>=1){ripples.splice(i,1);continue}
-     const r=18+life*165;
-     ctx.lineWidth=1.6*(1-life);
-     ctx.strokeStyle="rgba(222,255,255,"+(.3*(1-life)).toFixed(3)+")";
-     ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
-   }
- }
- window.addEventListener("pointermove",e=>{px=e.clientX/Math.max(w,1);py=e.clientY/Math.max(h,1)},{passive:true});
- window.addEventListener("pointerdown",e=>{if(!reduced.matches){ripples.push({x:e.clientX,y:e.clientY,t:performance.now()});if(ripples.length>8)ripples.shift()}},{passive:true});
- window.addEventListener("scroll",()=>{scroll=window.scrollY},{passive:true});
- window.addEventListener("resize",resize,{passive:true});
- resize();raf=requestAnimationFrame(render);
-})();
-</script>
 </body>
 </html>
