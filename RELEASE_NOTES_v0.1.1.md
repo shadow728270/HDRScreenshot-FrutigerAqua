@@ -1,9 +1,11 @@
-# 🌊 HDRSnip Fusion v0.1.1
+# 🌊 Prismwake release archive · v0.1.1
+_Archived v0.1.1 release, shipped with the original desktop application branding. Binary names remain unchanged._
+
 ### Your screenshots, your folder. Updates without the scavenger hunt.
 
 > **What's new:** One-click screenshot saving, a configurable save folder, and built-in GitHub Release update checking.
 
-<p align="center"><img alt="HDRSnip Fusion HDR screenshot selection overlay with translucent Frutiger Aqua annotation controls" src="https://raw.githubusercontent.com/shadow728270/HDRScreenshot-FrutigerAqua/main/docs/assets/hdrsnip-capture-overlay.webp" width="780"></p>
+<p align="center"><img alt="Original Aqua app HDR screenshot selection overlay with translucent Frutiger Aqua annotation controls" src="https://raw.githubusercontent.com/shadow728270/HDRScreenshot-FrutigerAqua/main/docs/assets/hdrsnip-capture-overlay.webp" width="780"></p>
 
 <sub>Original Aqua capture interface. The new v0.1.1 saving and update controls aren't shown in this earlier screenshot.</sub>
 
