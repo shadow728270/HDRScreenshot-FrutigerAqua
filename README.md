@@ -4,7 +4,7 @@
 
 **Free, open-source Windows screenshot and annotation tool with HDR and Auto HDR capture, a global hotkey, and a Frutiger Aqua-inspired interface.**
 
-[**⬇ Download for Windows (v0.1.1)**](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe) · [Releases](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases) · [Project website](https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/) · [Report an issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues)
+[**⬇ Download for Windows (v0.1.2)**](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe) · [Releases](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases) · [Project website](https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/) · [Report an issue](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues)
 
 **Windows 10 / 11 · 64-bit · MIT licensed · No Python required for the EXE**
 
