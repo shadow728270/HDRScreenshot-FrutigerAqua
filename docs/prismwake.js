@@ -2,31 +2,11 @@
 (()=>{"use strict";
  const $=id=>document.getElementById(id);
  const repo="shadow728270/HDRScreenshot-FrutigerAqua";
- const compare=$("compare"),range=$("compareRange"),left=$("compareLeft"),right=$("compareRight");
- const lblLeft=$("compareLabelLeft"),lblRight=$("compareLabelRight"),fileA=$("realConventional"),fileB=$("realPrismwake"),feedback=$("compareFeedback");
- let urlA=null,urlB=null,hasA=false,hasB=false;
+ const compare=$("compare"),range=$("compareRange");
  function positionSplit(percent){const val=Math.max(0,Math.min(100,percent));compare.style.setProperty("--split",val+"%");range.value=String(Math.round(val));range.setAttribute("aria-valuenow",String(Math.round(val)))}
  positionSplit(50);
  range.addEventListener("input",()=>positionSplit(+range.value));
- function importFile(input,image,side){
-   const file=input.files?.[0];if(!file)return;
-   if(!file.type.startsWith("image/")||file.size>25*1024*1024){feedback.textContent="Choose a PNG, JPEG or WebP image under 25 MB.";input.value="";return}
-   const url=URL.createObjectURL(file);image.onload=()=>{if(side==="A"&&urlA)URL.revokeObjectURL(urlA);if(side==="B"&&urlB)URL.revokeObjectURL(urlB);if(side==="A"){urlA=url;hasA=true}else{urlB=url;hasB=true}
-     if(hasA&&hasB){compare.dataset.real="true";lblLeft.textContent="Your conventional capture";lblRight.textContent="Your Prismwake capture";feedback.textContent="Comparing your two real files locally. Nothing was uploaded."}
-     else{feedback.textContent="One image added. Choose the second file for an actual side-by-side comparison."}
-   };
-   image.onerror=()=>{URL.revokeObjectURL(url);feedback.textContent="Could not open that image."};
-   image.src=url;
- }
- fileA.addEventListener("change",()=>importFile(fileA,left,"A"));
- fileB.addEventListener("change",()=>importFile(fileB,right,"B"));
- $("compareReset").addEventListener("click",()=>{
-   if(urlA)URL.revokeObjectURL(urlA);if(urlB)URL.revokeObjectURL(urlB);
-   urlA=urlB=null;hasA=hasB=false;fileA.value="";fileB.value="";
-   left.src=right.src="assets/hdrsnip-capture-overlay.webp";compare.dataset.real="false";
-   lblLeft.textContent="Simulated blown-out capture";lblRight.textContent="Original Prismwake-era capture";
-   feedback.textContent="Illustrative simulation shown. Upload both genuine files to compare actual outputs.";positionSplit(50);
- });
+ $("compareReset").addEventListener("click",()=>positionSplit(50));
  let draggingSplit=false;
  compare.addEventListener("pointerdown",event=>{if(event.button!==0&&event.pointerType==="mouse")return;event.preventDefault();draggingSplit=true;compare.setPointerCapture(event.pointerId);setSplitFromPointer(event)});
  compare.addEventListener("dragstart",event=>event.preventDefault());
@@ -36,14 +16,15 @@
  compare.addEventListener("keydown",event=>{if(event.key==="ArrowLeft"||event.key==="ArrowRight"){event.preventDefault();positionSplit(+range.value+(event.key==="ArrowLeft"?-3:3))}});
 
  const stage=$("demoStage"),svg=$("demoSvg"),hint=$("demoHint"),tools=[...document.querySelectorAll("[data-tool]")],undo=$("demoUndo"),reset=$("demoReset");
+ const sourcePhoto=stage.querySelector("img"),fillSettings=$("demoFillSettings"),fillTolerance=$("demoFillTolerance"),fillToleranceValue=$("demoToleranceValue"),fillColor=$("demoFillColor");
  const NS="http://www.w3.org/2000/svg";let currentTool="select",isDrawing=false,start=null,temp=null,history=[];
  function coord(e){const r=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1000,(e.clientX-r.left)/r.width*1000)),y:Math.max(0,Math.min(615,(e.clientY-r.top)/r.height*615))}}
  function make(tag,props){const el=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(props))el.setAttribute(k,String(v));return el}
  const selection=make("rect",{x:155,y:112,width:670,height:372,rx:10,fill:"#baffff","fill-opacity":".07",stroke:"#aefff6","stroke-width":"4","stroke-dasharray":"15 8"});
  svg.appendChild(selection);
- function selectTool(t){currentTool=t;tools.forEach(el=>el.setAttribute("aria-pressed",String(el.dataset.tool===t)));hint.textContent=({
+ function selectTool(t){currentTool=t;tools.forEach(el=>el.setAttribute("aria-pressed",String(el.dataset.tool===t)));fillSettings.hidden=t!=="fill";hint.textContent=({
   select:"Drag to choose a capture region",pen:"Drag to draw a line",rect:"Drag to draw a rectangle",
-  arrow:"Drag to draw an arrow",fill:"Tap a point to add a translucent fill",text:"Tap to add a label"
+  arrow:"Drag to draw an arrow",fill:"Click a color region to flood fill its connected pixels",text:"Tap to add a label"
  })[t]}
  tools.forEach(btn=>btn.addEventListener("click",()=>selectTool(btn.dataset.tool)));
  function keep(el){history.push(el);undo.disabled=false}
@@ -51,6 +32,60 @@
  function redrawShape(el,a,b,t){const dx=b.x-a.x,dy=b.y-a.y;
    if(t==="select"||t==="rect"){el.setAttribute("x",Math.min(a.x,b.x));el.setAttribute("y",Math.min(a.y,b.y));el.setAttribute("width",Math.abs(dx));el.setAttribute("height",Math.abs(dy))}
    if(t==="arrow"){el.setAttribute("x1",a.x);el.setAttribute("y1",a.y);el.setAttribute("x2",b.x);el.setAttribute("y2",b.y)}
+ }
+ // Rasterize the *displayed* cover-cropped image once; no idle processing or animation.
+ // SVG annotations stay in the existing undo history. Flood fill never changes the source photo.
+ const FILL_W=640,FILL_H=394,VIEW_W=1000,VIEW_H=615;
+ let sampledPixels=null;
+ function sampleDemoPixels(){
+   if(sampledPixels)return sampledPixels;
+   if(!sourcePhoto.complete||!sourcePhoto.naturalWidth)return null;
+   const surface=document.createElement("canvas");surface.width=FILL_W;surface.height=FILL_H;
+   const context=surface.getContext("2d",{willReadFrequently:true});if(!context)return null;
+   const scale=Math.max(FILL_W/sourcePhoto.naturalWidth,FILL_H/sourcePhoto.naturalHeight);
+   const rw=sourcePhoto.naturalWidth*scale,rh=sourcePhoto.naturalHeight*scale;
+   context.drawImage(sourcePhoto,(FILL_W-rw)/2,(FILL_H-rh)/2,rw,rh);
+   try {sampledPixels=context.getImageData(0,0,FILL_W,FILL_H).data}
+   catch(_err){return null}
+   return sampledPixels;
+ }
+ fillTolerance.addEventListener("input",()=>{fillToleranceValue.textContent=fillTolerance.value});
+ function floodFillAt(point){
+   const source=sampleDemoPixels();
+   if(!source){hint.textContent="The demo image is still loading. Try again.";return}
+   const w=FILL_W,h=FILL_H,total=w*h;
+   const sx=Math.min(w-1,Math.max(0,Math.floor(point.x/VIEW_W*w)));
+   const sy=Math.min(h-1,Math.max(0,Math.floor(point.y/VIEW_H*h)));
+   const seed=sy*w+sx,off=seed*4;
+   const sr=source[off],sg=source[off+1],sb=source[off+2],t=+fillTolerance.value;
+   // RGB distance from the seed color, not iterative neighbor drift.
+   const thresholdSq=3*t*t;
+   const mark=new Uint8Array(total),stack=new Int32Array(total),result=new Uint8ClampedArray(total*4);
+   let top=0,filled=0;
+   mark[seed]=1;stack[top++]=seed;
+   const hex=fillColor.value;
+   const fr=parseInt(hex.slice(1,3),16),fg=parseInt(hex.slice(3,5),16),fb=parseInt(hex.slice(5,7),16);
+   while(top>0){
+     const index=stack[--top],i=index*4,dr=source[i]-sr,dg=source[i+1]-sg,db=source[i+2]-sb;
+     if(dr*dr+dg*dg+db*db>thresholdSq)continue;
+     result[i]=fr;result[i+1]=fg;result[i+2]=fb;result[i+3]=174;filled++;
+     const x=index%w,y=(index/w)|0;
+     // Mark at enqueue time; each source pixel enters at most once.
+     let next;
+     if(x>0){next=index-1;if(!mark[next]){mark[next]=1;stack[top++]=next}}
+     if(x<w-1){next=index+1;if(!mark[next]){mark[next]=1;stack[top++]=next}}
+     if(y>0){next=index-w;if(!mark[next]){mark[next]=1;stack[top++]=next}}
+     if(y<h-1){next=index+w;if(!mark[next]){mark[next]=1;stack[top++]=next}}
+   }
+   if(!filled){hint.textContent="No matching pixels. Increase the tolerance.";return}
+   const overlay=document.createElement("canvas");overlay.width=w;overlay.height=h;
+   const ctx=overlay.getContext("2d");if(!ctx)return;
+   const data=ctx.createImageData(w,h);data.data.set(result);ctx.putImageData(data,0,0);
+   const element=make("image",{x:0,y:0,width:VIEW_W,height:VIEW_H,preserveAspectRatio:"none"});
+   element.setAttribute("href",overlay.toDataURL("image/png"));
+   // Keep the dashed capture selection and all subsequent annotations visible.
+   svg.insertBefore(element,selection);keep(element);
+   hint.textContent="Filled "+filled.toLocaleString()+" connected pixels · Ctrl-free undo ↶";
  }
  stage.addEventListener("pointerdown",e=>{
    if(e.pointerType==="mouse"&&e.button!==0)return;
@@ -61,7 +96,7 @@
    if(currentTool==="rect"){temp=make("rect",{...outline(),x:p.x,y:p.y,width:1,height:1,rx:4});svg.appendChild(temp);return}
    if(currentTool==="arrow"){if(!$("demoArrowHead")){const defs=make("defs",{});const marker=make("marker",{id:"demoArrowHead",markerWidth:10,markerHeight:10,refX:8,refY:3,orient:"auto",markerUnits:"strokeWidth"});marker.appendChild(make("path",{d:"M0,0 L0,6 L9,3 z",fill:"#5affd7"}));defs.appendChild(marker);svg.appendChild(defs)}
      temp=make("line",{...outline(),x1:p.x,y1:p.y,x2:p.x,y2:p.y,"marker-end":"url(#demoArrowHead)"});svg.appendChild(temp);return}
-   if(currentTool==="fill"){const circle=make("ellipse",{cx:p.x,cy:p.y,rx:115,ry:75,fill:"#67ffe0","fill-opacity":".27",stroke:"#abfff0","stroke-width":3});svg.appendChild(circle);keep(circle);temp=null;return}
+   if(currentTool==="fill"){floodFillAt(p);temp=null;return}
    if(currentTool==="text"){const el=make("text",{x:p.x,y:p.y,fill:"#fbfff7","font-size":33,"font-weight":800,stroke:"#04476d","stroke-width":1,"paint-order":"stroke"});el.textContent="LOOK HERE ↗";svg.appendChild(el);keep(el);temp=null}
  });
  stage.addEventListener("pointermove",e=>{if(!isDrawing||!temp)return;const p=coord(e);
