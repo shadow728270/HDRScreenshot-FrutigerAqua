@@ -21,7 +21,19 @@
  function coord(e){const r=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1000,(e.clientX-r.left)/r.width*1000)),y:Math.max(0,Math.min(615,(e.clientY-r.top)/r.height*615))}}
  function make(tag,props){const el=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(props))el.setAttribute(k,String(v));return el}
  const selection=make("rect",{x:155,y:112,width:670,height:372,rx:10,fill:"#baffff","fill-opacity":".07",stroke:"#aefff6","stroke-width":"4","stroke-dasharray":"15 8"});
+ // The annotation layer is genuinely clipped to the capture selection.
+ // Moving or resizing the selection updates the clipping rectangle immediately.
+ const clipDefs=make("defs",{});
+ const clipPath=make("clipPath",{id:"demoSelectionClip",clipPathUnits:"userSpaceOnUse"});
+ const clipRect=make("rect",{x:155,y:112,width:670,height:372,rx:10});
+ clipPath.appendChild(clipRect);clipDefs.appendChild(clipPath);svg.appendChild(clipDefs);
+ const annotationLayer=make("g",{id:"demoAnnotationLayer","clip-path":"url(#demoSelectionClip)"});
+ svg.appendChild(annotationLayer);
  svg.appendChild(selection);
+ function selectionBounds(){return{x:+selection.getAttribute("x"),y:+selection.getAttribute("y"),width:+selection.getAttribute("width"),height:+selection.getAttribute("height")}}
+ function withinSelection(p){const b=selectionBounds();return b.width>0&&b.height>0&&p.x>=b.x&&p.y>=b.y&&p.x<=b.x+b.width&&p.y<=b.y+b.height}
+ function syncSelectionClip(){for(const attr of ["x","y","width","height"])clipRect.setAttribute(attr,selection.getAttribute(attr))}
+
  function selectTool(t){currentTool=t;tools.forEach(el=>el.setAttribute("aria-pressed",String(el.dataset.tool===t)));fillSettings.hidden=t!=="fill";hint.textContent=({
   select:"Drag to choose a capture region",pen:"Drag to draw a line",rect:"Drag to draw a rectangle",
   arrow:"Drag to draw an arrow",fill:"Click a color region to flood fill its connected pixels",text:"Tap to add a label"
@@ -30,11 +42,11 @@
  function keep(el){history.push(el);undo.disabled=false}
  function outline(color="#5affd7"){return{fill:"none",stroke:color,"stroke-width":5,"stroke-linecap":"round","stroke-linejoin":"round"}}
  function redrawShape(el,a,b,t){const dx=b.x-a.x,dy=b.y-a.y;
-   if(t==="select"||t==="rect"){el.setAttribute("x",Math.min(a.x,b.x));el.setAttribute("y",Math.min(a.y,b.y));el.setAttribute("width",Math.abs(dx));el.setAttribute("height",Math.abs(dy))}
+   if(t==="select"||t==="rect"){el.setAttribute("x",Math.min(a.x,b.x));el.setAttribute("y",Math.min(a.y,b.y));el.setAttribute("width",Math.abs(dx));el.setAttribute("height",Math.abs(dy));if(t==="select")syncSelectionClip()}
    if(t==="arrow"){el.setAttribute("x1",a.x);el.setAttribute("y1",a.y);el.setAttribute("x2",b.x);el.setAttribute("y2",b.y)}
  }
  // Rasterize the *displayed* cover-cropped image once; no idle processing or animation.
- // SVG annotations stay in the existing undo history. Flood fill never changes the source photo.
+ // Both the background and already-drawn annotations participate in the fill; undo remains non-destructive.
  const FILL_W=640,FILL_H=394,VIEW_W=1000,VIEW_H=615;
  let sampledPixels=null;
  function sampleDemoPixels(){
@@ -84,20 +96,21 @@
    const element=make("image",{x:0,y:0,width:VIEW_W,height:VIEW_H,preserveAspectRatio:"none"});
    element.setAttribute("href",overlay.toDataURL("image/png"));
    // Keep the dashed capture selection and all subsequent annotations visible.
-   svg.insertBefore(element,selection);keep(element);
+   annotationLayer.appendChild(element);keep(element);
    hint.textContent="Filled "+filled.toLocaleString()+" connected pixels · use ↶ to undo";
  }
  stage.addEventListener("pointerdown",e=>{
    if(e.pointerType==="mouse"&&e.button!==0)return;
-   e.preventDefault();isDrawing=true;start=coord(e);stage.setPointerCapture(e.pointerId);
-   const p=start;
+   e.preventDefault();const p=coord(e);
+   if(currentTool!=="select"&&!withinSelection(p)){hint.textContent="Choose a point inside the selection first.";return}
+   isDrawing=true;start=p;stage.setPointerCapture(e.pointerId);
    if(currentTool==="select"){temp=selection;redrawShape(selection,p,p,"select");return}
-   if(currentTool==="pen"){temp=make("polyline",{...outline(),"points":p.x+","+p.y});svg.appendChild(temp);return}
-   if(currentTool==="rect"){temp=make("rect",{...outline(),x:p.x,y:p.y,width:1,height:1,rx:4});svg.appendChild(temp);return}
+   if(currentTool==="pen"){temp=make("polyline",{...outline(),"points":p.x+","+p.y});annotationLayer.appendChild(temp);return}
+   if(currentTool==="rect"){temp=make("rect",{...outline(),x:p.x,y:p.y,width:1,height:1,rx:4});annotationLayer.appendChild(temp);return}
    if(currentTool==="arrow"){if(!$("demoArrowHead")){const defs=make("defs",{});const marker=make("marker",{id:"demoArrowHead",markerWidth:10,markerHeight:10,refX:8,refY:3,orient:"auto",markerUnits:"strokeWidth"});marker.appendChild(make("path",{d:"M0,0 L0,6 L9,3 z",fill:"#5affd7"}));defs.appendChild(marker);svg.appendChild(defs)}
-     temp=make("line",{...outline(),x1:p.x,y1:p.y,x2:p.x,y2:p.y,"marker-end":"url(#demoArrowHead)"});svg.appendChild(temp);return}
+     temp=make("line",{...outline(),x1:p.x,y1:p.y,x2:p.x,y2:p.y,"marker-end":"url(#demoArrowHead)"});annotationLayer.appendChild(temp);return}
    if(currentTool==="fill"){floodFillAt(p);temp=null;return}
-   if(currentTool==="text"){const el=make("text",{x:p.x,y:p.y,fill:"#fbfff7","font-size":33,"font-weight":800,stroke:"#04476d","stroke-width":1,"paint-order":"stroke"});el.textContent="LOOK HERE ↗";svg.appendChild(el);keep(el);temp=null}
+   if(currentTool==="text"){const el=make("text",{x:p.x,y:p.y,fill:"#fbfff7","font-size":33,"font-weight":800,stroke:"#04476d","stroke-width":1,"paint-order":"stroke"});el.textContent="LOOK HERE ↗";annotationLayer.appendChild(el);keep(el);temp=null}
  });
  stage.addEventListener("pointermove",e=>{if(!isDrawing||!temp)return;const p=coord(e);
    if(currentTool==="pen"){const s=temp.getAttribute("points")||"";temp.setAttribute("points",s+" "+p.x.toFixed(1)+","+p.y.toFixed(1))}
@@ -106,7 +119,7 @@
  function finish(e){if(!isDrawing)return;isDrawing=false;if(temp&&currentTool!=="select"){keep(temp)}temp=null}
  stage.addEventListener("pointerup",finish);stage.addEventListener("pointercancel",finish);
  undo.addEventListener("click",()=>{const x=history.pop();if(x)x.remove();undo.disabled=history.length===0});
- reset.addEventListener("click",()=>{history.forEach(x=>x.remove());history=[];undo.disabled=true;selection.setAttribute("x","155");selection.setAttribute("y","112");selection.setAttribute("width","670");selection.setAttribute("height","372");selectTool("select")});
+ reset.addEventListener("click",()=>{history.forEach(x=>x.remove());history=[];undo.disabled=true;selection.setAttribute("x","155");selection.setAttribute("y","112");selection.setAttribute("width","670");selection.setAttribute("height","372");syncSelectionClip();selectTool("select")});
  selectTool("select");
 
  const themes=[...document.querySelectorAll("[data-theme-choice]")],preview=$("themePreview"),opacity=$("themeOpacity"),opacityValue=$("opacityValue"),themeName=$("themeName");
