@@ -37,7 +37,7 @@ The screenshots above are real captures of the current Windows application, not 
 The <a href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/#playground">Prismwake Lab</a> contains four lightweight, browser-side experiences:
 
 1. **HDR comparison:** drag the slider to explore a clearly labeled, illustrative overexposure effect. This is a simulation, not a measured HDR-versus-SDR comparison, and has no upload feature.
-2. **Interactive editor demo:** select a region, draw, flood-fill connected image pixels with adjustable tolerance and color, add labels and undo. This is a browser sandbox, not an in-browser screen-capture engine.
+2. **Interactive editor demo:** select a region, draw closed shapes, fill those drawings without sampling the background photograph, choose a fill color, add labels, and undo. Annotations are clipped to the selection. This is a browser sandbox, not an in-browser screen-capture engine.
 3. **Aqua theme preview:** try Ocean, Emerald, Coral, or Vista themes plus transparency and motion preferences. These are **concept previews**, not yet desktop app settings.
 4. **Live release history and roadmap:** recent published releases load from the GitHub API where available. Upcoming ideas are labeled as ideas, not committed shipping dates.
 
