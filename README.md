@@ -63,7 +63,7 @@ Builds and release automation live in [`.github/workflows/`](.github/workflows/)
 
 ## Upcoming v0.1.3 transition
 
-The [Prismwake v0.1.3 migration contract](docs/PRISMWAKE_V013_MIGRATION.md) documents the non-breaking app rename and how existing v0.1.2 users must continue to receive verified updates through the legacy executable asset and repository. The [automated compatibility suite](tests/test_legacy_updater_contract.py) checks the actual v0.1.2 update parser against future dual-named releases. **v0.1.3 is not published yet.**
+The new v0.1.3 source is committed, and its [Windows candidate build passed](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/actions/runs/40138079555) packaging, checksum, 8 candidate unit tests and actual two-EXE updater/restart/rollback tests. The [test-build artifact](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/actions/runs/40138079555/artifacts/12577147735) includes both `Prismwake.exe` and the backward-compatible `HDRSnipFusion.exe`, plus their SHA-256 checksums. This workflow artifact may require GitHub login and is temporary. **v0.1.3 is not a public stable release yet**, and existing users still receive v0.1.2. Manual Windows feature testing and approval are required before tagging v0.1.3. See the [migration contract](docs/PRISMWAKE_V013_MIGRATION.md) and [frozen v0.1.2 updater tests](tests/test_legacy_updater_contract.py).
 
 ## Releases, security and contributing
 
