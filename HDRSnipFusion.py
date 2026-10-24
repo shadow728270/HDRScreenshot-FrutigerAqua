@@ -59,7 +59,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import weakref
+import bisect
+from collections import deque
 import webbrowser
+import zlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -145,7 +148,44 @@ except ImportError:
 
 import traceback
 
-APP_VERSION: str = "0.1.1"
+APP_VERSION: str = "0.1.2"
+
+# v0.1.2 Stroke Thickness & Non-Destructive Paint Bucket Constants
+MIN_STROKE_THICKNESS: int = 1
+MAX_STROKE_THICKNESS: int = 40
+DEFAULT_STROKE_THICKNESS: int = 3
+MIN_FILL_TOLERANCE: int = 0
+MAX_FILL_TOLERANCE: int = 100
+DEFAULT_FILL_TOLERANCE: int = 20
+MIN_FILL_OPACITY: int = 0
+MAX_FILL_OPACITY: int = 100
+DEFAULT_FILL_OPACITY: int = 100
+DEFAULT_TEXT_FONT_SIZE: int = 16
+STROKE_DRAWING_TOOLS: Tuple[str, ...] = ("pen", "rect", "ellipse", "line", "arrow")
+
+
+def clamp_stroke_thickness(value: Any) -> int:
+    """Clamps stroke thickness to the supported v0.1.2 range [1, 40] px."""
+    try:
+        return max(MIN_STROKE_THICKNESS, min(MAX_STROKE_THICKNESS, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_STROKE_THICKNESS
+
+
+def clamp_fill_tolerance(value: Any) -> int:
+    """Clamps Paint Bucket color tolerance to [0, 100]."""
+    try:
+        return max(MIN_FILL_TOLERANCE, min(MAX_FILL_TOLERANCE, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_FILL_TOLERANCE
+
+
+def clamp_fill_opacity(value: Any) -> int:
+    """Clamps Paint Bucket fill opacity percentage to [0, 100]."""
+    try:
+        return max(MIN_FILL_OPACITY, min(MAX_FILL_OPACITY, int(round(float(value)))))
+    except Exception:
+        return DEFAULT_FILL_OPACITY
 GITHUB_REPO_OWNER: str = "shadow728270"
 GITHUB_REPO_NAME: str = "HDRScreenshot-FrutigerAqua"
 GITHUB_REPO_URL: str = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
@@ -852,9 +892,12 @@ class AppConfig:
     animation_intensity: str = "medium"
     # Glass & gel transparency percentage (10 = dense aero glass, 72 = crystal clear default, 95 = ultra-sheer water)
     glass_transparency: int = 72
-    # Default tool and color
+    # Default tool, stroke thickness (1..40 px), and Paint Bucket settings (v0.1.2+)
     default_color: str = "#00E5FF"
-    default_thickness: int = 3
+    default_thickness: int = DEFAULT_STROKE_THICKNESS
+    default_fill_tolerance: int = DEFAULT_FILL_TOLERANCE
+    default_fill_opacity: int = DEFAULT_FILL_OPACITY
+    default_font_size: int = DEFAULT_TEXT_FONT_SIZE
     save_directory: str = str(DEFAULT_SAVE_DIR)
     # GitHub Automatic Updater preferences (v0.1.1+)
     auto_check_updates: bool = True
@@ -926,6 +969,25 @@ class AppConfig:
                         )
                     except Exception:
                         filtered["glass_transparency"] = 72
+                if "default_thickness" in filtered:
+                    filtered["default_thickness"] = clamp_stroke_thickness(
+                        filtered["default_thickness"]
+                    )
+                if "default_fill_tolerance" in filtered:
+                    filtered["default_fill_tolerance"] = clamp_fill_tolerance(
+                        filtered["default_fill_tolerance"]
+                    )
+                if "default_fill_opacity" in filtered:
+                    filtered["default_fill_opacity"] = clamp_fill_opacity(
+                        filtered["default_fill_opacity"]
+                    )
+                if "default_font_size" in filtered:
+                    try:
+                        filtered["default_font_size"] = max(
+                            8, min(72, int(filtered["default_font_size"]))
+                        )
+                    except Exception:
+                        filtered["default_font_size"] = DEFAULT_TEXT_FONT_SIZE
                 if "save_directory" in filtered:
                     raw_dir = str(filtered["save_directory"] or "").strip()
                     filtered["save_directory"] = (
@@ -7499,6 +7561,20 @@ if HAS_QT:
             super().__init__(text, parent)
             self._text_color = QColor(tint_hex)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            if AeroToolbarLabel._FONT is None:
+                AeroToolbarLabel._FONT = QFont("Segoe UI", 9, QFont.Weight.Bold)
+            self.setFont(AeroToolbarLabel._FONT)
+
+        def sizeHint(self) -> QSize:
+            if AeroToolbarLabel._FONT is None:
+                AeroToolbarLabel._FONT = QFont("Segoe UI", 9, QFont.Weight.Bold)
+            fm = QFontMetrics(AeroToolbarLabel._FONT)
+            txt = self.text() or ""
+            pad = 10 if txt.endswith(":") else 6
+            return QSize(fm.horizontalAdvance(txt) + pad, max(22, fm.height() + 4))
+
+        def minimumSizeHint(self) -> QSize:
+            return self.sizeHint()
 
         def paintEvent(self, event) -> None:
             txt = self.text()
@@ -7887,13 +7963,581 @@ if HAS_QT:
 # 8. ANNOTATIONS & FRUTIGER AERO INTERACTIVE OVERLAY
 # =============================================================================
 
+def parse_hex_rgb(color_str: str) -> Tuple[int, int, int]:
+    """Parses a '#RRGGBB' or '#AARRGGBB' hex color string into an (R, G, B) uint8 tuple."""
+    s = str(color_str or "#00E5FF").strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(ch * 2 for ch in s)
+    elif len(s) == 8:
+        s = s[2:]
+    if len(s) != 6:
+        return (0, 229, 255)
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return (0, 229, 255)
+
+
+def tolerance_to_color_distance(tolerance: int) -> float:
+    """
+    Maps UI Paint Bucket tolerance (0..100) to a perceptual Redmean RGB distance
+    threshold in [0.0, 255.0] (where pure black (0,0,0) to pure white (255,255,255)
+    has a maximum Redmean distance of 255.0):
+      - tolerance == 0: 0.0 (strictly identical RGB pixel values only)
+      - 1 .. 20:  linear ramp 1.5 -> 24.0 (handles typical screenshot antialiasing & DWM fringes)
+      - 20 .. 50: linear ramp 24.0 -> 64.0 (handles moderate shading & gradients)
+      - 50 .. 100: smooth ramp 64.0 -> 145.0 (allows wide tonal variation without blindly
+                   filling opposite high-contrast boundaries like black text on white)
+    """
+    t = clamp_fill_tolerance(tolerance)
+    if t == 0:
+        return 0.0
+    if t <= 20:
+        return 1.5 + ((t - 1) / 19.0) * 22.5
+    if t <= 50:
+        return 24.0 + ((t - 20) / 30.0) * 40.0
+    return 64.0 + ((t - 50) / 50.0) * 81.0
+
+
+def compute_redmean_distance(
+    rgb_a: Sequence[int], rgb_b: Sequence[int]
+) -> float:
+    """
+    Computes the perceptual Redmean color distance in [0.0, 255.0] between two RGB colors:
+      d = sqrt(((2 + r_mean/256)*dR^2 + 4*dG^2 + (2 + (255 - b_mean)/256)*dB^2) / 9)
+    """
+    r1, g1, b1 = float(rgb_a[0]), float(rgb_a[1]), float(rgb_a[2])
+    r2, g2, b2 = float(rgb_b[0]), float(rgb_b[1]), float(rgb_b[2])
+    rm = 0.5 * (r1 + r2)
+    bm = 0.5 * (b1 + b2)
+    dr = r1 - r2
+    dg = g1 - g2
+    db = b1 - b2
+    w_r = (2.0 + rm / 256.0) / 9.0
+    w_g = 4.0 / 9.0
+    w_b = (2.0 + (255.0 - bm) / 256.0) / 9.0
+    return math.sqrt(max(0.0, w_r * dr * dr + w_g * dg * dg + w_b * db * db))
+
+
+def compute_arrow_head_points(
+    p1: Tuple[float, float],
+    p2: Tuple[float, float],
+    thickness: float,
+) -> Tuple[Tuple[float, float], List[Tuple[float, float]]]:
+    """
+    Computes proportional arrowhead geometry for stroke thicknesses 1..40 px.
+    Returns `(shaft_end_point, [tip_point, wing1_point, wing2_point])`.
+    Retracts `shaft_end_point` inside the arrowhead base so thick round-cap lines
+    never poke past the pointed arrow tip.
+    """
+    x1, y1 = float(p1[0]), float(p1[1])
+    x2, y2 = float(p2[0]), float(p2[1])
+    dx = x2 - x1
+    dy = y2 - y1
+    line_len = math.hypot(dx, dy)
+    sw = max(1.0, min(float(MAX_STROKE_THICKNESS), float(thickness)))
+    # Proportional scaling without becoming enormous at 30-40 px
+    head_len = max(11.5, min(56.0, 9.5 + sw * 1.95))
+    if line_len > 1e-4:
+        head_len = min(head_len, max(8.0, line_len * 0.72))
+    angle = math.atan2(dy, dx) if line_len > 1e-4 else 0.0
+    half_angle = math.pi / 6.1
+    wing1 = (
+        x2 - head_len * math.cos(angle - half_angle),
+        y2 - head_len * math.sin(angle - half_angle),
+    )
+    wing2 = (
+        x2 - head_len * math.cos(angle + half_angle),
+        y2 - head_len * math.sin(angle + half_angle),
+    )
+    retract = min(line_len * 0.55, head_len * 0.58) if line_len > 1e-4 else 0.0
+    shaft_end = (
+        x2 - retract * math.cos(angle),
+        y2 - retract * math.sin(angle),
+    )
+    return shaft_end, [(x2, y2), wing1, wing2]
+
+
 @dataclass
 class AnnotationItem:
-    tool: str  # "pen", "rect", "ellipse", "line", "arrow", "text"
+    tool: str  # "pen", "rect", "ellipse", "line", "arrow", "text", "fill"
     color: str
-    thickness: int
+    thickness: int = DEFAULT_STROKE_THICKNESS
     points: List[Tuple[float, float]] = field(default_factory=list)
     text: str = ""
+    opacity: int = DEFAULT_FILL_OPACITY
+    tolerance: int = DEFAULT_FILL_TOLERANCE
+    font_size: int = DEFAULT_TEXT_FONT_SIZE
+    # For non-destructive Paint Bucket ("fill") items:
+    # `fill_bbox` stores (bx, by, bw, bh) in full-resolution physical image coordinates.
+    # `logical_bbox` stores (lx, ly, lw, lh) in overlay logical coordinates.
+    # `compressed_mask` stores zlib-compressed uint8 coverage bytes (bh x bw) for the tight bbox.
+    fill_bbox: Optional[Tuple[int, int, int, int]] = None
+    logical_bbox: Optional[Tuple[float, float, float, float]] = None
+    compressed_mask: bytes = b""
+    _cached_qimage: Any = field(default=None, init=False, repr=False, compare=False)
+    _cached_cache_key: Any = field(default=None, init=False, repr=False, compare=False)
+
+    def decompress_mask_array(self) -> Optional[np.ndarray]:
+        """Decompresses `compressed_mask` into a (bh, bw) uint8 coverage array (0..255)."""
+        if not self.compressed_mask or self.fill_bbox is None:
+            return None
+        _, _, bw, bh = self.fill_bbox
+        if bw <= 0 or bh <= 0:
+            return None
+        raw = zlib.decompress(self.compressed_mask)
+        if len(raw) != bw * bh:
+            return None
+        return np.frombuffer(raw, dtype=np.uint8).reshape((bh, bw))
+
+    def memory_footprint_bytes(self) -> int:
+        """Returns the compressed byte size of this annotation's stored flood-fill mask."""
+        return len(self.compressed_mask) if self.compressed_mask else 0
+
+    def invalidate_render_cache(self) -> None:
+        self._cached_qimage = None
+        self._cached_cache_key = None
+
+    def get_or_create_qimage(self) -> Any:
+        """
+        Lazily builds and caches a premultiplied ARGB32 QImage for fast QPainter rendering
+        of a Paint Bucket fill item.
+        """
+        if not HAS_QT or self.tool != "fill" or self.fill_bbox is None:
+            return None
+        op = clamp_fill_opacity(self.opacity)
+        if op <= 0 or not self.compressed_mask:
+            return None
+        key = (self.color, op, self.fill_bbox, len(self.compressed_mask))
+        if self._cached_qimage is not None and self._cached_cache_key == key:
+            return self._cached_qimage
+
+        mask = self.decompress_mask_array()
+        if mask is None:
+            return None
+        bh, bw = mask.shape
+        r, g, b = parse_hex_rgb(self.color)
+        if op < 100:
+            alpha = ((mask.astype(np.uint16) * op + 50) // 100).astype(np.uint8)
+        else:
+            alpha = mask
+
+        # Format_ARGB32_Premultiplied on little-endian x86/ARM is [B, G, R, A] in memory
+        bgra = np.empty((bh, bw, 4), dtype=np.uint8)
+        a16 = alpha.astype(np.uint16)
+        bgra[:, :, 0] = ((a16 * b + 127) // 255).astype(np.uint8)
+        bgra[:, :, 1] = ((a16 * g + 127) // 255).astype(np.uint8)
+        bgra[:, :, 2] = ((a16 * r + 127) // 255).astype(np.uint8)
+        bgra[:, :, 3] = alpha
+
+        qimg = QImage(
+            bgra.data,
+            bw,
+            bh,
+            bw * 4,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        ).copy()
+        self._cached_qimage = qimg
+        self._cached_cache_key = key
+        return qimg
+
+
+def compute_flood_fill_mask(
+    rgb_crop: np.ndarray,
+    seed_x: int,
+    seed_y: int,
+    tolerance: int = DEFAULT_FILL_TOLERANCE,
+    *,
+    stroke_alpha: Optional[np.ndarray] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> Optional[Tuple[Tuple[int, int, int, int], bytes, int]]:
+    """
+    Iterative 4-connected Run-Length Encoded (RLE) scanline connected-component flood fill.
+    Operates strictly within `rgb_crop` (shape H x W x 3, uint8) starting from `(seed_x, seed_y)`.
+
+    Features:
+      - Zero recursion (immune to RecursionError on 4K complex regions).
+      - Uses precomputed 256-entry uint16 Redmean perceptual color-distance LUTs in
+        256-row strips so full 4K (3840x2160) regions complete in ~150-350 ms without OpenCV.
+      - Checks `cancel_event` every strip and every 256 BFS iterations for instant cancellation.
+      - Respects antialiased annotation boundaries via `stroke_alpha`: when filling a background
+        region bounded by drawn strokes (`stroke_alpha[seed_y, seed_x] < 128`), treats solid stroke
+        cores (`stroke_alpha >= 200`) as barriers and feathers into 1px adjacent antialiased stroke
+        fringes with complementary coverage (`255 - stroke_alpha`) so no halo gap appears while
+        keeping the bounding stroke outline 100% crisp and visible.
+      - Returns `((bx, by, bw, bh), zlib_compressed_mask_bytes, filled_pixel_count)` in crop-local
+        coordinates, or `None` if cancelled or out of bounds.
+    """
+    if rgb_crop is None or rgb_crop.ndim != 3 or rgb_crop.shape[2] < 3:
+        return None
+    h, w, _ = rgb_crop.shape
+    if h <= 0 or w <= 0:
+        return None
+    sx = int(seed_x)
+    sy = int(seed_y)
+    if sx < 0 or sx >= w or sy < 0 or sy >= h:
+        return None
+    if cancel_event is not None and cancel_event.is_set():
+        return None
+
+    sr = int(rgb_crop[sy, sx, 0])
+    sg = int(rgb_crop[sy, sx, 1])
+    sb = int(rgb_crop[sy, sx, 2])
+    tau = tolerance_to_color_distance(tolerance)
+
+    seed_on_stroke = False
+    if stroke_alpha is not None and stroke_alpha.shape == (h, w):
+        seed_on_stroke = int(stroke_alpha[sy, sx]) >= 128
+
+    # Build 256-entry uint16 LUTs for half-squared Redmean distance (max sum 32,498 <= 65,535)
+    vals = np.arange(256, dtype=np.float64)
+    rm = 0.5 * (vals + float(sr))
+    bm = 0.5 * (vals + float(sb))
+    w_r = 0.5 * (2.0 + rm / 256.0) / 9.0
+    w_g = 0.5 * 4.0 / 9.0
+    w_b = 0.5 * (2.0 + (255.0 - bm) / 256.0) / 9.0
+    lut_r = np.round(w_r * (vals - float(sr)) ** 2).astype(np.uint16)
+    lut_g = np.round(w_g * (vals - float(sg)) ** 2).astype(np.uint16)
+    lut_b = np.round(w_b * (vals - float(sb)) ** 2).astype(np.uint16)
+    thresh_u16 = int(round(0.5 * tau * tau))
+
+    passable = np.empty((h, w), dtype=np.bool_)
+    strip_h = 256
+    for y0 in range(0, h, strip_h):
+        if cancel_event is not None and cancel_event.is_set():
+            return None
+        y1 = min(h, y0 + strip_h)
+        strip = rgb_crop[y0:y1]
+        if tau <= 0.0:
+            p_strip = (
+                (strip[:, :, 0] == sr)
+                & (strip[:, :, 1] == sg)
+                & (strip[:, :, 2] == sb)
+            )
+        else:
+            dist_sq = lut_r[strip[:, :, 0]]
+            dist_sq = dist_sq + lut_g[strip[:, :, 1]]
+            dist_sq = dist_sq + lut_b[strip[:, :, 2]]
+            p_strip = dist_sq <= thresh_u16
+        if stroke_alpha is not None and not seed_on_stroke:
+            # Treat drawn annotation strokes as crisp boundaries at all tolerances (0..100)
+            stroke_barrier = int(round(36 + (clamp_fill_tolerance(tolerance) / 100.0) * 84))
+            p_strip = p_strip & (stroke_alpha[y0:y1] < stroke_barrier)
+        passable[y0:y1] = p_strip
+
+    # Seed pixel itself is always passable
+    passable[sy, sx] = True
+
+    # Extract 1D horizontal RLE spans per row using padded diff
+    padded = np.empty((h, w + 2), dtype=np.int8)
+    padded[:, 0] = 0
+    padded[:, 1:-1] = passable
+    padded[:, -1] = 0
+    diffs = np.diff(padded, axis=1)
+    rows_s, x_starts = np.nonzero(diffs == 1)
+    _, x_ends = np.nonzero(diffs == -1)
+
+    if len(rows_s) == 0:
+        return None
+
+    row_Change = np.flatnonzero(np.diff(rows_s)) + 1
+    row_splits = np.concatenate(([0], row_Change, [len(rows_s)]))
+    unique_rows = rows_s[row_splits[:-1]]
+
+    row_map: List[Optional[Tuple[List[int], List[int], List[bool]]]] = [None] * h
+    for i, r_idx in enumerate(unique_rows.tolist()):
+        s_idx = int(row_splits[i])
+        e_idx = int(row_splits[i + 1])
+        st_list = x_starts[s_idx:e_idx].tolist()
+        en_list = x_ends[s_idx:e_idx].tolist()
+        row_map[r_idx] = (st_list, en_list, [False] * (e_idx - s_idx))
+
+    seed_row = row_map[sy]
+    if seed_row is None:
+        return None
+    st_seed, en_seed, vis_seed = seed_row
+    idx = bisect.bisect_right(st_seed, sx) - 1
+    if idx < 0 or sx >= en_seed[idx]:
+        return None
+
+    vis_seed[idx] = True
+    queue = deque([(sy, st_seed[idx], en_seed[idx])])
+    filled_spans: List[Tuple[int, int, int]] = []
+    min_x = st_seed[idx]
+    max_x = en_seed[idx]
+    min_y = sy
+    max_y = sy
+
+    steps = 0
+    while queue:
+        steps += 1
+        if (steps & 0xFF) == 0 and cancel_event is not None and cancel_event.is_set():
+            return None
+        ry, x0, x1 = queue.popleft()
+        filled_spans.append((ry, x0, x1))
+        if x0 < min_x:
+            min_x = x0
+        if x1 > max_x:
+            max_x = x1
+        if ry < min_y:
+            min_y = ry
+        if ry > max_y:
+            max_y = ry
+
+        # 4-connected vertical adjacency check: span [nx0, nx1) overlaps [x0, x1) iff nx0 < x1 and nx1 > x0
+        for ny in (ry - 1, ry + 1):
+            if 0 <= ny < h:
+                nrow = row_map[ny]
+                if nrow is not None:
+                    nst, nen, nvis = nrow
+                    k = bisect.bisect_right(nen, x0)
+                    n_len = len(nst)
+                    while k < n_len and nst[k] < x1:
+                        if not nvis[k]:
+                            nvis[k] = True
+                            queue.append((ny, nst[k], nen[k]))
+                        k += 1
+
+    if cancel_event is not None and cancel_event.is_set():
+        return None
+
+    # Expand tight bbox by 1px if stroke_alpha fringe blending is active
+    pad = 1 if (stroke_alpha is not None and not seed_on_stroke) else 0
+    bx0 = max(0, min_x - pad)
+    by0 = max(0, min_y - pad)
+    bx1 = min(w, max_x + pad)
+    by1 = min(h, max_y + 1 + pad)
+    bw = bx1 - bx0
+    bh = by1 - by0
+
+    sub_bool = np.zeros((bh, bw), dtype=np.bool_)
+    for ry, x0, x1 in filled_spans:
+        sub_bool[ry - by0, (x0 - bx0) : (x1 - bx0)] = True
+
+    if stroke_alpha is not None and not seed_on_stroke:
+        sa_sub = stroke_alpha[by0:by1, bx0:bx1]
+        # 8-connected 1px dilation under the inner antialiased fringe of bounding strokes
+        # so the Fill Layer completely covers underlying screenshot pixels right up to the
+        # stroke core while the Stroke Layer renders crisp outlines on top with zero dark seam.
+        dilated = sub_bool.copy()
+        if bh > 1:
+            dilated[1:, :] |= sub_bool[:-1, :]
+            dilated[:-1, :] |= sub_bool[1:, :]
+        if bw > 1:
+            dilated[:, 1:] |= sub_bool[:, :-1]
+            dilated[:, :-1] |= sub_bool[:, 1:]
+        if bh > 1 and bw > 1:
+            dilated[1:, 1:] |= sub_bool[:-1, :-1]
+            dilated[1:, :-1] |= sub_bool[:-1, 1:]
+            dilated[:-1, 1:] |= sub_bool[1:, :-1]
+            dilated[:-1, :-1] |= sub_bool[1:, 1:]
+        fringe = dilated & (~sub_bool) & (sa_sub > 0) & (sa_sub < 250)
+        active = sub_bool | fringe
+        sub_mask = np.where(active, np.uint8(255), np.uint8(0))
+    else:
+        sub_mask = np.where(sub_bool, np.uint8(255), np.uint8(0))
+
+    # Tighten bounding box to non-zero coverage pixels
+    nz_rows = np.any(sub_mask > 0, axis=1)
+    nz_cols = np.any(sub_mask > 0, axis=0)
+    if not np.any(nz_rows) or not np.any(nz_cols):
+        return None
+    r0 = int(np.argmax(nz_rows))
+    r1 = int(bh - np.argmax(nz_rows[::-1]))
+    c0 = int(np.argmax(nz_cols))
+    c1 = int(bw - np.argmax(nz_cols[::-1]))
+    final_mask = np.ascontiguousarray(sub_mask[r0:r1, c0:c1], dtype=np.uint8)
+    final_bbox = (bx0 + c0, by0 + r0, int(c1 - c0), int(r1 - r0))
+    pixel_count = int(np.count_nonzero(final_mask))
+    compressed = zlib.compress(final_mask.tobytes(), level=1)
+    return (final_bbox, compressed, pixel_count)
+
+
+def select_annotation_canvas_bg_rgb(
+    annotations: Sequence[AnnotationItem],
+) -> Tuple[int, int, int]:
+    """
+    Selects a neutral RGB background color for the offscreen Annotation Layer
+    flood-fill detection canvas whose Redmean perceptual distance to all committed
+    annotations is maximized (> 160, strictly above the maximum tolerance=100
+    threshold of 145.0). This guarantees that un-annotated screenshot areas are
+    never confused with drawn strokes or fills, while completely ignoring text,
+    code pills, icons, or UI elements in the underlying screenshot.
+    """
+    candidates = [
+        (13, 17, 23),
+        (242, 238, 230),
+        (18, 225, 195),
+        (235, 25, 185),
+        (195, 235, 20),
+        (35, 95, 240),
+        (245, 140, 20),
+    ]
+    if not annotations:
+        return candidates[0]
+    used_colors = [parse_hex_rgb(it.color) for it in annotations]
+    best_rgb = candidates[0]
+    best_min_dist = -1.0
+    for cand in candidates:
+        min_d = min(compute_redmean_distance(cand, uc) for uc in used_colors)
+        if min_d > best_min_dist:
+            best_min_dist = min_d
+            best_rgb = cand
+    return best_rgb
+
+
+def render_annotations_for_fill_pil(
+    base_rgb: np.ndarray,
+    annotations: Sequence[AnnotationItem],
+    *,
+    crop_rect: Optional[Tuple[int, int, int, int]] = None,
+    px_scale_x: float = 1.0,
+    px_scale_y: float = 1.0,
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """
+    Renders ONLY the committed `AnnotationItem`s onto a clean, uniform Annotation Layer
+    canvas (excluding the underlying screenshot `base_rgb` pixels) so Paint Bucket flood
+    fills are bounded strictly by drawn annotation shapes/strokes and the selection box,
+    never by text or UI elements inside the screenshot.
+    """
+    full_h, full_w, _ = base_rgb.shape
+    bg_r, bg_g, bg_b = select_annotation_canvas_bg_rgb(annotations)
+    clean_base = np.full((full_h, full_w, 3), (bg_r, bg_g, bg_b), dtype=np.uint8)
+    if not annotations:
+        if crop_rect is not None:
+            cx, cy, cw, ch = crop_rect
+            cx = max(0, min(full_w - 1, int(cx)))
+            cy = max(0, min(full_h - 1, int(cy)))
+            cw = max(1, min(full_w - cx, int(cw)))
+            ch = max(1, min(full_h - cy, int(ch)))
+            return np.ascontiguousarray(clean_base[cy : cy + ch, cx : cx + cw]), None
+        return clean_base, None
+    comp_rgb, stroke_alpha = composite_annotations_pil(
+        clean_base,
+        annotations,
+        crop_rect=crop_rect,
+        px_scale_x=px_scale_x,
+        px_scale_y=px_scale_y,
+    )
+    has_vector_strokes = any(it.tool != "fill" for it in annotations)
+    return comp_rgb, (stroke_alpha if has_vector_strokes else None)
+
+
+def composite_annotations_pil(
+    base_rgb: np.ndarray,
+    annotations: Sequence[AnnotationItem],
+    *,
+    crop_rect: Optional[Tuple[int, int, int, int]] = None,
+    px_scale_x: float = 1.0,
+    px_scale_y: float = 1.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Non-destructive PIL/NumPy annotation compositor that renders all committed
+    `AnnotationItem`s (pen, rect, ellipse, line, arrow, text, and flood-fill masks)
+    onto a copy of `base_rgb` (or a cropped sub-region `crop_rect = (cx, cy, cw, ch)`).
+    Never mutates `base_rgb`.
+    Returns `(composited_rgb_uint8, vector_strokes_alpha_uint8)`.
+    Used by headless unit tests and as a fallback when Qt is unavailable.
+    """
+    from PIL import ImageDraw
+
+    full_h, full_w, _ = base_rgb.shape
+    if crop_rect is not None:
+        cx, cy, cw, ch = crop_rect
+        cx = max(0, min(full_w - 1, int(cx)))
+        cy = max(0, min(full_h - 1, int(cy)))
+        cw = max(1, min(full_w - cx, int(cw)))
+        ch = max(1, min(full_h - cy, int(ch)))
+    else:
+        cx, cy, cw, ch = 0, 0, full_w, full_h
+
+    out_rgb = np.ascontiguousarray(base_rgb[cy : cy + ch, cx : cx + cw, :3].copy(), dtype=np.uint8)
+    stroke_alpha = np.zeros((ch, cw), dtype=np.uint8)
+    if not annotations:
+        return out_rgb, stroke_alpha
+
+    sx = float(px_scale_x) if px_scale_x > 0 else 1.0
+    sy = float(px_scale_y) if px_scale_y > 0 else 1.0
+
+    def _to_crop_pt(pt: Tuple[float, float]) -> Tuple[float, float]:
+        return (pt[0] * sx - cx, pt[1] * sy - cy)
+
+    ordered_items = [it for it in annotations if it.tool == "fill"] + [
+        it for it in annotations if it.tool != "fill"
+    ]
+    for item in ordered_items:
+        if item.tool == "fill":
+            op = clamp_fill_opacity(item.opacity)
+            if op <= 0 or item.fill_bbox is None or not item.compressed_mask:
+                continue
+            mask = item.decompress_mask_array()
+            if mask is None:
+                continue
+            bx, by, bw, bh = item.fill_bbox
+            # Intersect (bx, by, bw, bh) with (cx, cy, cw, ch)
+            ix0 = max(cx, bx)
+            iy0 = max(cy, by)
+            ix1 = min(cx + cw, bx + bw)
+            iy1 = min(cy + ch, by + bh)
+            if ix1 <= ix0 or iy1 <= iy0:
+                continue
+            sub_m = mask[(iy0 - by) : (iy1 - by), (ix0 - bx) : (ix1 - bx)].astype(np.float32)
+            alpha_f = (sub_m / 255.0) * (op / 100.0)
+            r, g, b = parse_hex_rgb(item.color)
+            dst = out_rgb[(iy0 - cy) : (iy1 - cy), (ix0 - cx) : (ix1 - cx)]
+            col_arr = np.array([r, g, b], dtype=np.float32)
+            blended = dst.astype(np.float32) * (1.0 - alpha_f[:, :, None]) + col_arr * alpha_f[:, :, None]
+            out_rgb[(iy0 - cy) : (iy1 - cy), (ix0 - cx) : (ix1 - cx)] = np.clip(
+                np.round(blended), 0, 255
+            ).astype(np.uint8)
+        else:
+            # Render vector/text item at 2x supersampling for smooth antialiasing
+            layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(layer)
+            r, g, b = parse_hex_rgb(item.color)
+            sw = max(1, int(round(clamp_stroke_thickness(item.thickness) * 0.5 * (sx + sy))))
+            if item.tool == "pen" and len(item.points) >= 2:
+                pts = [_to_crop_pt(p) for p in item.points]
+                draw.line(pts, fill=(r, g, b, 255), width=sw, joint="curve")
+            elif item.tool == "rect" and len(item.points) >= 2:
+                p1 = _to_crop_pt(item.points[0])
+                p2 = _to_crop_pt(item.points[-1])
+                x0, x1 = min(p1[0], p2[0]), max(p1[0], p2[0])
+                y0, y1 = min(p1[1], p2[1]), max(p1[1], p2[1])
+                draw.rectangle([x0, y0, x1, y1], outline=(r, g, b, 255), width=sw)
+            elif item.tool == "ellipse" and len(item.points) >= 2:
+                p1 = _to_crop_pt(item.points[0])
+                p2 = _to_crop_pt(item.points[-1])
+                x0, x1 = min(p1[0], p2[0]), max(p1[0], p2[0])
+                y0, y1 = min(p1[1], p2[1]), max(p1[1], p2[1])
+                draw.ellipse([x0, y0, x1, y1], outline=(r, g, b, 255), width=sw)
+            elif item.tool == "line" and len(item.points) >= 2:
+                p1 = _to_crop_pt(item.points[0])
+                p2 = _to_crop_pt(item.points[-1])
+                draw.line([p1, p2], fill=(r, g, b, 255), width=sw)
+            elif item.tool == "arrow" and len(item.points) >= 2:
+                p1 = _to_crop_pt(item.points[0])
+                p2 = _to_crop_pt(item.points[-1])
+                shaft_end, poly = compute_arrow_head_points(p1, p2, sw)
+                draw.line([p1, shaft_end], fill=(r, g, b, 255), width=sw)
+                draw.polygon(poly, fill=(r, g, b, 255))
+            elif item.tool == "text" and item.points and item.text:
+                p1 = _to_crop_pt(item.points[0])
+                draw.text((p1[0] + 1, p1[1] + 1), item.text, fill=(0, 0, 0, 200))
+                draw.text(p1, item.text, fill=(r, g, b, 255))
+
+            rgba = np.asarray(layer, dtype=np.uint8)
+            a_ch = rgba[:, :, 3]
+            if np.any(a_ch > 0):
+                af = (a_ch.astype(np.float32) / 255.0)[:, :, None]
+                out_rgb = np.clip(
+                    np.round(out_rgb.astype(np.float32) * (1.0 - af) + rgba[:, :, :3].astype(np.float32) * af),
+                    0,
+                    255,
+                ).astype(np.uint8)
+                stroke_alpha = np.maximum(stroke_alpha, a_ch)
+
+    return out_rgb, stroke_alpha
 
 
 _SCREENSHOT_PATH_LOCK = threading.Lock()
@@ -8096,6 +8740,197 @@ def save_screenshot_to_directory(
 
 if HAS_QT:
 
+    class FloodFillSignals(QObject):
+        """Qt signal carrier for asynchronous non-destructive Paint Bucket worker jobs."""
+
+        done = pyqtSignal(int, object)
+
+    class FloodFillJob(QRunnable):
+        """
+        Background worker that executes `compute_flood_fill_mask` off the GUI thread
+        so large 1440p/4K Paint Bucket fills never block the Frutiger Aqua interface.
+        Supports cooperative cancellation via `cancel_event`.
+        """
+
+        def __init__(
+            self,
+            signals: FloodFillSignals,
+            revision: int,
+            rgb_crop: np.ndarray,
+            seed_x: int,
+            seed_y: int,
+            tolerance: int,
+            opacity: int,
+            color_hex: str,
+            crop_origin: Tuple[int, int],
+            px_scale: Tuple[float, float],
+            stroke_alpha: Optional[np.ndarray] = None,
+            cancel_event: Optional[threading.Event] = None,
+        ) -> None:
+            super().__init__()
+            self.setAutoDelete(True)
+            self.signals = signals
+            self.revision = int(revision)
+            self.rgb_crop = rgb_crop
+            self.seed_x = int(seed_x)
+            self.seed_y = int(seed_y)
+            self.tolerance = clamp_fill_tolerance(tolerance)
+            self.opacity = clamp_fill_opacity(opacity)
+            self.color_hex = str(color_hex)
+            self.crop_origin = crop_origin
+            self.px_scale = px_scale
+            self.stroke_alpha = stroke_alpha
+            self.cancel_event = cancel_event
+
+        def run(self) -> None:
+            if self.cancel_event is not None and self.cancel_event.is_set():
+                try:
+                    self.signals.done.emit(self.revision, None)
+                except RuntimeError:
+                    pass
+                return
+            try:
+                res = compute_flood_fill_mask(
+                    self.rgb_crop,
+                    self.seed_x,
+                    self.seed_y,
+                    self.tolerance,
+                    stroke_alpha=self.stroke_alpha,
+                    cancel_event=self.cancel_event,
+                )
+                if res is None or (self.cancel_event is not None and self.cancel_event.is_set()):
+                    try:
+                        self.signals.done.emit(self.revision, None)
+                    except RuntimeError:
+                        pass
+                    return
+                (bx, by, bw, bh), compressed_bytes, pixel_count = res
+                cx, cy = self.crop_origin
+                sx, sy = self.px_scale
+                phys_bx = cx + bx
+                phys_by = cy + by
+                logical_bbox = (
+                    float(phys_bx) / max(1e-4, float(sx)),
+                    float(phys_by) / max(1e-4, float(sy)),
+                    float(bw) / max(1e-4, float(sx)),
+                    float(bh) / max(1e-4, float(sy)),
+                )
+                item = AnnotationItem(
+                    tool="fill",
+                    color=self.color_hex,
+                    thickness=1,
+                    opacity=self.opacity,
+                    tolerance=self.tolerance,
+                    fill_bbox=(phys_bx, phys_by, bw, bh),
+                    logical_bbox=logical_bbox,
+                    compressed_mask=compressed_bytes,
+                )
+                # Pre-warm the QImage on the worker thread so GUI commit is zero-cost
+                _ = item.get_or_create_qimage()
+                try:
+                    self.signals.done.emit(
+                        self.revision,
+                        {"item": item, "pixel_count": pixel_count},
+                    )
+                except RuntimeError:
+                    pass
+            except Exception as exc:
+                DIAG_LOG.error("FLOOD_FILL", "Async flood-fill worker failed", exc)
+                try:
+                    self.signals.done.emit(self.revision, None)
+                except RuntimeError:
+                    pass
+
+    class AeroBrushPreviewWidget(QWidget):
+        """
+        Crisp, zero-overhead circular brush-thickness & Paint-Bucket opacity preview widget
+        embedded inside the secondary Frutiger Aqua context toolbar.
+        Scales accurately with stroke thickness (1..40 px), matches the active annotation
+        color, and never appears in exported screenshots.
+        """
+
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.setFixedSize(44, 30)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self._thickness: int = DEFAULT_STROKE_THICKNESS
+            self._color: QColor = QColor("#00E5FF")
+            self._mode: str = "stroke"  # "stroke" or "fill"
+            self._opacity: int = DEFAULT_FILL_OPACITY
+
+        def set_preview_state(
+            self,
+            *,
+            thickness: int,
+            color: QColor,
+            mode: str = "stroke",
+            opacity: int = 100,
+        ) -> None:
+            new_t = clamp_stroke_thickness(thickness)
+            new_c = QColor(color)
+            new_m = str(mode)
+            new_op = clamp_fill_opacity(opacity)
+            if (
+                new_t != self._thickness
+                or new_c != self._color
+                or new_m != self._mode
+                or new_op != self._opacity
+            ):
+                self._thickness = new_t
+                self._color = new_c
+                self._mode = new_m
+                self._opacity = new_op
+                self.update()
+
+        def paintEvent(self, event) -> None:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rc = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
+            center = rc.center()
+
+            # Subtle recessed Aqua glass well background
+            painter.setPen(QPen(QColor(255, 255, 255, 130), 1.0))
+            painter.setBrush(QColor(4, 24, 48, 120))
+            painter.drawRoundedRect(rc, 9.0, 9.0)
+
+            if self._mode == "fill":
+                # Draw subtle 2x2 checkerboard inside well to illustrate fill opacity
+                well = rc.adjusted(5.0, 5.0, -5.0, -5.0)
+                mid_x = well.center().x()
+                mid_y = well.center().y()
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(225, 235, 245, 190))
+                painter.drawRect(QRectF(well.left(), well.top(), well.width() / 2.0, well.height() / 2.0))
+                painter.drawRect(QRectF(mid_x, mid_y, well.width() / 2.0, well.height() / 2.0))
+                painter.setBrush(QColor(80, 105, 130, 190))
+                painter.drawRect(QRectF(mid_x, well.top(), well.width() / 2.0, well.height() / 2.0))
+                painter.drawRect(QRectF(well.left(), mid_y, well.width() / 2.0, well.height() / 2.0))
+
+                fill_col = QColor(self._color)
+                fill_col.setAlpha(int(round(255.0 * (self._opacity / 100.0))))
+                painter.setBrush(fill_col)
+                painter.setPen(QPen(QColor(255, 255, 255, 220), 1.2))
+                painter.drawRoundedRect(well, 5.0, 5.0)
+                return
+
+            # Stroke thickness preview (1..40 px):
+            # Up to 22 px fits 1:1 inside the 26 px vertical well; 23..40 px smoothly maps
+            # to 22..25.5 px diameter with a crisp inner ring so the user sees continuous growth.
+            if self._thickness <= 22:
+                vis_diam = max(2.0, float(self._thickness))
+            else:
+                vis_diam = 22.0 + ((float(self._thickness) - 22.0) / 18.0) * 3.6
+            rad = vis_diam / 2.0
+
+            # Outer contrast halo so both very dark and very bright colors stand out clearly
+            painter.setPen(QPen(QColor(0, 16, 36, 190), 1.6))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(center, rad + 0.8, rad + 0.8)
+
+            painter.setPen(QPen(QColor(255, 255, 255, 210), 0.9))
+            painter.setBrush(QBrush(self._color))
+            painter.drawEllipse(center, rad, rad)
+
     class SnipOverlayWindow(QWidget):
         """
         Frutiger Aero / Aqua Glass frozen screen overlay:
@@ -8248,13 +9083,30 @@ if HAS_QT:
             self._badge_cached_rect: Optional[QRect] = None
             self._badge_frosted_pix: Optional[QPixmap] = None
 
-            # Tool state ("move", "pen", "rect", "ellipse", "line", "arrow", "text")
+            # Tool state ("move", "pen", "rect", "ellipse", "line", "arrow", "fill", "text")
             self.active_tool: str = "move"
             self.stroke_color: QColor = QColor(config.default_color)
-            self.stroke_width: int = config.default_thickness
+            self.stroke_width: int = clamp_stroke_thickness(config.default_thickness)
+            self.fill_tolerance: int = clamp_fill_tolerance(
+                getattr(config, "default_fill_tolerance", DEFAULT_FILL_TOLERANCE)
+            )
+            self.fill_opacity: int = clamp_fill_opacity(
+                getattr(config, "default_fill_opacity", DEFAULT_FILL_OPACITY)
+            )
+            self.text_font_size: int = int(
+                getattr(config, "default_font_size", DEFAULT_TEXT_FONT_SIZE)
+            )
             self.annotations: List[AnnotationItem] = []
             self.redo_stack: List[AnnotationItem] = []
             self.current_annotation: Optional[AnnotationItem] = None
+            self._cursor_pos_local: Optional[QPointF] = None
+
+            # Async Paint Bucket flood-fill worker state
+            self._fill_signals = FloodFillSignals()
+            self._fill_signals.done.connect(self._on_flood_fill_ready)
+            self._fill_revision: int = 0
+            self._fill_running: bool = False
+            self._cancel_fill_event = threading.Event()
 
             self._build_floating_toolbar()
             self.setCursor(Qt.CursorShape.CrossCursor)
@@ -8354,8 +9206,10 @@ if HAS_QT:
             super().resizeEvent(event)
             self._sync_coordinate_scales()
             self._badge_cached_rect = None
-            if hasattr(self, "toolbar"):
+            if hasattr(self, "toolbar") and self.toolbar is not None:
                 self.toolbar.invalidate_backdrop()
+            if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                self.context_toolbar.invalidate_backdrop()
 
         def _sample_frosted_region(self, logical_rect: QRect) -> Optional[QPixmap]:
             """Samples physical pixels from the captured screenshot and returns a blurred acrylic QPixmap."""
@@ -8428,8 +9282,10 @@ if HAS_QT:
             ).copy()
             self.bg_pixmap = QPixmap.fromImage(qimg)
             self._badge_cached_rect = None
-            if hasattr(self, "toolbar"):
+            if hasattr(self, "toolbar") and self.toolbar is not None:
                 self.toolbar.invalidate_backdrop()
+            if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                self.context_toolbar.invalidate_backdrop()
             PERF_TELEMETRY.record_stage("pixmap_creation", (time.perf_counter() - t_pix_start) * 1000.0)
 
         def _build_floating_toolbar(self) -> None:
@@ -8460,13 +9316,19 @@ if HAS_QT:
                 ("ellipse", "Circle (E)"),
                 ("line", "Line (L)"),
                 ("arrow", "Arrow (A)"),
+                ("fill", "Fill (F)"),
                 ("text", "Text (T)"),
             ]
             for tool_id, label in tools:
                 btn = AeroGelButton(label, variant="glass", parent=self.toolbar)
-                btn.setToolTip(
-                    f"{label} • Hold Shift for square/circle/45° snap • Hold Space to move box"
-                )
+                if tool_id == "fill":
+                    btn.setToolTip(
+                        "Paint Bucket Flood Fill (F) • Non-destructively fills connected regions inside selection"
+                    )
+                else:
+                    btn.setToolTip(
+                        f"{label} • [ / ] or Scroll Wheel adjusts thickness • Hold Shift for snap • Hold Space to move box"
+                    )
                 btn.setCheckable(True)
                 btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
                 btn.setChecked(tool_id == self.active_tool)
@@ -8488,7 +9350,6 @@ if HAS_QT:
             layout.addWidget(self.color_btn)
 
             # Live HDR SDR-White exposure slider if captured from an HDR surface
-            # (Note: Glass Transparency is now configured cleanly inside SettingsDialog)
             if self.frame.raw_scrgb_float is not None:
                 layout.addSpacing(6)
                 hdr_lbl = AeroToolbarLabel(
@@ -8502,7 +9363,7 @@ if HAS_QT:
                 )
                 self.hdr_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
                 self.hdr_slider.setRange(80, 1000)
-                self.hdr_slider.setFixedWidth(112)
+                self.hdr_slider.setFixedWidth(108)
                 self.hdr_slider.setValue(int(round(self.current_white_scale * 80.0)))
                 self.hdr_slider.setToolTip(
                     "Live SDR paper-white level (nits) for this capture. Exports always use full resolution."
@@ -8519,14 +9380,20 @@ if HAS_QT:
 
             layout.addSpacing(6)
 
-            # Undo
-            undo_btn = AeroGelButton("Undo", variant="glass", parent=self.toolbar)
-            undo_btn.setToolTip(
-                "Undo (Ctrl+Z) • Redo (Ctrl+Y) • Scroll wheel adjusts stroke thickness"
+            # Undo & Redo
+            self.undo_btn = AeroGelButton("Undo", variant="glass", parent=self.toolbar)
+            self.undo_btn.setToolTip(
+                "Undo (Ctrl+Z) • Redo (Ctrl+Y) • [ / ] or Scroll wheel adjusts stroke thickness"
             )
-            undo_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            undo_btn.clicked.connect(self.undo_annotation)
-            layout.addWidget(undo_btn)
+            self.undo_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.undo_btn.clicked.connect(self.undo_annotation)
+            layout.addWidget(self.undo_btn)
+
+            self.redo_btn = AeroGelButton("Redo", variant="glass", parent=self.toolbar)
+            self.redo_btn.setToolTip("Redo last undone annotation or fill (Ctrl+Y)")
+            self.redo_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.redo_btn.clicked.connect(self.redo_annotation)
+            layout.addWidget(self.redo_btn)
 
             # Save (Frutiger Emerald Gel Pill)
             self.save_btn = AeroGelButton("Save", variant="emerald", parent=self.toolbar)
@@ -8553,11 +9420,262 @@ if HAS_QT:
             self.toolbar.adjustSize()
             self.toolbar.hide()
 
+            # Build slim, context-sensitive secondary Frutiger Aqua toolbar for Thickness & Paint Bucket controls
+            self._build_context_toolbar()
+
+        def _build_context_toolbar(self) -> None:
+            self.context_toolbar = AeroGlassToolbar(
+                self, self._sample_frosted_region, self._sample_parent_patch
+            )
+            self.context_toolbar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            ctx_layout = QHBoxLayout(self.context_toolbar)
+            ctx_layout.setContentsMargins(12, 5, 12, 5)
+            ctx_layout.setSpacing(6)
+
+            # --- Group A: Stroke Thickness Control (1..40 px) ---
+            self.thickness_group = QWidget(self.context_toolbar)
+            self.thickness_group.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            th_layout = QHBoxLayout(self.thickness_group)
+            th_layout.setContentsMargins(0, 0, 0, 0)
+            th_layout.setSpacing(6)
+
+            self.thickness_title_label = AeroToolbarLabel(
+                "Thickness:", tint_hex="#E4FFFF", parent=self.thickness_group
+            )
+            self.thickness_title_label.setMinimumWidth(68)
+            th_layout.addWidget(self.thickness_title_label)
+
+            self.thickness_minus_btn = AeroGelButton(
+                "−", variant="glass", parent=self.thickness_group
+            )
+            self.thickness_minus_btn.setFixedWidth(30)
+            self.thickness_minus_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.thickness_minus_btn.setToolTip("Decrease stroke thickness ([ or Scroll Down)")
+            self.thickness_minus_btn.clicked.connect(lambda: self.adjust_stroke_thickness(-1))
+            th_layout.addWidget(self.thickness_minus_btn)
+
+            self.thickness_slider = AeroLiquidSlider(
+                Qt.Orientation.Horizontal, self.thickness_group
+            )
+            self.thickness_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.thickness_slider.setRange(MIN_STROKE_THICKNESS, MAX_STROKE_THICKNESS)
+            self.thickness_slider.setFixedWidth(136)
+            self.thickness_slider.setValue(self.stroke_width)
+            self.thickness_slider.setToolTip(
+                "Stroke thickness (1–40 px) • Shortcuts: [ and ] or mouse scroll wheel"
+            )
+            self.thickness_slider.valueChanged.connect(
+                lambda v: self.set_stroke_thickness(v, persist=False)
+            )
+            self.thickness_slider.sliderReleased.connect(self._persist_annotation_prefs)
+            th_layout.addWidget(self.thickness_slider)
+
+            self.thickness_plus_btn = AeroGelButton(
+                "+", variant="glass", parent=self.thickness_group
+            )
+            self.thickness_plus_btn.setFixedWidth(30)
+            self.thickness_plus_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.thickness_plus_btn.setToolTip("Increase stroke thickness (] or Scroll Up)")
+            self.thickness_plus_btn.clicked.connect(lambda: self.adjust_stroke_thickness(1))
+            th_layout.addWidget(self.thickness_plus_btn)
+
+            self.thickness_value_label = AeroToolbarLabel(
+                f"{self.stroke_width} px", tint_hex="#FFFFFF", parent=self.thickness_group
+            )
+            self.thickness_value_label.setFixedWidth(44)
+            th_layout.addWidget(self.thickness_value_label)
+
+            ctx_layout.addWidget(self.thickness_group)
+
+            # --- Group B: Paint Bucket Tolerance (0..100) & Opacity (0..100%) ---
+            self.fill_group = QWidget(self.context_toolbar)
+            self.fill_group.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            fl_layout = QHBoxLayout(self.fill_group)
+            fl_layout.setContentsMargins(0, 0, 0, 0)
+            fl_layout.setSpacing(6)
+
+            self.tolerance_title_label = AeroToolbarLabel(
+                "Tolerance:", tint_hex="#E4FFFF", parent=self.fill_group
+            )
+            self.tolerance_title_label.setMinimumWidth(68)
+            fl_layout.addWidget(self.tolerance_title_label)
+
+            self.tolerance_slider = AeroLiquidSlider(
+                Qt.Orientation.Horizontal, self.fill_group
+            )
+            self.tolerance_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.tolerance_slider.setRange(MIN_FILL_TOLERANCE, MAX_FILL_TOLERANCE)
+            self.tolerance_slider.setFixedWidth(116)
+            self.tolerance_slider.setValue(self.fill_tolerance)
+            self.tolerance_slider.setToolTip(
+                "Paint Bucket color tolerance (0 = exact match, 20 = antialiased borders, 50 = moderate gradients, 100 = wide range)"
+            )
+            self.tolerance_slider.valueChanged.connect(
+                lambda v: self.set_fill_tolerance(v, persist=False)
+            )
+            self.tolerance_slider.sliderReleased.connect(self._persist_annotation_prefs)
+            fl_layout.addWidget(self.tolerance_slider)
+
+            self.tolerance_value_label = AeroToolbarLabel(
+                f"{self.fill_tolerance}", tint_hex="#FFFFFF", parent=self.fill_group
+            )
+            self.tolerance_value_label.setFixedWidth(30)
+            fl_layout.addWidget(self.tolerance_value_label)
+
+            fl_layout.addSpacing(6)
+
+            self.opacity_title_label = AeroToolbarLabel(
+                "Opacity:", tint_hex="#E4FFFF", parent=self.fill_group
+            )
+            self.opacity_title_label.setMinimumWidth(56)
+            fl_layout.addWidget(self.opacity_title_label)
+
+            self.opacity_slider = AeroLiquidSlider(
+                Qt.Orientation.Horizontal, self.fill_group
+            )
+            self.opacity_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.opacity_slider.setRange(MIN_FILL_OPACITY, MAX_FILL_OPACITY)
+            self.opacity_slider.setFixedWidth(108)
+            self.opacity_slider.setValue(self.fill_opacity)
+            self.opacity_slider.setToolTip(
+                "Paint Bucket fill opacity (100% = solid fill, 50% = semi-transparent tint, 0% = transparent)"
+            )
+            self.opacity_slider.valueChanged.connect(
+                lambda v: self.set_fill_opacity(v, persist=False)
+            )
+            self.opacity_slider.sliderReleased.connect(self._persist_annotation_prefs)
+            fl_layout.addWidget(self.opacity_slider)
+
+            self.opacity_value_label = AeroToolbarLabel(
+                f"{self.fill_opacity}%", tint_hex="#FFFFFF", parent=self.fill_group
+            )
+            self.opacity_value_label.setFixedWidth(42)
+            fl_layout.addWidget(self.opacity_value_label)
+
+            self.fill_status_label = AeroToolbarLabel(
+                "", tint_hex="#84FFFF", parent=self.fill_group
+            )
+            self.fill_status_label.setFixedWidth(64)
+            self.fill_status_label.hide()
+            fl_layout.addWidget(self.fill_status_label)
+
+            ctx_layout.addWidget(self.fill_group)
+
+            # Shared live brush / fill preview well at the right end of the context toolbar
+            self.brush_preview_widget = AeroBrushPreviewWidget(self.context_toolbar)
+            self.brush_preview_widget.setToolTip(
+                "Live Brush / Fill Preview (never appears in saved screenshots)"
+            )
+            ctx_layout.addWidget(self.brush_preview_widget)
+
+            self._sync_context_toolbar_mode()
+            self.context_toolbar.hide()
+
+        def _persist_annotation_prefs(self) -> None:
+            self.config.default_thickness = self.stroke_width
+            self.config.default_fill_tolerance = self.fill_tolerance
+            self.config.default_fill_opacity = self.fill_opacity
+            try:
+                self.config.save()
+            except Exception:
+                pass
+
+        def _sync_context_toolbar_mode(self) -> None:
+            if not hasattr(self, "context_toolbar") or self.context_toolbar is None:
+                return
+            mode = "fill" if self.active_tool == "fill" else "stroke"
+            self.brush_preview_widget.set_preview_state(
+                thickness=self.stroke_width,
+                color=self.stroke_color,
+                mode=mode,
+                opacity=self.fill_opacity,
+            )
+            if self.active_tool in STROKE_DRAWING_TOOLS:
+                self.fill_group.hide()
+                self.thickness_group.show()
+                self.context_toolbar.adjustSize()
+            elif self.active_tool == "fill":
+                self.thickness_group.hide()
+                self.fill_group.show()
+                self.context_toolbar.adjustSize()
+
+        def set_stroke_thickness(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_stroke_thickness(value)
+            self.stroke_width = clamped
+            self.config.default_thickness = clamped
+            if hasattr(self, "thickness_slider") and self.thickness_slider.value() != clamped:
+                self.thickness_slider.blockSignals(True)
+                self.thickness_slider.setValue(clamped)
+                self.thickness_slider.blockSignals(False)
+            if hasattr(self, "thickness_value_label"):
+                self.thickness_value_label.setText(f"{clamped} px")
+            if hasattr(self, "brush_preview_widget"):
+                self.brush_preview_widget.set_preview_state(
+                    thickness=clamped,
+                    color=self.stroke_color,
+                    mode="fill" if self.active_tool == "fill" else "stroke",
+                    opacity=self.fill_opacity,
+                )
+            if persist:
+                self._persist_annotation_prefs()
+            if self._badge_cached_rect is not None:
+                self.update(self._badge_cached_rect.adjusted(-6, -6, 6, 6))
+            if self._cursor_pos_local is not None:
+                r_pad = int(clamped) + 16
+                cx = int(self._cursor_pos_local.x())
+                cy = int(self._cursor_pos_local.y())
+                self.update(QRect(cx - r_pad, cy - r_pad, r_pad * 2, r_pad * 2))
+            else:
+                self.update()
+
+        def adjust_stroke_thickness(self, delta: int) -> None:
+            self.set_stroke_thickness(self.stroke_width + int(delta), persist=True)
+
+        def set_fill_tolerance(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_fill_tolerance(value)
+            self.fill_tolerance = clamped
+            self.config.default_fill_tolerance = clamped
+            if hasattr(self, "tolerance_slider") and self.tolerance_slider.value() != clamped:
+                self.tolerance_slider.blockSignals(True)
+                self.tolerance_slider.setValue(clamped)
+                self.tolerance_slider.blockSignals(False)
+            if hasattr(self, "tolerance_value_label"):
+                self.tolerance_value_label.setText(f"{clamped}")
+            if persist:
+                self._persist_annotation_prefs()
+            if self._badge_cached_rect is not None:
+                self.update(self._badge_cached_rect.adjusted(-6, -6, 6, 6))
+
+        def set_fill_opacity(self, value: int, *, persist: bool = True) -> None:
+            clamped = clamp_fill_opacity(value)
+            self.fill_opacity = clamped
+            self.config.default_fill_opacity = clamped
+            if hasattr(self, "opacity_slider") and self.opacity_slider.value() != clamped:
+                self.opacity_slider.blockSignals(True)
+                self.opacity_slider.setValue(clamped)
+                self.opacity_slider.blockSignals(False)
+            if hasattr(self, "opacity_value_label"):
+                self.opacity_value_label.setText(f"{clamped}%")
+            if hasattr(self, "brush_preview_widget"):
+                self.brush_preview_widget.set_preview_state(
+                    thickness=self.stroke_width,
+                    color=self.stroke_color,
+                    mode="fill" if self.active_tool == "fill" else "stroke",
+                    opacity=clamped,
+                )
+            if persist:
+                self._persist_annotation_prefs()
+            if self._badge_cached_rect is not None:
+                self.update(self._badge_cached_rect.adjusted(-6, -6, 6, 6))
+
         def set_tool(self, tool_id: str) -> None:
             self.active_tool = tool_id
             for tid, btn in self.tool_buttons.items():
                 btn.setChecked(tid == tool_id)
                 btn.update()
+            self._sync_context_toolbar_mode()
+            self._reposition_toolbar()
+            self.update()
             self.setFocus()
 
         def pick_color(self) -> None:
@@ -8569,6 +9687,14 @@ if HAS_QT:
                 self.config.default_color = col.name()
                 self.config.save()
                 self.color_btn.set_swatch_color(col)
+                if hasattr(self, "brush_preview_widget"):
+                    self.brush_preview_widget.set_preview_state(
+                        thickness=self.stroke_width,
+                        color=self.stroke_color,
+                        mode="fill" if self.active_tool == "fill" else "stroke",
+                        opacity=self.fill_opacity,
+                    )
+                self.update()
             self.setFocus()
 
         def _on_hdr_slider_changed(self, nits: int) -> None:
@@ -8777,10 +9903,227 @@ if HAS_QT:
                     f"Full-resolution tone-map ensured for export in {(time.perf_counter() - t0)*1000:.1f} ms",
                 )
 
+        def _invalidate_all_toolbars(self) -> None:
+            if hasattr(self, "toolbar") and self.toolbar is not None:
+                self.toolbar.invalidate_backdrop()
+            if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                self.context_toolbar.invalidate_backdrop()
+
+        def cancel_active_flood_fill(self) -> None:
+            """Cooperatively cancels any in-flight background Paint Bucket operation."""
+            self._cancel_fill_event.set()
+            self._fill_revision += 1
+            if self._fill_running:
+                self._fill_running = False
+                if hasattr(self, "fill_status_label"):
+                    self.fill_status_label.setText("")
+                    self.fill_status_label.hide()
+                    if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                        self.context_toolbar.adjustSize()
+                self.setCursor(Qt.CursorShape.CrossCursor)
+
         def undo_annotation(self) -> None:
+            if self._fill_running:
+                self.cancel_active_flood_fill()
+                return
             if self.annotations:
                 self.redo_stack.append(self.annotations.pop())
-                self.toolbar.invalidate_backdrop()
+                self._invalidate_all_toolbars()
+                self.update()
+
+        def redo_annotation(self) -> None:
+            if self._fill_running:
+                return
+            if self.redo_stack:
+                self.annotations.append(self.redo_stack.pop())
+                self._invalidate_all_toolbars()
+                self.update()
+
+        def _render_selection_composite_for_fill(
+            self, crop_rect: QRect
+        ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+            """
+            Renders the committed Annotation Layer strictly inside `crop_rect` onto a clean,
+            uniform offscreen canvas (excluding underlying screenshot text, code pills, icons,
+            and UI noise), plus an optional (ch, cw) uint8 alpha mask of vector/text strokes
+            so the Paint Bucket fills drawn shapes and regions cleanly without treating
+            screenshot text as lines or leaving inner halo seams.
+            Never modifies `self.frame.srgb_image` or `self.frame.raw_scrgb_float`.
+            """
+            self._ensure_full_resolution_export()
+            self._sync_coordinate_scales()
+            cx = int(crop_rect.x())
+            cy = int(crop_rect.y())
+            cw = max(1, int(crop_rect.width()))
+            ch = max(1, int(crop_rect.height()))
+
+            bg_r, bg_g, bg_b = select_annotation_canvas_bg_rgb(self.annotations)
+            if not self.annotations:
+                comp_rgb = np.full((ch, cw, 3), (bg_r, bg_g, bg_b), dtype=np.uint8)
+                return comp_rgb, None
+
+            # Render committed annotations onto a clean neutral canvas (without bg_pixmap)
+            qimg = QImage(cw, ch, QImage.Format.Format_RGB888)
+            qimg.fill(QColor(bg_r, bg_g, bg_b))
+            p = QPainter(qimg)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            p.translate(-float(cx), -float(cy))
+            p.scale(self._px_scale_x, self._px_scale_y)
+            self._draw_all_annotations(p, include_current=False)
+            p.end()
+
+            bpl = qimg.bytesPerLine()
+            ptr = qimg.bits()
+            ptr.setsize(ch * bpl)
+            raw_2d = np.frombuffer(ptr, dtype=np.uint8).reshape((ch, bpl))
+            comp_rgb = np.ascontiguousarray(raw_2d[:, : cw * 3].reshape((ch, cw, 3)).copy())
+
+            # If there are committed vector/text strokes, capture their alpha mask for fringe blending
+            has_vector_strokes = any(it.tool != "fill" for it in self.annotations)
+            if not has_vector_strokes:
+                return comp_rgb, None
+
+            stroke_qimg = QImage(cw, ch, QImage.Format.Format_ARGB32_Premultiplied)
+            stroke_qimg.fill(Qt.GlobalColor.transparent)
+            sp = QPainter(stroke_qimg)
+            sp.setRenderHint(QPainter.RenderHint.Antialiasing)
+            sp.translate(-float(cx), -float(cy))
+            sp.scale(self._px_scale_x, self._px_scale_y)
+            self._draw_all_annotations(sp, include_current=False, only_vector_strokes=True)
+            sp.end()
+
+            sbpl = stroke_qimg.bytesPerLine()
+            sptr = stroke_qimg.bits()
+            sptr.setsize(ch * sbpl)
+            sraw = np.frombuffer(sptr, dtype=np.uint8).reshape((ch, sbpl))
+            # Alpha channel is byte 3 of each BGRA pixel
+            stroke_alpha = np.ascontiguousarray(sraw[:, 3 : cw * 4 : 4].copy())
+            return comp_rgb, stroke_alpha
+
+        def _start_flood_fill_at(
+            self, local_pos: QPointF, *, force_sync: bool = False
+        ) -> Optional[AnnotationItem]:
+            """
+            Initiates a non-destructive Paint Bucket flood fill at `local_pos` inside
+            the current selection. Small/medium regions or Safe Mode run synchronously
+            in a few milliseconds; large selections run on a cancellable background job.
+            """
+            if not self.has_selection:
+                return None
+            sel_norm = self.selection_rect.normalized()
+            if not sel_norm.contains(local_pos):
+                return None
+
+            self._ensure_full_resolution_export()
+            self._sync_coordinate_scales()
+            img_w = int(self.frame.srgb_image.shape[1])
+            img_h = int(self.frame.srgb_image.shape[0])
+            full_rect = QRect(0, 0, img_w, img_h)
+
+            cx, cy, cw, ch = self.coord_mapper.local_rect_to_image_crop_rect(
+                (sel_norm.left(), sel_norm.top(), sel_norm.width(), sel_norm.height())
+            )
+            crop_rect = QRect(cx, cy, cw, ch).intersected(full_rect)
+            if crop_rect.isEmpty():
+                return None
+
+            phys_x = int(round(local_pos.x() * self._px_scale_x))
+            phys_y = int(round(local_pos.y() * self._px_scale_y))
+            seed_x = max(0, min(crop_rect.width() - 1, phys_x - crop_rect.x()))
+            seed_y = max(0, min(crop_rect.height() - 1, phys_y - crop_rect.y()))
+
+            self.cancel_active_flood_fill()
+            self._cancel_fill_event = threading.Event()
+            self._fill_revision += 1
+            rev = self._fill_revision
+
+            comp_rgb, stroke_alpha = self._render_selection_composite_for_fill(crop_rect)
+            area = int(crop_rect.width()) * int(crop_rect.height())
+            run_sync = (
+                bool(force_sync)
+                or self.config.effective_async_workers_disabled
+                or area <= 480_000
+            )
+
+            if run_sync:
+                res = compute_flood_fill_mask(
+                    comp_rgb,
+                    seed_x,
+                    seed_y,
+                    self.fill_tolerance,
+                    stroke_alpha=stroke_alpha,
+                    cancel_event=self._cancel_fill_event,
+                )
+                if res is None:
+                    return None
+                (bx, by, bw, bh), compressed_bytes, _ = res
+                phys_bx = crop_rect.x() + bx
+                phys_by = crop_rect.y() + by
+                logical_bbox = (
+                    float(phys_bx) / max(1e-4, float(self._px_scale_x)),
+                    float(phys_by) / max(1e-4, float(self._px_scale_y)),
+                    float(bw) / max(1e-4, float(self._px_scale_x)),
+                    float(bh) / max(1e-4, float(self._px_scale_y)),
+                )
+                item = AnnotationItem(
+                    tool="fill",
+                    color=self.stroke_color.name(),
+                    thickness=1,
+                    opacity=self.fill_opacity,
+                    tolerance=self.fill_tolerance,
+                    fill_bbox=(phys_bx, phys_by, bw, bh),
+                    logical_bbox=logical_bbox,
+                    compressed_mask=compressed_bytes,
+                )
+                _ = item.get_or_create_qimage()
+                self.annotations.append(item)
+                self.redo_stack.clear()
+                self._invalidate_all_toolbars()
+                self.update()
+                return item
+
+            # Asynchronous background worker path for large 1080p/1440p/4K selections
+            self._fill_running = True
+            if hasattr(self, "fill_status_label"):
+                self.fill_status_label.setText("Filling...")
+                self.fill_status_label.show()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.adjustSize()
+                    self._reposition_toolbar()
+            self.setCursor(Qt.CursorShape.WaitCursor)
+            job = FloodFillJob(
+                self._fill_signals,
+                rev,
+                comp_rgb,
+                seed_x,
+                seed_y,
+                self.fill_tolerance,
+                self.fill_opacity,
+                self.stroke_color.name(),
+                (crop_rect.x(), crop_rect.y()),
+                (self._px_scale_x, self._px_scale_y),
+                stroke_alpha=stroke_alpha,
+                cancel_event=self._cancel_fill_event,
+            )
+            self._tone_pool.start(job)
+            return None
+
+        def _on_flood_fill_ready(self, revision: int, payload: object) -> None:
+            if revision != self._fill_revision or self._closed:
+                return
+            self._fill_running = False
+            if hasattr(self, "fill_status_label"):
+                self.fill_status_label.setText("")
+                self.fill_status_label.hide()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.adjustSize()
+                    self._reposition_toolbar()
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            if isinstance(payload, dict) and isinstance(payload.get("item"), AnnotationItem):
+                self.annotations.append(payload["item"])
+                self.redo_stack.clear()
+                self._invalidate_all_toolbars()
                 self.update()
 
         def _get_handle_rects(self, r: QRectF) -> List[QRectF]:
@@ -8845,29 +10188,76 @@ if HAS_QT:
         def _reposition_toolbar(self) -> None:
             if not self.has_selection or self.selection_rect.width() < 10:
                 self.toolbar.hide()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.hide()
                 return
             r = self.selection_rect.normalized()
             tb_w = self.toolbar.width()
             tb_h = self.toolbar.height()
+
+            show_ctx = (
+                hasattr(self, "context_toolbar")
+                and self.context_toolbar is not None
+                and (self.active_tool in STROKE_DRAWING_TOOLS or self.active_tool == "fill")
+            )
+            if show_ctx:
+                self._sync_context_toolbar_mode()
+                ctx_w = self.context_toolbar.width()
+                ctx_h = self.context_toolbar.height()
+            else:
+                ctx_w = 0
+                ctx_h = 0
+
+            gap = 6
+            total_h = tb_h + (gap + ctx_h if show_ctx else 0)
 
             tx = int(r.right() - tb_w)
             if tx < 10:
                 tx = int(r.left())
             if tx + tb_w > self.width() - 10:
                 tx = self.width() - tb_w - 10
+            tx = max(10, tx)
 
+            placed_above = False
             ty = int(r.bottom() + 12)
-            if ty + tb_h > self.height() - 10:
-                ty = int(r.top() - tb_h - 12)
-                if ty < 10:
-                    ty = int(r.bottom() - tb_h - 12)
+            if ty + total_h > self.height() - 10:
+                ty_above = int(r.top() - total_h - 12)
+                if ty_above >= 10:
+                    ty = ty_above
+                    placed_above = True
+                else:
+                    ty = max(10, int(r.bottom() - total_h - 12))
 
-            new_pos = QPoint(max(10, tx), max(10, ty))
+            if show_ctx and placed_above:
+                ctx_y = ty
+                main_y = ty + ctx_h + gap
+            else:
+                main_y = ty
+                ctx_y = main_y + tb_h + gap
+
+            new_pos = QPoint(tx, max(10, min(self.height() - tb_h - 10, main_y)))
             if self.toolbar.pos() != new_pos:
                 self.toolbar.move(new_pos)
             self.toolbar.invalidate_backdrop()
             self.toolbar.show()
             self.toolbar.raise_()
+
+            if show_ctx:
+                ctx_x = int(new_pos.x() + tb_w - ctx_w)
+                if ctx_x < 10:
+                    ctx_x = int(new_pos.x())
+                if ctx_x + ctx_w > self.width() - 10:
+                    ctx_x = self.width() - ctx_w - 10
+                ctx_x = max(10, ctx_x)
+                ctx_y_clamped = max(10, min(self.height() - ctx_h - 10, ctx_y))
+                ctx_pos = QPoint(ctx_x, ctx_y_clamped)
+                if self.context_toolbar.pos() != ctx_pos:
+                    self.context_toolbar.move(ctx_pos)
+                self.context_toolbar.invalidate_backdrop()
+                self.context_toolbar.show()
+                self.context_toolbar.raise_()
+            elif hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                self.context_toolbar.hide()
 
         # ---------------------------------------------------------------------
         # Painting (Frozen Image + Deep Aqua Dim Mask + Aero Frame & Orbs)
@@ -8959,7 +10349,12 @@ if HAS_QT:
                 safe_tag = (
                     "  •  [SAFE MODE]" if self.config.is_safe_mode_active else ""
                 )
-                dim_text = f"{phys_w} × {phys_h} px{hdr_tag}  •  Stroke: {self.stroke_width}px{safe_tag}" 
+                tool_tag = (
+                    f"  •  Fill Tol: {self.fill_tolerance} ({self.fill_opacity}%)"
+                    if self.active_tool == "fill"
+                    else f"  •  Stroke: {self.stroke_width}px"
+                )
+                dim_text = f"{phys_w} × {phys_h} px{hdr_tag}{tool_tag}{safe_tag}" 
                 font = QFont("Segoe UI", 9, QFont.Weight.Bold)
                 painter.setFont(font)
                 fm = painter.fontMetrics()
@@ -9012,16 +10407,72 @@ if HAS_QT:
                     dim_text,
                 )
 
-        def _draw_all_annotations(self, painter: QPainter) -> None:
-            items = list(self.annotations)
-            if self.current_annotation is not None:
-                items.append(self.current_annotation)
+                # Unobtrusive live circular brush-thickness cursor preview inside selection
+                # (Rendered only on the interactive overlay widget, NEVER in saved/copied exports)
+                if (
+                    self.active_tool in STROKE_DRAWING_TOOLS
+                    and self.interaction_mode in ("none", "drawing")
+                    and not self.space_held
+                    and self._cursor_pos_local is not None
+                    and r.contains(self._cursor_pos_local)
+                ):
+                    c_pt = self._cursor_pos_local
+                    rad = max(1.5, float(self.stroke_width) / 2.0)
+                    painter.save()
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.setPen(QPen(QColor(0, 18, 40, 175), 1.4))
+                    painter.drawEllipse(c_pt, rad + 0.9, rad + 0.9)
+                    ring_col = QColor(self.stroke_color)
+                    ring_col.setAlpha(225)
+                    painter.setPen(QPen(ring_col, 1.2))
+                    painter.drawEllipse(c_pt, rad, rad)
+                    painter.restore()
+
+        def _draw_all_annotations(
+            self,
+            painter: QPainter,
+            *,
+            include_current: bool = True,
+            only_vector_strokes: bool = False,
+        ) -> None:
+            raw_items = list(self.annotations)
+            if include_current and self.current_annotation is not None:
+                raw_items.append(self.current_annotation)
+            # Coherent two-layer compositing model:
+            # Pass 1 renders Paint Bucket fills in chronological order; Pass 2 renders
+            # vector & text strokes in chronological order on top so bounding outlines
+            # stay crisp and seamless with zero dark inner border.
+            items = [it for it in raw_items if it.tool == "fill"] + [
+                it for it in raw_items if it.tool != "fill"
+            ]
 
             for item in items:
+                if item.tool == "fill":
+                    if only_vector_strokes:
+                        continue
+                    qimg = item.get_or_create_qimage()
+                    if qimg is None:
+                        continue
+                    if item.logical_bbox is not None:
+                        target_rc = QRectF(*item.logical_bbox)
+                    elif item.fill_bbox is not None:
+                        bx, by, bw, bh = item.fill_bbox
+                        target_rc = QRectF(
+                            float(bx) / max(1e-4, float(self._px_scale_x)),
+                            float(by) / max(1e-4, float(self._px_scale_y)),
+                            float(bw) / max(1e-4, float(self._px_scale_x)),
+                            float(bh) / max(1e-4, float(self._px_scale_y)),
+                        )
+                    else:
+                        continue
+                    painter.drawImage(target_rc, qimg)
+                    continue
+
                 col = QColor(item.color)
+                sw = float(clamp_stroke_thickness(item.thickness))
                 pen = QPen(
                     col,
-                    item.thickness,
+                    sw,
                     Qt.PenStyle.SolidLine,
                     Qt.PenCapStyle.RoundCap,
                     Qt.PenJoinStyle.RoundJoin,
@@ -9029,11 +10480,17 @@ if HAS_QT:
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
 
-                if item.tool == "pen" and len(item.points) >= 2:
-                    path = QPainterPath(QPointF(*item.points[0]))
-                    for pt in item.points[1:]:
-                        path.lineTo(QPointF(*pt))
-                    painter.drawPath(path)
+                if item.tool == "pen":
+                    if len(item.points) == 1:
+                        pt = QPointF(*item.points[0])
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QBrush(col))
+                        painter.drawEllipse(pt, sw / 2.0, sw / 2.0)
+                    elif len(item.points) >= 2:
+                        path = QPainterPath(QPointF(*item.points[0]))
+                        for pt in item.points[1:]:
+                            path.lineTo(QPointF(*pt))
+                        painter.drawPath(path)
 
                 elif item.tool == "rect" and len(item.points) >= 2:
                     p1 = QPointF(*item.points[0])
@@ -9051,27 +10508,30 @@ if HAS_QT:
                     )
 
                 elif item.tool == "arrow" and len(item.points) >= 2:
-                    p1 = QPointF(*item.points[0])
-                    p2 = QPointF(*item.points[-1])
-                    painter.drawLine(p1, p2)
-                    angle = math.atan2(p2.y() - p1.y(), p2.x() - p1.x())
-                    head_len = max(12.0, item.thickness * 4.0)
-                    wing1 = QPointF(
-                        p2.x() - head_len * math.cos(angle - math.pi / 6),
-                        p2.y() - head_len * math.sin(angle - math.pi / 6),
-                    )
-                    wing2 = QPointF(
-                        p2.x() - head_len * math.cos(angle + math.pi / 6),
-                        p2.y() - head_len * math.sin(angle + math.pi / 6),
+                    p1_t = item.points[0]
+                    p2_t = item.points[-1]
+                    shaft_end, head_pts = compute_arrow_head_points(p1_t, p2_t, sw)
+                    painter.drawLine(QPointF(*p1_t), QPointF(*shaft_end))
+                    painter.setPen(
+                        QPen(
+                            col,
+                            max(1.0, min(4.0, sw * 0.22)),
+                            Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap,
+                            Qt.PenJoinStyle.RoundJoin,
+                        )
                     )
                     painter.setBrush(QBrush(col))
-                    painter.drawPolygon(QPolygonF([p2, wing1, wing2]))
+                    painter.drawPolygon(QPolygonF([QPointF(*pt) for pt in head_pts]))
 
                 elif item.tool == "text" and item.points and item.text:
                     pt = QPointF(*item.points[0])
-                    font = QFont(
-                        "Segoe UI", max(11, item.thickness * 4), QFont.Weight.Bold
+                    fsize = (
+                        int(item.font_size)
+                        if getattr(item, "font_size", 0) and int(item.font_size) > 0
+                        else DEFAULT_TEXT_FONT_SIZE
                     )
+                    font = QFont("Segoe UI", max(10, min(72, fsize)), QFont.Weight.Bold)
                     painter.setFont(font)
                     painter.setPen(QColor(0, 0, 0, 200))
                     painter.drawText(QPointF(pt.x() + 1.5, pt.y() + 1.5), item.text)
@@ -9089,43 +10549,59 @@ if HAS_QT:
                 return
 
             pos = event.position()
+            self._cursor_pos_local = pos
 
             # 1. Always allow grabbing the 8 resize handles of the selection box
             h_idx = self._hit_test_handles(pos)
             if h_idx != -1:
+                self.cancel_active_flood_fill()
                 self.interaction_mode = "resizing"
                 self.active_handle = h_idx
                 self.drag_start_pos = pos
                 self.rect_at_drag_start = QRectF(self.selection_rect.normalized())
                 self.toolbar.hide()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.hide()
                 return
 
             # 2. If no selection yet, drag creates the selection box
             if not self.has_selection:
+                self.cancel_active_flood_fill()
                 self.has_selection = True
                 self.interaction_mode = "creating"
                 self.drag_start_pos = pos
                 self.selection_rect = QRectF(pos, pos)
                 self.toolbar.hide()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.hide()
                 self.update()
                 return
 
             # 3. Allow grabbing the border of the selection box to move it at any time
             if self._hit_test_border(pos):
+                self.cancel_active_flood_fill()
                 self.interaction_mode = "moving"
                 self.drag_start_pos = pos
                 self.rect_at_drag_start = QRectF(self.selection_rect.normalized())
                 self.toolbar.hide()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.hide()
                 return
 
-            # 4. Inside selection box: either move the box or draw with the selected tool
+            # 4. Inside selection box: move, Paint Bucket flood fill, text, or stroke drawing
             sel_norm = self.selection_rect.normalized()
             if sel_norm.contains(pos):
                 if self.active_tool == "move" or self.space_held:
+                    self.cancel_active_flood_fill()
                     self.interaction_mode = "moving"
                     self.drag_start_pos = pos
                     self.rect_at_drag_start = QRectF(sel_norm)
                     self.toolbar.hide()
+                    if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                        self.context_toolbar.hide()
+                elif self.active_tool == "fill":
+                    self._start_flood_fill_at(pos)
+                    self.setFocus()
                 elif self.active_tool == "text":
                     text, ok = QInputDialog.getText(
                         self, "Add Text Annotation", "Enter text:"
@@ -9138,10 +10614,11 @@ if HAS_QT:
                                 thickness=self.stroke_width,
                                 points=[(pos.x(), pos.y())],
                                 text=text.strip(),
+                                font_size=self.text_font_size,
                             )
                         )
                         self.redo_stack.clear()
-                        self.toolbar.invalidate_backdrop()
+                        self._invalidate_all_toolbars()
                         self.update()
                     self.setFocus()
                 else:
@@ -9154,14 +10631,19 @@ if HAS_QT:
                     )
                     self.update()
             else:
+                self.cancel_active_flood_fill()
                 self.interaction_mode = "creating"
                 self.drag_start_pos = pos
                 self.selection_rect = QRectF(pos, pos)
                 self.toolbar.hide()
+                if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                    self.context_toolbar.hide()
                 self.update()
 
         def mouseMoveEvent(self, event) -> None:
             pos = event.position()
+            prev_pos = self._cursor_pos_local
+            self._cursor_pos_local = pos
 
             if self.interaction_mode == "none":
                 h_idx = self._hit_test_handles(pos)
@@ -9175,10 +10657,31 @@ if HAS_QT:
                 ):
                     if self.active_tool == "move" or self.space_held:
                         self.setCursor(Qt.CursorShape.SizeAllCursor)
+                    elif self._fill_running:
+                        self.setCursor(Qt.CursorShape.WaitCursor)
                     else:
                         self.setCursor(Qt.CursorShape.CrossCursor)
                 else:
                     self.setCursor(Qt.CursorShape.CrossCursor)
+
+                if self.has_selection and self.active_tool in STROKE_DRAWING_TOOLS:
+                    r_pad = int(self.stroke_width) + 14
+                    dirty = QRect(
+                        int(pos.x()) - r_pad,
+                        int(pos.y()) - r_pad,
+                        r_pad * 2,
+                        r_pad * 2,
+                    )
+                    if prev_pos is not None:
+                        dirty = dirty.united(
+                            QRect(
+                                int(prev_pos.x()) - r_pad,
+                                int(prev_pos.y()) - r_pad,
+                                r_pad * 2,
+                                r_pad * 2,
+                            )
+                        )
+                    self.update(dirty)
                 return
 
             if self.interaction_mode == "creating":
@@ -9243,7 +10746,10 @@ if HAS_QT:
                 self.interaction_mode == "drawing"
                 and self.current_annotation is not None
             ):
-                if len(self.current_annotation.points) >= 2:
+                if (
+                    len(self.current_annotation.points) >= 2
+                    or self.current_annotation.tool == "pen"
+                ):
                     self.annotations.append(self.current_annotation)
                     self.redo_stack.clear()
                 self.current_annotation = None
@@ -9256,13 +10762,9 @@ if HAS_QT:
         def wheelEvent(self, event) -> None:
             delta = event.angleDelta().y()
             if delta > 0:
-                self.stroke_width = min(20, self.stroke_width + 1)
+                self.adjust_stroke_thickness(1)
             elif delta < 0:
-                self.stroke_width = max(1, self.stroke_width - 1)
-            if self._badge_cached_rect is not None:
-                self.update(self._badge_cached_rect.adjusted(-4, -4, 4, 4))
-            else:
-                self.update()
+                self.adjust_stroke_thickness(-1)
 
         def keyPressEvent(self, event) -> None:
             key = event.key()
@@ -9272,7 +10774,18 @@ if HAS_QT:
                 self.space_held = True
                 self.update()
             elif key == Qt.Key.Key_Escape:
+                if self._fill_running:
+                    self.cancel_active_flood_fill()
+                    return
                 self.close()
+            elif key == Qt.Key.Key_BracketLeft and not (
+                mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
+            ):
+                self.adjust_stroke_thickness(-1)
+            elif key == Qt.Key.Key_BracketRight and not (
+                mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
+            ):
+                self.adjust_stroke_thickness(1)
             elif (
                 key == Qt.Key.Key_C and (mods & Qt.KeyboardModifier.ControlModifier)
             ) or key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -9294,10 +10807,7 @@ if HAS_QT:
             elif key == Qt.Key.Key_Z and (mods & Qt.KeyboardModifier.ControlModifier):
                 self.undo_annotation()
             elif key == Qt.Key.Key_Y and (mods & Qt.KeyboardModifier.ControlModifier):
-                if self.redo_stack:
-                    self.annotations.append(self.redo_stack.pop())
-                    self.toolbar.invalidate_backdrop()
-                    self.update()
+                self.redo_annotation()
             elif key == Qt.Key.Key_V:
                 self.set_tool("move")
             elif key == Qt.Key.Key_P:
@@ -9310,6 +10820,8 @@ if HAS_QT:
                 self.set_tool("line")
             elif key == Qt.Key.Key_A:
                 self.set_tool("arrow")
+            elif key == Qt.Key.Key_F:
+                self.set_tool("fill")
             elif key == Qt.Key.Key_T:
                 self.set_tool("text")
 
@@ -9549,12 +11061,22 @@ if HAS_QT:
             self._closed = True
             self._resources_released = True
             self._cancel_tone_event.set()
+            self._cancel_fill_event.set()
+            self._fill_revision += 1
+            self._fill_running = False
             self._render_debounce.stop()
             self._pending_tone_request = None
+            try:
+                self._fill_signals.done.disconnect(self._on_flood_fill_ready)
+            except Exception:
+                pass
 
             if hasattr(self, "toolbar") and self.toolbar is not None:
                 self.toolbar.hide()
                 self.toolbar.cleanup_resources()
+            if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                self.context_toolbar.hide()
+                self.context_toolbar.cleanup_resources()
 
             self._badge_frosted_pix = None
             self._badge_cached_rect = None
@@ -10501,7 +12023,7 @@ ACTIVE_TRANSACTION_MAX_AGE_SEC: float = 1800.0  # 30 minutes protection window
 
 
 def _is_updater_transaction_mutex_active() -> bool:
-    """
+    r"""
     Returns True if a Windows `Local\HDRSnipFusion_UpdaterTransaction` mutex
     is currently held by an active updater helper process.
     """
@@ -10596,7 +12118,7 @@ def cleanup_stale_update_staging(
         if _is_updater_transaction_mutex_active():
             DIAG_LOG.log(
                 "UPDATE_CLEANUP",
-                "Skipping staging cleanup because Local\HDRSnipFusion_UpdaterTransaction is active.",
+                r"Skipping staging cleanup because Local\HDRSnipFusion_UpdaterTransaction is active.",
             )
             return
 
