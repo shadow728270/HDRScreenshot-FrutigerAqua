@@ -6,18 +6,18 @@
 
 <p align="center">
   <a href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">🌊 Explore the website</a> ·
-  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe">⬇ Download the Windows EXE</a> ·
+  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe">⬇ Download the Windows EXE</a> ·
   <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">Releases</a> ·
   <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Issues</a>
 </p>
 
-> **Rebrand in progress:** Prismwake is the project's new website and documentation identity. The latest stable desktop release is still **v0.1.2**, distributed as `HDRSnipFusion.exe` and branded with its previous name internally. Keeping the existing binary name, API repository address and user data paths preserves compatibility with installations and update checking. A coordinated desktop-app rename will follow separately. Historical Git tags and releases remain unchanged.
+> **Prismwake v0.1.3 is released.** New Windows downloads use `Prismwake.exe`. The same release also ships a byte-identical `HDRSnipFusion.exe` for existing v0.1.2 users and preserves the original repository's updater endpoint, settings, and historical tags.
 
 ## See it in action
 
 <img src="docs/assets/hdrsnip-capture-overlay.webp" alt="Real Aqua screenshot editor captured before the Prismwake desktop rebrand" width="850">
 
-<img src="docs/assets/hdrsnip-settings.webp" alt="Real legacy Aqua settings dialog; desktop rebrand forthcoming" width="370">
+<img src="docs/assets/hdrsnip-settings.webp" alt="Historical v0.1.2 Aqua settings dialog; current v0.1.3 UI may differ" width="370">
 
 The screenshots above are real captures of the current Windows application, not mockups of a future UI.
 
@@ -25,6 +25,7 @@ The screenshots above are real captures of the current Windows application, not 
 
 - **HDR-aware region screenshots.** Uses DXGI Desktop Duplication to read scRGB framebuffer data and tone-map it for shareable SDR PNG exports. True HDR file exports aren't implemented yet.
 - **Annotation tools.** Pen, rectangles, ellipses, lines, arrows, text, adjustable **1–40 px** stroke widths, and a non-destructive **Paint Bucket** (v0.1.2).
+- **New in v0.1.3.** Blur and pixelation brushes/regions, permanent redaction, numbered callouts, pixel magnifier, eyedropper, and four integrated Aqua themes.
 - **Capture workflow.** Move and resize the capture region, undo/redo annotations, copy to clipboard, save or quick-save to a configurable folder.
 - **Desktop integration.** Configurable global capture hotkey, Windows tray icon, single-instance guard, optional start with Windows, per-monitor/DPI awareness and diagnostic logging.
 - **Updater.** Optional GitHub Releases update checking with download verification, staged replacement and rollback safety.
@@ -45,7 +46,7 @@ The website intentionally avoids permanent canvas animations and expensive full-
 
 ## Installation
 
-1. Download [the latest stable executable](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/HDRSnipFusion.exe).
+1. Download [the latest stable executable](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe).
 2. Run it on 64-bit Windows 10/11. No Python installation is required.
 3. Find its tray icon and use **Ctrl + Shift + X** by default. A previously saved hotkey may override this.
 4. Choose your screenshot folder under Settings. Save with **Ctrl+S**, quick-save and copy with **Ctrl+Shift+S**, or open Save As with **Ctrl+Alt+S**.
@@ -59,14 +60,16 @@ py -m pip install -r requirements.txt
 py HDRSnipFusion.py
 ```
 
-Builds and release automation live in [`.github/workflows/`](.github/workflows/). The legacy Python entry-point and packaged EXE names are intentionally unchanged for v0.1.2.
+Builds and release automation live in [`.github/workflows/`](.github/workflows/). The Python source entry point is still `HDRSnipFusion.py` for compatibility. Both `Prismwake.exe` and the old-name `HDRSnipFusion.exe` are published with identical bytes for v0.1.3.
 
-## Upcoming v0.1.3 transition
+## Official v0.1.3 release and migration
 
-The new v0.1.3 source is committed, and its [Windows candidate build passed](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/actions/runs/40138079555) packaging, checksum, 8 candidate unit tests and actual two-EXE updater/restart/rollback tests. The [test-build artifact](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/actions/runs/40138079555/artifacts/12577147735) includes both `Prismwake.exe` and the backward-compatible `HDRSnipFusion.exe`, plus their SHA-256 checksums. This workflow artifact may require GitHub login and is temporary. **v0.1.3 is not a public stable release yet**, and existing users still receive v0.1.2. Manual Windows feature testing and approval are required before tagging v0.1.3. See the [migration contract](docs/PRISMWAKE_V013_MIGRATION.md) and [frozen v0.1.2 updater tests](tests/test_legacy_updater_contract.py).
+[Download the stable Prismwake v0.1.3 release](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.3).
+
+The original [v0.1.2 updater compatibility checks](tests/test_legacy_updater_contract.py), eight v0.1.3 candidate tests and actual Windows PyInstaller replacement/startup/rollback checks passed. Both release executable names share the verified SHA-256 `959bc75e50ddccf0eff424b7559873c84834a8ccd2483f23047233e774bd0439`. The website points new users to `Prismwake.exe`, while the legacy filename remains published for existing installations. See the [migration contract](docs/PRISMWAKE_V013_MIGRATION.md) for technical details.
 
 ## Releases, security and contributing
 
-Read [the current release notes](RELEASE_NOTES_v0.1.2.md), [contributing guidelines](CONTRIBUTING.md) and [security policy](SECURITY.md). Downloads should come from the official GitHub Releases page only. Inspect diagnostic logs before sharing them publicly; paths, window titles and screenshots can contain private information.
+Read [the current release notes](RELEASE_NOTES_v0.1.3.md), [contributing guidelines](CONTRIBUTING.md) and [security policy](SECURITY.md). Downloads should come from the official GitHub Releases page only. Inspect diagnostic logs before sharing them publicly; paths, window titles and screenshots can contain private information.
 
 Prismwake is an independent project distributed under the [MIT License](LICENSE).
