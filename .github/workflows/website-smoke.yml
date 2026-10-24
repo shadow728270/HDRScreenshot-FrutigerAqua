@@ -95,62 +95,32 @@ jobs:
               if(await page.locator('input[type=file]').count()!==0)throw Error('Screenshot upload UI has returned');
               await page.locator('#compareReset').click();
               if(await page.locator('#compare').evaluate(el=>parseFloat(el.style.getPropertyValue('--split')))!==50)throw Error('Comparison reset failed');
-              await page.locator('[data-tool=rect]').click();
-              await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              const stage=await page.locator('#demoStage').boundingBox();
-              await page.mouse.move(stage.x+stage.width*.25,stage.y+stage.height*.3);
-              await page.mouse.down();await page.mouse.move(stage.x+stage.width*.7,stage.y+stage.height*.65,{steps:4});await page.mouse.up();
-              if(await page.locator('#demoAnnotationLayer > rect').count()!==1)throw Error('Demo shape drawing failed');
-              if(await page.locator('#demoAnnotationLayer').getAttribute('clip-path')!=='url(#demoSelectionClip)')throw Error('Annotation layer has no selection clip');
-              await page.locator('#demoUndo').click();
-              if(await page.locator('#demoAnnotationLayer > rect').count()!==0)throw Error('Undo failed');
+              // With no user-drawn boundary, clicking the photo must never create a fill.
               await page.locator('[data-tool=fill]').click();
-              if(await page.locator('#demoFillSettings').isHidden())throw Error('Fill controls not visible when tool selected');
-              await page.locator('#demoFillTolerance').evaluate(el=>{el.value='64';el.dispatchEvent(new Event('input',{bubbles:true}))});
-              if(await page.locator('#demoToleranceValue').innerText()!=='64')throw Error('Fill tolerance display failed');
-              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.27),y:Math.round(stage.height*.22)}});
-              if(await page.locator('#demoAnnotationLayer > image').count()!==1)throw Error('Paint Bucket did not create a raster flood-fill mask');
-              if(await page.locator('#demoAnnotationLayer > ellipse').count()!==0)throw Error('Paint Bucket still draws an ellipse instead of a region fill');
-              const fillMask=await page.locator('#demoAnnotationLayer > image').getAttribute('href');
-              if(!fillMask?.startsWith('data:image/png;base64,'))throw Error('Paint Bucket mask is not an inline transparent PNG');
-              const pixelStats=await page.evaluate(async()=>{
-                const href=document.querySelector('#demoAnnotationLayer > image').getAttribute('href');
-                const bitmap=await createImageBitmap(await (await fetch(href)).blob());
-                const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
-                const c=canvas.getContext('2d');c.drawImage(bitmap,0,0);
-                const raw=c.getImageData(0,0,canvas.width,canvas.height).data;
-                let painted=0,transparent=0;
-                for(let i=3;i<raw.length;i+=4){if(raw[i])painted++;else transparent++}
-                bitmap.close();return{painted,transparent};
-              });
-              if(pixelStats.painted<20||pixelStats.transparent<20)throw Error('Flood-fill region mask invalid '+JSON.stringify(pixelStats));
-              const selectionMaskOutside=await page.evaluate(async()=>{
-                const el=document.querySelector('#demoAnnotationLayer > image');
-                const bitmap=await createImageBitmap(await (await fetch(el.getAttribute('href'))).blob());
-                const cv=document.createElement('canvas');cv.width=bitmap.width;cv.height=bitmap.height;
-                const c=cv.getContext('2d');c.drawImage(bitmap,0,0);const data=c.getImageData(0,0,cv.width,cv.height).data;
-                const alpha=(x,y)=>data[4*(y*cv.width+x)+3];
-                const result={outside:alpha(10,10),insideBounds:alpha(210,115),rightOutside:alpha(620,350)};bitmap.close();return result;
-              });
-              if(selectionMaskOutside.outside!==0||selectionMaskOutside.rightOutside!==0)throw Error('Fill leaked outside selection '+JSON.stringify(selectionMaskOutside));
-              await page.locator('#demoUndo').click();
-              if(await page.locator('#demoAnnotationLayer > image').count()!==0)throw Error('Undo did not remove Paint Bucket flood-fill');
-              // Draw a closed rectangle over the photo and verify max-tolerance fill
-              // stops at the user's actual drawn outline rather than crossing into the background.
+              if(await page.locator('#demoFillSettings').isHidden())throw Error('Fill controls not visible');
+              if(await page.locator('#demoFillTolerance').count())throw Error('Image color-tolerance control should not exist');
+              await page.locator('#demoStage').scrollIntoViewIfNeeded();
+              let stage=await page.locator('#demoStage').boundingBox();
+              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.5),y:Math.round(stage.height*.49)}});
+              if(await page.locator('#demoAnnotationLayer > image').count())throw Error('Background image caused a flood fill without an enclosed drawing');
+              if(!(await page.locator('#demoHint').innerText()).includes('No enclosed drawing'))throw Error('No-boundary feedback missing');
+              // Draw a closed rectangle, then fill only its interior.
               await page.locator('[data-tool=rect]').click();
               await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              const box=await page.locator('#demoStage').boundingBox();
-              await page.mouse.move(box.x+box.width*.38,box.y+box.height*.34);
+              stage=await page.locator('#demoStage').boundingBox();
+              await page.mouse.move(stage.x+stage.width*.38,stage.y+stage.height*.34);
               await page.mouse.down();
-              await page.mouse.move(box.x+box.width*.62,box.y+box.height*.63,{steps:5});
+              await page.mouse.move(stage.x+stage.width*.62,stage.y+stage.height*.63,{steps:6});
               await page.mouse.up();
               if(await page.locator('#demoAnnotationLayer > rect').count()!==1)throw Error('Closed rectangle not drawn');
+              if(await page.locator('#demoAnnotationLayer').getAttribute('clip-path')!=='url(#demoSelectionClip)')throw Error('Annotation selection clipping is missing');
               await page.locator('[data-tool=fill]').click();
-              await page.locator('#demoFillTolerance').evaluate(el=>{el.value='255';el.dispatchEvent(new Event('input',{bubbles:true}))});
               await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              const center=await page.locator('#demoStage').boundingBox();
-              await page.locator('#demoStage').click({position:{x:Math.round(center.width*.5),y:Math.round(center.height*.49)}});
-              if(await page.locator('#demoAnnotationLayer > image').count()!==1)throw Error('Flood fill failed inside a user-drawn rectangle');
+              stage=await page.locator('#demoStage').boundingBox();
+              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.5),y:Math.round(stage.height*.49)}});
+              if(await page.locator('#demoAnnotationLayer > image').count()!==1)throw Error('Paint Bucket failed to fill closed user-drawn shape');
+              const firstMask=await page.locator('#demoAnnotationLayer > image').getAttribute('href');
+              if(!firstMask?.startsWith('data:image/png;base64,'))throw Error('Paint Bucket is not producing a raster fill mask');
               const containment=await page.evaluate(async()=>{
                 const el=document.querySelector('#demoAnnotationLayer > image'),bitmap=await createImageBitmap(await (await fetch(el.getAttribute('href'))).blob());
                 const cv=document.createElement('canvas');cv.width=bitmap.width;cv.height=bitmap.height;
@@ -159,10 +129,20 @@ jobs:
                 const result={inside:at(.5,.49),outsideDrawing:at(.72,.49),outsideSelection:at(.05,.05)};
                 bitmap.close();return result;
               });
-              if(containment.inside<100||containment.outsideDrawing!==0||containment.outsideSelection!==0)throw Error('User-drawn rectangle is not a flood-fill boundary '+JSON.stringify(containment));
+              if(containment.inside<100||containment.outsideDrawing!==0||containment.outsideSelection!==0)throw Error('Fill not bounded by user drawing '+JSON.stringify(containment));
+              // Change the photo pixels radically; the annotation-only fill must be IDENTICAL.
               await page.locator('#demoUndo').click();
-              await page.locator('#demoUndo').click();
-              // Selection resizing must immediately update the clip path.
+              await page.locator('#demoStage img').evaluate(el=>{
+                el.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="750" height="408"><rect width="750" height="408" fill="red"/></svg>');
+              });
+              await page.locator('#demoStage').scrollIntoViewIfNeeded();
+              stage=await page.locator('#demoStage').boundingBox();
+              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.5),y:Math.round(stage.height*.49)}});
+              const secondMask=await page.locator('#demoAnnotationLayer > image').getAttribute('href');
+              if(firstMask!==secondMask)throw Error('Fill result depends on underlying background image');
+              // Undo, then ensure selection changes clip subsequent edits.
+              await page.locator('#demoUndo').click();await page.locator('#demoUndo').click();
+              if(await page.locator('#demoAnnotationLayer > rect').count()||await page.locator('#demoAnnotationLayer > image').count())throw Error('Undo left annotation artifacts');
               await page.locator('[data-tool=select]').click();
               await page.locator('#demoStage').scrollIntoViewIfNeeded();
               const selBox=await page.locator('#demoStage').boundingBox();
@@ -173,8 +153,7 @@ jobs:
                 return {clipX:rect.getAttribute('x'),visualX:frame.getAttribute('x'),clipW:rect.getAttribute('width'),visualW:frame.getAttribute('width')};
               });
               if(clipState.clipX!==clipState.visualX||clipState.clipW!==clipState.visualW)throw Error('Selection clip did not follow resized selection '+JSON.stringify(clipState));
-              await page.locator('[data-tool=select]').click();
-              if(!(await page.locator('#demoFillSettings').isHidden()))throw Error('Fill controls remain visible after selecting another tool');
+              if(!(await page.locator('#demoFillSettings').isHidden()))throw Error('Fill controls remain visible after selecting a different tool');
               await page.locator('#refreshReleases').click();
               await page.waitForTimeout(200);
               if(!(await page.locator('#releaseList').innerText()).includes('v0.1.2'))throw Error('Live release list missing');
