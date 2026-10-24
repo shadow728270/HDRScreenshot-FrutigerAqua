@@ -51,7 +51,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Exercise desktop, mobile and interactive features
         run: |
-          cat > /tmp/prismwake-smoke.mjs <<'JS'
+          cat > prismwake-smoke.mjs <<'JS'
           import {chromium} from 'playwright';
           import {spawn} from 'node:child_process';
           import fs from 'node:fs';
@@ -93,7 +93,8 @@ jobs:
             }
           }finally{await browser.close();server.kill();}
           JS
-          node /tmp/prismwake-smoke.mjs
+          node prismwake-smoke.mjs
+          rm -f prismwake-smoke.mjs
       - name: Upload visual captures
         if: always()
         uses: actions/upload-artifact@v4
