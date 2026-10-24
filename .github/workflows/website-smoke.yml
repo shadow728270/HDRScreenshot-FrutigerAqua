@@ -75,6 +75,7 @@ jobs:
               if(await page.locator('#themeMotion').count())throw Error('Unnecessary animation selector still exists');
               const scene=await page.locator('#demoStage img').evaluate(el=>({url:el.getAttribute('src'),loaded:el.complete&&el.naturalWidth>0}));
               if(!scene.url.endsWith('/demo-landscape.webp')||!scene.loaded)throw Error('New clean demo artwork not loaded: '+JSON.stringify(scene));
+              await page.locator('#compare').scrollIntoViewIfNeeded();
               const comparisonBounds=await page.locator('#compare').boundingBox();
               await page.mouse.move(comparisonBounds.x+comparisonBounds.width*.48,comparisonBounds.y+comparisonBounds.height*.5);
               await page.mouse.down();
