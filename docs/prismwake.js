@@ -85,7 +85,7 @@
    element.setAttribute("href",overlay.toDataURL("image/png"));
    // Keep the dashed capture selection and all subsequent annotations visible.
    svg.insertBefore(element,selection);keep(element);
-   hint.textContent="Filled "+filled.toLocaleString()+" connected pixels · Ctrl-free undo ↶";
+   hint.textContent="Filled "+filled.toLocaleString()+" connected pixels · use ↶ to undo";
  }
  stage.addEventListener("pointerdown",e=>{
    if(e.pointerType==="mouse"&&e.button!==0)return;
