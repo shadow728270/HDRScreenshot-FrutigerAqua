@@ -28,7 +28,8 @@
    feedback.textContent="Illustrative simulation shown. Upload both genuine files to compare actual outputs.";positionSplit(50);
  });
  let draggingSplit=false;
- compare.addEventListener("pointerdown",event=>{if(event.button!==0&&event.pointerType==="mouse")return;draggingSplit=true;compare.setPointerCapture(event.pointerId);setSplitFromPointer(event)});
+ compare.addEventListener("pointerdown",event=>{if(event.button!==0&&event.pointerType==="mouse")return;event.preventDefault();draggingSplit=true;compare.setPointerCapture(event.pointerId);setSplitFromPointer(event)});
+ compare.addEventListener("dragstart",event=>event.preventDefault());
  compare.addEventListener("pointermove",event=>{if(draggingSplit)setSplitFromPointer(event)});
  function setSplitFromPointer(e){const rect=compare.getBoundingClientRect();positionSplit((e.clientX-rect.left)/rect.width*100)}
  ["pointerup","pointercancel","lostpointercapture"].forEach(t=>compare.addEventListener(t,()=>draggingSplit=false));
@@ -73,13 +74,12 @@
  reset.addEventListener("click",()=>{history.forEach(x=>x.remove());history=[];undo.disabled=true;selection.setAttribute("x","155");selection.setAttribute("y","112");selection.setAttribute("width","670");selection.setAttribute("height","372");selectTool("select")});
  selectTool("select");
 
- const themes=[...document.querySelectorAll("[data-theme-choice]")],preview=$("themePreview"),opacity=$("themeOpacity"),opacityValue=$("opacityValue"),motion=$("themeMotion"),themeName=$("themeName");
+ const themes=[...document.querySelectorAll("[data-theme-choice]")],preview=$("themePreview"),opacity=$("themeOpacity"),opacityValue=$("opacityValue"),themeName=$("themeName");
  const names={ocean:"Ocean Current",emerald:"Emerald Glass",coral:"Sunset Coral",vista:"Vista Sapphire"};
  function applyTheme(name){preview.dataset.theme=name;themeName.textContent=names[name]||names.ocean;themes.forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.themeChoice===name)))}
  themes.forEach(b=>b.addEventListener("click",()=>applyTheme(b.dataset.themeChoice)));
  opacity.addEventListener("input",()=>{preview.style.setProperty("--glass-opacity",(+opacity.value/100).toFixed(2));opacityValue.textContent=opacity.value+"%"});
- motion.addEventListener("change",()=>preview.dataset.motion=motion.value);
- applyTheme("ocean");preview.dataset.motion="off";
+ applyTheme("ocean");
 
  const releases=$("releaseList"),releaseState=$("releaseState"),refresh=$("refreshReleases"),repoLink="https://github.com/"+repo+"/releases";
  let didLoad=false;
