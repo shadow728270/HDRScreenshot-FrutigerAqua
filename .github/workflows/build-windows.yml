@@ -3,6 +3,11 @@ name: Build & Release Windows Executable
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'HDRSnipFusion.py'
+      - 'requirements.txt'
+      - '.github/workflows/build-windows.yml'
+      - 'RELEASE_NOTES_v*.md'
     tags:
       - 'v*.*.*'
   pull_request:
