@@ -16,7 +16,7 @@
  compare.addEventListener("keydown",event=>{if(event.key==="ArrowLeft"||event.key==="ArrowRight"){event.preventDefault();positionSplit(+range.value+(event.key==="ArrowLeft"?-3:3))}});
 
  const stage=$("demoStage"),svg=$("demoSvg"),hint=$("demoHint"),tools=[...document.querySelectorAll("[data-tool]")],undo=$("demoUndo"),reset=$("demoReset");
- const sourcePhoto=stage.querySelector("img"),fillSettings=$("demoFillSettings"),fillTolerance=$("demoFillTolerance"),fillToleranceValue=$("demoToleranceValue"),fillColor=$("demoFillColor");
+ const fillSettings=$("demoFillSettings"),fillColor=$("demoFillColor");
  const NS="http://www.w3.org/2000/svg";let currentTool="select",isDrawing=false,start=null,temp=null,history=[];
  function coord(e){const r=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1000,(e.clientX-r.left)/r.width*1000)),y:Math.max(0,Math.min(615,(e.clientY-r.top)/r.height*615))}}
  function make(tag,props){const el=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(props))el.setAttribute(k,String(v));return el}
@@ -36,7 +36,7 @@
 
  function selectTool(t){currentTool=t;tools.forEach(el=>el.setAttribute("aria-pressed",String(el.dataset.tool===t)));fillSettings.hidden=t!=="fill";hint.textContent=({
   select:"Drag to choose a capture region",pen:"Drag to draw a line",rect:"Drag to draw a rectangle",
-  arrow:"Drag to draw an arrow",fill:"Click a color region to flood fill its connected pixels",text:"Tap to add a label"
+  arrow:"Drag to draw an arrow",fill:"Click inside a closed shape to fill it. Background colors are ignored.",text:"Tap to add a label"
  })[t]}
  tools.forEach(btn=>btn.addEventListener("click",()=>selectTool(btn.dataset.tool)));
  function keep(el){history.push(el);undo.disabled=false}
@@ -45,43 +45,20 @@
    if(t==="select"||t==="rect"){el.setAttribute("x",Math.min(a.x,b.x));el.setAttribute("y",Math.min(a.y,b.y));el.setAttribute("width",Math.abs(dx));el.setAttribute("height",Math.abs(dy));if(t==="select")syncSelectionClip()}
    if(t==="arrow"){el.setAttribute("x1",a.x);el.setAttribute("y1",a.y);el.setAttribute("x2",b.x);el.setAttribute("y2",b.y)}
  }
- // Rasterize the *displayed* cover-cropped image once; no idle processing or animation.
- // Both the background and already-drawn annotations participate in the fill; undo remains non-destructive.
+ // The demo is an annotation-only paint bucket, NOT a photo color-replacement tool.
+ // Background photo pixels must never enter the flood-fill calculation.
+ // We rasterize drawn outline geometry into an opaque boundary mask on demand.
  const FILL_W=640,FILL_H=394,VIEW_W=1000,VIEW_H=615;
- let sampledPixels=null;
- function sampleDemoPixels(){
-   if(sampledPixels)return sampledPixels;
-   if(!sourcePhoto.complete||!sourcePhoto.naturalWidth)return null;
-   const surface=document.createElement("canvas");surface.width=FILL_W;surface.height=FILL_H;
-   const context=surface.getContext("2d",{willReadFrequently:true});if(!context)return null;
-   const scale=Math.max(FILL_W/sourcePhoto.naturalWidth,FILL_H/sourcePhoto.naturalHeight);
-   const rw=sourcePhoto.naturalWidth*scale,rh=sourcePhoto.naturalHeight*scale;
-   context.drawImage(sourcePhoto,(FILL_W-rw)/2,(FILL_H-rh)/2,rw,rh);
-   try {sampledPixels=context.getImageData(0,0,FILL_W,FILL_H).data}
-   catch(_err){return null}
-   return sampledPixels;
- }
- fillTolerance.addEventListener("input",()=>{fillToleranceValue.textContent=fillTolerance.value});
 
- // Render existing annotations against the photo before deciding which pixels are connected.
- // A separate solid stroke mask ensures drawn outlines form reliable fill barriers even
- // when a high tolerance would otherwise match their colors.
- function renderAnnotation(ctx,el,asBarrier=false){
-   if(el.tagName.toLowerCase()==="image"){
-     if(!asBarrier&&el._fillCanvas)ctx.drawImage(el._fillCanvas,0,0,VIEW_W,VIEW_H);
-     return;
-   }
-   ctx.save();
-   ctx.lineWidth=5;ctx.lineCap="round";ctx.lineJoin="round";
-   ctx.strokeStyle=asBarrier?"#fff":(el.getAttribute("stroke")||"#5affd7");
-   ctx.fillStyle=asBarrier?"#fff":(el.getAttribute("fill")||"#fbfff7");
+ function drawAnnotationBoundary(ctx,el){
    const tag=el.tagName.toLowerCase();
+   if(tag==="image")return; // Earlier fills are colored overlays, not walls.
+   ctx.save();ctx.lineWidth=7;ctx.lineCap="round";ctx.lineJoin="round";
+   ctx.strokeStyle="#fff";ctx.fillStyle="#fff";
    if(tag==="rect"){
-     const x=+el.getAttribute("x"),y=+el.getAttribute("y"),w=+el.getAttribute("width"),h=+el.getAttribute("height");
-     ctx.beginPath();
-     if(ctx.roundRect)ctx.roundRect(x,y,w,h,Math.min(4,w/2,h/2));
-     else ctx.rect(x,y,w,h);
-     ctx.stroke();
+     const x=+el.getAttribute("x"),y=+el.getAttribute("y"),
+           w=+el.getAttribute("width"),h=+el.getAttribute("height");
+     if(w>0&&h>0){ctx.beginPath();ctx.rect(x,y,w,h);ctx.stroke()}
    }else if(tag==="polyline"){
      const pts=(el.getAttribute("points")||"").trim().split(/[,\s]+/).map(Number);
      if(pts.length>=2){ctx.beginPath();ctx.moveTo(pts[0],pts[1]);for(let i=2;i+1<pts.length;i+=2)ctx.lineTo(pts[i],pts[i+1]);ctx.stroke()}
@@ -95,80 +72,68 @@
      ctx.closePath();ctx.fill();
    }else if(tag==="text"){
      ctx.font='800 33px "Segoe UI",sans-serif';ctx.textBaseline="alphabetic";
-     const x=+el.getAttribute("x"),y=+el.getAttribute("y");
-     ctx.fillText(el.textContent||"",x,y);
-     if(!asBarrier){ctx.lineWidth=1;ctx.strokeStyle="#04476d";ctx.strokeText(el.textContent||"",x,y)}
+     ctx.fillText(el.textContent||"",+el.getAttribute("x"),+el.getAttribute("y"));
    }
    ctx.restore();
  }
- function composeForFill(basePixels){
-   const frame=document.createElement("canvas");frame.width=FILL_W;frame.height=FILL_H;
-   const barrierCanvas=document.createElement("canvas");barrierCanvas.width=FILL_W;barrierCanvas.height=FILL_H;
-   const context=frame.getContext("2d",{willReadFrequently:true});
-   const maskContext=barrierCanvas.getContext("2d",{willReadFrequently:true});
-   if(!context||!maskContext)return null;
-   const img=context.createImageData(FILL_W,FILL_H);img.data.set(basePixels);context.putImageData(img,0,0);
+ function drawingBoundaryMask(){
+   const canvas=document.createElement("canvas");canvas.width=FILL_W;canvas.height=FILL_H;
+   const ctx=canvas.getContext("2d",{willReadFrequently:true});if(!ctx)return null;
    const b=selectionBounds();
-   for(const ctx of [context,maskContext]){
-     ctx.setTransform(FILL_W/VIEW_W,0,0,FILL_H/VIEW_H,0,0);
-     ctx.beginPath();
-     if(ctx.roundRect)ctx.roundRect(b.x,b.y,b.width,b.height,Math.min(10,b.width/2,b.height/2));
-     else ctx.rect(b.x,b.y,b.width,b.height);
-     ctx.clip();
-   }
-   for(const el of annotationLayer.children){
-     renderAnnotation(context,el);
-     renderAnnotation(maskContext,el,true);
-   }
-   return {colors:context.getImageData(0,0,FILL_W,FILL_H).data,
-           barrier:maskContext.getImageData(0,0,FILL_W,FILL_H).data};
+   ctx.scale(FILL_W/VIEW_W,FILL_H/VIEW_H);
+   ctx.beginPath();ctx.rect(b.x,b.y,b.width,b.height);ctx.clip();
+   for(const el of annotationLayer.children)drawAnnotationBoundary(ctx,el);
+   return ctx.getImageData(0,0,FILL_W,FILL_H).data;
  }
- fillTolerance.addEventListener("input",()=>{fillToleranceValue.textContent=fillTolerance.value});
  function floodFillAt(point){
-   if(!withinSelection(point)){hint.textContent="Fill only works inside your selected region.";return}
-   const original=sampleDemoPixels();
-   if(!original){hint.textContent="The demo image is still loading. Try again.";return}
-   const composite=composeForFill(original);
-   if(!composite){hint.textContent="Couldn't prepare the image for filling.";return}
-   const {colors:source,barrier}=composite;
-   const w=FILL_W,h=FILL_H,total=w*h,b=selectionBounds();
+   if(!withinSelection(point)){hint.textContent="Draw and fill shapes inside your selected region.";return}
+   const barrier=drawingBoundaryMask();
+   if(!barrier){hint.textContent="Can't initialize the fill tool.";return}
+   const w=FILL_W,h=FILL_H,b=selectionBounds();
    const minX=Math.max(0,Math.floor(b.x/VIEW_W*w));
    const maxX=Math.min(w-1,Math.ceil((b.x+b.width)/VIEW_W*w)-1);
    const minY=Math.max(0,Math.floor(b.y/VIEW_H*h));
    const maxY=Math.min(h-1,Math.ceil((b.y+b.height)/VIEW_H*h)-1);
    const sx=Math.min(w-1,Math.max(0,Math.floor(point.x/VIEW_W*w)));
    const sy=Math.min(h-1,Math.max(0,Math.floor(point.y/VIEW_H*h)));
-   const seed=sy*w+sx,off=seed*4;
-   if(sx<minX||sx>maxX||sy<minY||sy>maxY||barrier[off+3]>40){
-     hint.textContent="Click an unpainted area inside the selection, not on a drawn line.";return;
+   const seed=sy*w+sx;
+   if(sx<minX||sx>maxX||sy<minY||sy>maxY||barrier[seed*4+3]>30){
+     hint.textContent="Click inside an enclosed drawing, not directly on its outline.";return;
    }
-   const sr=source[off],sg=source[off+1],sb=source[off+2],t=+fillTolerance.value;
-   const thresholdSq=3*t*t;
-   const seen=new Uint8Array(total),stack=new Int32Array(total),result=new Uint8ClampedArray(total*4);
-   let top=0,filled=0;
+   const seen=new Uint8Array(w*h),stack=new Int32Array(w*h);
+   const region=new Uint8Array(w*h);
+   let top=0,filled=0,escaped=false;
    seen[seed]=1;stack[top++]=seed;
-   const hex=fillColor.value,fr=parseInt(hex.slice(1,3),16),fg=parseInt(hex.slice(3,5),16),fb=parseInt(hex.slice(5,7),16);
+   // Connectivity depends exclusively on the drawn opaque barriers.
+   // If the area reaches the selection border, it isn't a closed shape: do NOT paint it.
    while(top>0){
      const index=stack[--top],i=index*4,x=index%w,y=(index/w)|0;
-     if(barrier[i+3]>40)continue;
-     const dr=source[i]-sr,dg=source[i+1]-sg,db=source[i+2]-sb;
-     if(dr*dr+dg*dg+db*db>thresholdSq)continue;
-     result[i]=fr;result[i+1]=fg;result[i+2]=fb;result[i+3]=174;filled++;
+     if(barrier[i+3]>30)continue;
+     if(x<=minX||x>=maxX||y<=minY||y>=maxY){escaped=true;break}
+     region[index]=1;filled++;
      let next;
      if(x>minX){next=index-1;if(!seen[next]){seen[next]=1;stack[top++]=next}}
      if(x<maxX){next=index+1;if(!seen[next]){seen[next]=1;stack[top++]=next}}
      if(y>minY){next=index-w;if(!seen[next]){seen[next]=1;stack[top++]=next}}
      if(y<maxY){next=index+w;if(!seen[next]){seen[next]=1;stack[top++]=next}}
    }
-   if(!filled){hint.textContent="No matching pixels. Adjust the fill tolerance.";return}
+   if(escaped||!filled){
+     hint.textContent="No enclosed drawing here. Draw a closed rectangle or loop first.";return;
+   }
+   const hex=fillColor.value,fr=parseInt(hex.slice(1,3),16),fg=parseInt(hex.slice(3,5),16),fb=parseInt(hex.slice(5,7),16);
    const overlay=document.createElement("canvas");overlay.width=w;overlay.height=h;
    const ctx=overlay.getContext("2d");if(!ctx)return;
-   const data=ctx.createImageData(w,h);data.data.set(result);ctx.putImageData(data,0,0);
+   const data=ctx.createImageData(w,h);
+   for(let i=0;i<w*h;i++){if(region[i]){const j=i*4;data.data[j]=fr;data.data[j+1]=fg;data.data[j+2]=fb;data.data[j+3]=174}}
+   ctx.putImageData(data,0,0);
    const element=make("image",{x:0,y:0,width:VIEW_W,height:VIEW_H,preserveAspectRatio:"none"});
    element._fillCanvas=overlay;
    element.setAttribute("href",overlay.toDataURL("image/png"));
-   annotationLayer.appendChild(element);keep(element);
-   hint.textContent="Filled "+filled.toLocaleString()+" connected pixels within the selection · ↶ to undo";
+   // Keep the fill beneath all drawn outlines, while later fills can replace earlier ones.
+   const firstOutline=[...annotationLayer.children].find(el=>el.tagName.toLowerCase()!=="image");
+   annotationLayer.insertBefore(element,firstOutline||null);
+   keep(element);
+   hint.textContent="Filled enclosed drawing · "+filled.toLocaleString()+" pixels · ↶ to undo";
  }
  stage.addEventListener("pointerdown",e=>{
    if(e.pointerType==="mouse"&&e.button!==0)return;
