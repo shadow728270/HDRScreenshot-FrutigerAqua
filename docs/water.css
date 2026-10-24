@@ -1,0 +1,34 @@
+/* HDRSnip Fusion Aqua Lagoon: decorative glass and interactive water. */
+body{background:radial-gradient(ellipse at 55% -13%,rgba(38,210,247,.48),transparent 58%),radial-gradient(ellipse at 99% 47%,rgba(21,166,231,.30),transparent 40%),linear-gradient(170deg,#042b50 0%,#075984 38%,#043455 75%,#031e39 100%);background-attachment:scroll}
+#water-light{opacity:.5}
+.wrap{max-width:1190px}
+.nav{background:linear-gradient(180deg,rgba(227,255,255,.32),rgba(28,123,165,.43) 33%,rgba(7,48,102,.74) 100%);border-color:rgba(255,255,255,.67);box-shadow:inset 0 2px rgba(255,255,255,.72),inset 0 -3px 8px rgba(0,25,79,.23),0 15px 35px rgba(0,25,59,.28)}
+.hero{background:radial-gradient(ellipse at 79% 4%,rgba(186,255,255,.45),transparent 48%),radial-gradient(ellipse at 15% 92%,rgba(47,240,246,.25),transparent 55%),linear-gradient(125deg,rgba(3,97,152,.71),rgba(3,57,117,.76) 70%,rgba(5,120,145,.59));box-shadow:inset 0 3px rgba(255,255,255,.58),inset 0 -15px 50px rgba(0,22,68,.21),0 24px 65px rgba(0,12,42,.25)}
+.orb{filter:saturate(1.25);box-shadow:inset 0 15px 28px rgba(255,255,255,.50),inset -23px -34px 40px rgba(0,18,89,.47),0 0 0 1px rgba(224,255,255,.9),0 0 0 12px rgba(135,249,252,.09),0 0 110px rgba(40,222,255,.45)}
+.panel{background:linear-gradient(145deg,rgba(190,255,255,.22),rgba(18,108,164,.48) 37%,rgba(2,48,96,.63));border-color:rgba(224,255,255,.43)}
+.water-stage{padding:22px 0 57px;scroll-margin-top:105px}
+.water-stage .stage-heading{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:18px;margin-bottom:20px}
+.water-stage .stage-heading h2{margin:0 0 8px;font-size:clamp(2rem,4vw,3.1rem);letter-spacing:-.048em}
+.water-stage .stage-heading p{color:#dbf5fc;max-width:680px;margin:0;font-size:1rem}
+.lagoon-shell{position:relative;isolation:isolate;overflow:hidden;border-radius:33px;border:2px solid rgba(226,255,255,.73);padding:10px;background:linear-gradient(155deg,rgba(220,255,255,.42),rgba(45,172,213,.16) 48%,rgba(3,41,94,.7));box-shadow:inset 0 2px 0 rgba(255,255,255,.77),inset 0 -3px 17px rgba(0,40,100,.38),0 25px 57px rgba(0,18,54,.34),0 0 65px rgba(13,231,255,.13)}
+.lagoon-shell::before{position:absolute;content:"";z-index:4;pointer-events:none;inset:10px 13px auto;height:42%;border-radius:26px 26px 70% 70%;background:linear-gradient(180deg,rgba(253,255,255,.16),transparent);mix-blend-mode:screen}
+.lagoon-screen{position:relative;overflow:hidden;border-radius:24px;height:clamp(340px,38vw,500px);background:linear-gradient(155deg,#adeaff,#15b4db 31%,#0072ae 55%,#023d76);cursor:crosshair;touch-action:none;user-select:none;-webkit-user-select:none}
+#lagoon-canvas{display:block;width:100%;height:100%;outline:none}
+.lagoon-screen:after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 45% 50%,transparent 37%,rgba(0,17,64,.24) 100%);box-shadow:inset 0 0 42px rgba(213,255,255,.30),inset 0 -65px 70px rgba(0,34,98,.35);border-radius:inherit}
+.lagoon-badge{position:absolute;pointer-events:none;z-index:3;display:inline-flex;align-items:center;gap:8px;left:25px;top:22px;padding:9px 15px;border-radius:99px;border:1px solid rgba(238,255,255,.74);color:#f4ffff;font-weight:750;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;background:linear-gradient(180deg,rgba(249,255,255,.35),rgba(11,83,144,.44) 53%,rgba(1,57,105,.55));box-shadow:inset 0 1px rgba(255,255,255,.61),0 4px 20px rgba(0,28,80,.23);backdrop-filter:blur(8px)}
+.lagoon-badge:before{content:"";width:9px;height:9px;border-radius:50%;background:#cdfff0;box-shadow:0 0 12px #9cffed}
+.lagoon-tip{position:absolute;z-index:3;pointer-events:none;bottom:20px;left:23px;right:23px;text-align:center;max-width:max-content;margin:auto;padding:10px 21px;color:#f5ffff;font-weight:650;font-size:.96rem;text-shadow:0 1px 6px rgba(0,44,90,.8);background:rgba(2,62,117,.42);border:1px solid rgba(243,255,255,.55);border-radius:999px;box-shadow:inset 0 1px rgba(255,255,255,.22);backdrop-filter:blur(12px);transition:opacity .6s,transform .6s}
+.lagoon-tip.is-used{opacity:.35;transform:translateY(6px)}
+.lagoon-rim{position:absolute;pointer-events:none;z-index:2;inset:0;border:1px solid rgba(209,255,255,.43);border-radius:24px}
+.lagoon-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:17px 0 0;justify-content:space-between}
+.lagoon-status{display:flex;align-items:center;gap:10px;font-size:.88rem;color:#d5f4fa;font-weight:650}
+.lagoon-status:before{content:"";width:9px;height:9px;border-radius:50%;background:#75fbff;box-shadow:0 0 15px rgba(94,252,255,.8)}
+.lagoon-buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.lagoon-btn{font:700 .86rem/1.2 "Segoe UI",system-ui,sans-serif;white-space:nowrap;color:#eaffff;border:1px solid rgba(224,255,255,.5);border-radius:14px;cursor:pointer;padding:11px 15px;background:linear-gradient(180deg,rgba(160,251,254,.28),rgba(4,60,119,.60));box-shadow:inset 0 2px rgba(255,255,255,.27),0 5px 15px rgba(0,19,54,.18);transition:transform .18s,filter .18s}
+.lagoon-btn:hover{transform:translateY(-2px);filter:brightness(1.15)}
+.lagoon-btn:active{transform:translateY(1px)}
+.lagoon-btn:focus-visible{outline:3px solid #c6fff6;outline-offset:3px}
+.lagoon-btn.is-active{background:linear-gradient(180deg,#ddffff 0%,#87f0ff 44%,#11a7d1 100%);color:#063e69;border-color:#e8ffff;text-shadow:0 1px rgba(255,255,255,.5)}
+.water-stage .water-footnote{font-size:.78rem;color:#b1dce7;margin:12px 4px 0}
+@media(max-width:760px){.water-stage{padding:12px 0 30px}.lagoon-shell{border-radius:22px;padding:7px}.lagoon-screen{height:310px;border-radius:15px}.lagoon-tip{left:12px;right:12px;bottom:13px;font-size:.78rem;padding:8px 10px}.lagoon-badge{left:12px;top:12px;padding:8px 11px;font-size:.67rem}.lagoon-buttons{width:100%}.lagoon-btn{flex:1;text-align:center;padding:10px}.lagoon-screen:after{border-radius:15px}}
+@media(prefers-reduced-motion:reduce){.lagoon-tip{transition:none}}
