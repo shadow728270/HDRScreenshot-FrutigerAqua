@@ -439,7 +439,12 @@ jobs:
             "$sha256  HDRSnipFusion.exe",
             "```"
           )
-          $notesLines -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
+          $customNotes = "RELEASE_NOTES_$tag.md"
+          if (Test-Path -LiteralPath $customNotes) {
+            Copy-Item -LiteralPath $customNotes -Destination $notesFile -Force
+          } else {
+            $notesLines -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
+          }
 
           # Native CLI commands do not throw on nonzero exit by default in PowerShell.
           # Check $LASTEXITCODE explicitly rather than relying on try/catch.

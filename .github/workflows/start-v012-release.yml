@@ -1,0 +1,31 @@
+name: Start approved v0.1.2 release build
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/start-v012-release.yml'
+permissions:
+  contents: write
+  actions: write
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag source and run published Windows build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^APP_VERSION: str = "0.1.2"$' HDRSnipFusion.py
+          test -s RELEASE_NOTES_v0.1.2.md
+          if git ls-remote --tags origin refs/tags/v0.1.2 | grep -q v0.1.2; then
+            echo 'Version already tagged; refusing to change it'; exit 1
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' tag -a v0.1.2 -m 'HDRSnip Fusion v0.1.2'
+          git push origin refs/tags/v0.1.2
+          gh workflow run build-windows.yml --ref v0.1.2 --repo "$GITHUB_REPOSITORY"
+          echo 'Tagged release build started.'
