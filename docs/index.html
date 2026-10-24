@@ -117,43 +117,44 @@
           <article class="lab-card" aria-labelledby="compare-title">
             <span class="lab-label">01 / COMPARE</span>
             <h3 id="compare-title">See the difference.</h3>
-            <p>Drag the divider, or load two screenshots of the same scene for a genuine, side-by-side HDR comparison.</p>
+            <p>Drag the divider to preview how clipped highlights can change a capture. This is a visual simulation, not a measured comparison.</p>
             <div class="compare" id="compare" data-real="false" tabindex="0" role="group" aria-label="Comparison preview. Drag, or use the comparison slider below." style="--split:50%">
               <img id="compareRight" draggable="false" src="assets/hdrsnip-capture-overlay.webp" alt="Actual Aqua capture interface screenshot showing original image" width="1600" height="757">
               <div class="compare-top"><img id="compareLeft" draggable="false" src="assets/hdrsnip-capture-overlay.webp" alt="" width="1600" height="757"></div>
               <span class="compare-badge left" id="compareLabelLeft">Simulated blown-out capture</span>
-              <span class="compare-badge right" id="compareLabelRight">Original Prismwake-era capture</span>
+              <span class="compare-badge right" id="compareLabelRight">Original screenshot</span>
               <span class="compare-line" aria-hidden="true"></span>
             </div>
             <label class="compare-help" for="compareRange">Move comparison divider</label>
             <input class="compare-range" id="compareRange" type="range" min="0" max="100" value="50" aria-label="Move before and after comparison divider">
-            <p class="compare-help" id="compareFeedback">The default is an illustrative simulation, not a genuine SDR reference. To compare real output, select two captures below.</p>
-            <div class="compare-uploads">
-              <label>Conventional screenshot<input id="realConventional" type="file" accept="image/png,image/jpeg,image/webp"></label>
-              <label>Prismwake capture<input id="realPrismwake" type="file" accept="image/png,image/jpeg,image/webp"></label>
-            </div>
+            <p class="compare-help">Illustrative overexposure effect only, not a measured HDR-versus-SDR comparison.</p>
             <button class="tool" type="button" id="compareReset" style="margin-top:10px">Reset preview</button>
           </article>
           <article class="lab-card" aria-labelledby="demo-title">
             <span class="lab-label">02 / EXPERIENCE</span>
             <h3 id="demo-title">Try a mini screenshot editor.</h3>
-            <p>Drag a region, draw a mark, add an arrow, or place a fill. This browser-only sandbox isn't the actual desktop capture engine.</p>
+            <p>Drag a region, draw a mark, add an arrow, or use the Paint Bucket to fill connected areas of the image. This interactive demo runs entirely in your browser.</p>
             <div class="toolbar" role="toolbar" aria-label="Interactive screenshot demo annotation tools">
               <button type="button" class="tool" data-tool="select" aria-pressed="true">▣ Select</button>
               <button type="button" class="tool" data-tool="pen" aria-pressed="false">✎ Pen</button>
               <button type="button" class="tool" data-tool="rect" aria-pressed="false">▢ Rect</button>
               <button type="button" class="tool" data-tool="arrow" aria-pressed="false">↗ Arrow</button>
-              <button type="button" class="tool" data-tool="fill" aria-pressed="false">◉ Fill</button>
+              <button type="button" class="tool" data-tool="fill" aria-pressed="false" title="Paint Bucket: fill connected pixels">◉ Fill</button>
               <button type="button" class="tool" data-tool="text" aria-pressed="false">T Text</button>
               <button type="button" class="tool" id="demoUndo" disabled>↶</button>
               <button type="button" class="tool" id="demoReset">Reset</button>
+            </div>
+            <div class="demo-fill-settings" id="demoFillSettings" hidden>
+              <label for="demoFillTolerance">Tolerance <output id="demoToleranceValue" for="demoFillTolerance">48</output></label>
+              <input id="demoFillTolerance" type="range" min="0" max="120" value="48" aria-label="Paint Bucket color tolerance">
+              <label for="demoFillColor">Color</label><input id="demoFillColor" type="color" value="#35f2c8" aria-label="Paint Bucket fill color">
             </div>
             <div class="demo-stage" id="demoStage" aria-label="Interactive capture editor demo; use the toolbar then drag or tap inside">
               <img src="assets/demo-landscape.webp" alt="Clear Frutiger Aqua waterscape with grass, sparkling water, clouds, bubbles and colorful glass architecture, used as the interactive editor canvas" width="750" height="408" draggable="false">
               <svg id="demoSvg" class="demo-svg" viewBox="0 0 1000 615" preserveAspectRatio="none" aria-hidden="true"></svg>
               <span class="demo-hint" id="demoHint">Drag to choose a capture region</span>
             </div>
-            <p class="demo-note">Local interaction only. No screenshots are transmitted anywhere.</p>
+            <p class="demo-note">Paint Bucket uses contiguous pixel-color matching, with adjustable tolerance and undo. The image stays local, and no screenshots are uploaded.</p>
           </article>
           <article class="lab-card" aria-labelledby="theme-title">
             <span class="lab-label">03 / CUSTOMIZE</span>
@@ -212,7 +213,7 @@
         <details><summary>Does the app capture native HDR image files?</summary><p>It uses HDR-aware DXGI capture and converts the captured data into tone-mapped SDR PNGs. True HDR file export is a future idea, not a current feature.</p></details>
         <details><summary>Is Prismwake free, and is its source available?</summary><p>Yes. It is MIT licensed and free. The existing repository contains the current Python application source and historical releases.</p></details>
         <details><summary>Why does the downloadable file have another name?</summary><p>This is a staged rebrand. The website and documentation now use Prismwake. Keeping the current EXE filename, program data paths, and GitHub updater endpoints intact prevents breaking the v0.1.2 installation. Desktop app branding will be updated separately.</p></details>
-        <details><summary>Does the browser demo actually capture my screen?</summary><p>No. The mini editor is a safe, local interactive prototype. The comparison viewer uses its bundled illustration or screenshots you select directly from your device. Selected images are processed in your browser and aren't uploaded.</p></details>
+        <details><summary>Does the browser demo actually capture my screen?</summary><p>No. The mini editor is a local interactive prototype. Its Paint Bucket analyzes pixels from the bundled demo image only. The comparison viewer is an illustrative effect, not a real HDR measurement. No screen capture or image upload is involved.</p></details>
         <details><summary>Does Prismwake work with fullscreen games?</summary><p>It captures before opening the editor overlay. Borderless fullscreen tends to be more reliable; exclusive fullscreen can still minimize or behave differently depending on drivers and game settings.</p></details>
       </section>
     </main>
