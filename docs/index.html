@@ -133,28 +133,27 @@
           <article class="lab-card" aria-labelledby="demo-title">
             <span class="lab-label">02 / EXPERIENCE</span>
             <h3 id="demo-title">Try a mini screenshot editor.</h3>
-            <p>Drag a region, draw a mark, add an arrow, or use the Paint Bucket to fill connected areas of the image. This interactive demo runs entirely in your browser.</p>
+            <p>Drag a region, draw a closed shape, and use the Paint Bucket to fill the area inside your lines. The background photo is never used for fill detection.</p>
             <div class="toolbar" role="toolbar" aria-label="Interactive screenshot demo annotation tools">
               <button type="button" class="tool" data-tool="select" aria-pressed="true">▣ Select</button>
               <button type="button" class="tool" data-tool="pen" aria-pressed="false">✎ Pen</button>
               <button type="button" class="tool" data-tool="rect" aria-pressed="false">▢ Rect</button>
               <button type="button" class="tool" data-tool="arrow" aria-pressed="false">↗ Arrow</button>
-              <button type="button" class="tool" data-tool="fill" aria-pressed="false" title="Paint Bucket: fill connected pixels">◉ Fill</button>
+              <button type="button" class="tool" data-tool="fill" aria-pressed="false" title="Paint Bucket: fill areas enclosed by your drawings">◉ Fill</button>
               <button type="button" class="tool" data-tool="text" aria-pressed="false">T Text</button>
               <button type="button" class="tool" id="demoUndo" disabled>↶</button>
               <button type="button" class="tool" id="demoReset">Reset</button>
             </div>
             <div class="demo-fill-settings" id="demoFillSettings" hidden>
-              <label for="demoFillTolerance">Tolerance <output id="demoToleranceValue" for="demoFillTolerance">48</output></label>
-              <input id="demoFillTolerance" type="range" min="0" max="255" value="48" aria-label="Paint Bucket color tolerance">
-              <label for="demoFillColor">Color</label><input id="demoFillColor" type="color" value="#35f2c8" aria-label="Paint Bucket fill color">
+              <label for="demoFillColor">Fill color</label><input id="demoFillColor" type="color" value="#35f2c8" aria-label="Paint Bucket fill color">
+              <span>Draw a closed outline, then click inside it.</span>
             </div>
             <div class="demo-stage" id="demoStage" aria-label="Interactive capture editor demo; use the toolbar then drag or tap inside">
               <img src="assets/demo-landscape.webp" alt="Clear Frutiger Aqua waterscape with grass, sparkling water, clouds, bubbles and colorful glass architecture, used as the interactive editor canvas" width="750" height="408" draggable="false">
               <svg id="demoSvg" class="demo-svg" viewBox="0 0 1000 615" preserveAspectRatio="none" aria-hidden="true"></svg>
               <span class="demo-hint" id="demoHint">Drag to choose a capture region</span>
             </div>
-            <p class="demo-note">All tools stay inside your selection. Paint Bucket recognizes drawn outlines as boundaries, fills connected pixels and supports undo. Nothing is uploaded.</p>
+            <p class="demo-note">All edits stay inside your selection. Paint Bucket fills only closed regions formed by your own drawings, ignoring the background image entirely. Undo is supported.</p>
           </article>
           <article class="lab-card" aria-labelledby="theme-title">
             <span class="lab-label">03 / CUSTOMIZE</span>
