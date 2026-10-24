@@ -24,6 +24,7 @@
   <meta name="twitter:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
   <meta name="twitter:description" content="HDR/Auto HDR screenshots, annotations and a Frutiger Aqua interface for Windows.">
   <link rel="sitemap" type="application/xml" href="sitemap.xml">
+  <link rel="stylesheet" href="water.css">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -248,6 +249,7 @@
       <a class="brand" href="./" aria-label="HDRSnip Fusion home"><img class="brand-icon" src="favicon.png" width="38" height="38" alt="">HDR<span>Snip</span> Fusion</a>
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#features">Features</a>
+        <a href="#water-play">Water Lab</a>
         <a href="#screenshots">Screenshots</a>
         <a href="#download">Download</a>
         <a href="#questions">FAQ</a>
@@ -276,6 +278,30 @@
         </div>
       </div>
       <div class="water-separator" aria-hidden="true"></div>
+      <section id="water-play" class="water-stage" aria-labelledby="water-heading">
+        <div class="stage-heading"><div>
+          <p class="eyebrow">A little pocket of paradise</p>
+          <h2 id="water-heading">Go on. Disturb the water.</h2>
+          <p>Click, drag, or touch the surface. Watch ripples bend the light, cross one another, and fade into the lagoon.</p>
+        </div></div>
+        <div class="lagoon-shell">
+          <div class="lagoon-screen">
+            <canvas id="lagoon-canvas" role="img" aria-label="Interactive Aqua water. Click or drag to make water ripples."></canvas>
+            <span class="lagoon-rim" aria-hidden="true"></span>
+            <span class="lagoon-badge" aria-hidden="true">AQUA / WATER LAB</span>
+            <span id="lagoon-tip" class="lagoon-tip">✦ Click or drag to make ripples ✦</span>
+          </div>
+          <div class="lagoon-controls">
+            <span id="lagoon-status" class="lagoon-status" role="status" aria-live="off">Living water · raindrops enabled</span>
+            <div class="lagoon-buttons">
+              <button type="button" class="lagoon-btn is-active" id="lagoon-rain" aria-pressed="true">☁ Rain: ON</button>
+              <button type="button" class="lagoon-btn" id="lagoon-calm">◌ Clear waves</button>
+              <button type="button" class="lagoon-btn" id="lagoon-pause" aria-pressed="false">❚❚ Pause water</button>
+            </div>
+          </div>
+        </div>
+        <p class="water-footnote">Interactive water is rendered locally in your browser. No accounts, tracking, or external animation libraries.</p>
+      </section>
       <section id="features" aria-labelledby="features-title">
         <h2 id="features-title">Built for HDR screenshots, not just screen grabs.</h2>
         <p class="section-intro">A focused region-capture workflow with configurable HDR-to-SDR conversion, annotation tools, and a distinct Frutiger Aqua design.</p>
@@ -413,5 +439,6 @@
   })();
   </script>
 
+  <script src="water.js" defer></script>
 </body>
 </html>
