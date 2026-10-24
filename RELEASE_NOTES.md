@@ -1,6 +1,8 @@
-# HDRScreenshot FrutigerAqua v0.1.0
+# Prismwake archive: v0.1.0
 
-First public Windows release of HDRSnip Fusion, a free HDR-aware screenshot and annotation application with a Frutiger Aqua interface.
+First public Windows release of the screenshot tool now known as Prismwake, a free HDR-aware screenshot and annotation application with a Frutiger Aqua interface.
+
+_Archived release notes: v0.1.0 shipped under its original app branding._
 
 ## Features
 - Capture SDR, HDR, and Auto HDR desktops with DXGI Desktop Duplication.
