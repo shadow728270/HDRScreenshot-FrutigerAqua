@@ -426,24 +426,13 @@ jobs:
           $sizeBytes = "${{ steps.verify_exe.outputs.size_bytes }}"
 
           $notesFile = Join-Path $env:RUNNER_TEMP "release_notes_$tag.md"
-          $notesLines = @(
-            "## HDRSnip Fusion $tag (Frutiger Aqua Edition)",
-            "",
-            "### Official Standalone Windows 10/11 Executable",
-            "- **Asset**: ``HDRSnipFusion.exe`` (64-bit standalone PyInstaller build)",
-            "- **Version**: ``v$ver``",
-            "- **Size**: ``$sizeBytes`` bytes",
-            "- **SHA-256**: ``$sha256``",
-            "",
-            "```text",
-            "$sha256  HDRSnipFusion.exe",
-            "```"
-          )
+          # Avoid Markdown backticks in double-quoted PowerShell strings: ` is the escape character.
+          $defaultNotes = "Official HDRSnip Fusion $tag Windows x64 build. SHA-256: $sha256."
           $customNotes = "RELEASE_NOTES_$tag.md"
           if (Test-Path -LiteralPath $customNotes) {
             Copy-Item -LiteralPath $customNotes -Destination $notesFile -Force
           } else {
-            $notesLines -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
+            $defaultNotes | Out-File -FilePath $notesFile -Encoding utf8
           }
 
           # Native CLI commands do not throw on nonzero exit by default in PowerShell.
