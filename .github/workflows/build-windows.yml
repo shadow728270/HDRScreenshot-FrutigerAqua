@@ -307,10 +307,13 @@ jobs:
           $pyiWork = Join-Path $testRoot "build"
           $pyiDist = Join-Path $testRoot "dist_next"
           $pyiSpec = Join-Path $testRoot "spec"
+          # PyInstaller resolves resources relative to --specpath; use absolute paths.
+          $iconAbs = (Resolve-Path -LiteralPath "prismwake.ico").Path
+          $versionAbs = (Resolve-Path -LiteralPath "prismwake_version_info.txt").Path
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name "Prismwake_vNext" `
-            --icon "prismwake.ico" `
-            --version-file "prismwake_version_info.txt" `
+            --icon $iconAbs `
+            --version-file $versionAbs `
             --workpath $pyiWork `
             --distpath $pyiDist `
             --specpath $pyiSpec `
