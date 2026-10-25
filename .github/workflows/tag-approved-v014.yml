@@ -1,0 +1,54 @@
+name: Tag approved Prismwake v0.1.4
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tag-approved-v014.yml'
+permissions:
+  contents: write
+jobs:
+  approved-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: shadow728270/HDRScreenshot-FrutigerAqua
+      TAG: v0.1.4
+      TESTED_COMMIT: ca84c2e608697aa05c8aa1b30ca337ffaba22fd2
+      EXPECTED_SOURCE_BLOB: c359a8d71039ba7b090bc51fe597032a1ec4225e
+      TESTED_RUN: "40147899554"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate tested source and GitHub build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$REPO"
+          test "$(git rev-parse "$TESTED_COMMIT:Prismwake.py")" = "$EXPECTED_SOURCE_BLOB"
+          test "$(git rev-parse "$TESTED_COMMIT:HDRSnipFusion.py")" = "$EXPECTED_SOURCE_BLOB"
+          test "$(git rev-parse HEAD:Prismwake.py)" = "$EXPECTED_SOURCE_BLOB"
+          gh run view "$TESTED_RUN" --repo "$REPO" --json conclusion,headSha > "$RUNNER_TEMP/approved-run.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          d=json.loads((Path(os.environ["RUNNER_TEMP"])/"approved-run.json").read_text())
+          assert d["conclusion"]=="success",d
+          assert d["headSha"]==os.environ["TESTED_COMMIT"],d
+          print("Authorized v0.1.4 source verified against fully successful Windows CI.")
+          PY
+      - name: Create v0.1.4 tag only on verified build commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            test "$(git rev-parse "$TAG^{}")" = "$TESTED_COMMIT"
+            echo "Tag already points at approved build commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG" "$TESTED_COMMIT"
+            git push origin "refs/tags/$TAG"
+            echo "Pushed verified $TAG tag; Windows release workflow will build, validate and publish both aliases."
+          fi
