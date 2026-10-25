@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="aquaSphere" cx="34%" cy="26%" r="72%">
+      <stop offset="0%" stop-color="#E6FFFF" stop-opacity="1"/>
+      <stop offset="28%" stop-color="#33E6FF" stop-opacity="1"/>
+      <stop offset="68%" stop-color="#0078D7" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#002B66" stop-opacity="1"/>
+    </radialGradient>
+    <radialGradient id="emeraldBounce" cx="50%" cy="84%" r="48%">
+      <stop offset="0%" stop-color="#69F0AE" stop-opacity="0.88"/>
+      <stop offset="60%" stop-color="#00E5FF" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="specularCap" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.92"/>
+      <stop offset="58%" stop-color="#E0FFFF" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="prismGlyph" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="55%" stop-color="#BDFBFF" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#69F0AE" stop-opacity="0.96"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer Frutiger Aqua Liquid Glass Orb -->
+  <circle cx="128" cy="128" r="114" fill="url(#aquaSphere)" stroke="#D8FCFF" stroke-width="7"/>
+  <!-- Subsurface Emerald-Aqua Bounce Glow -->
+  <circle cx="128" cy="128" r="108" fill="url(#emeraldBounce)"/>
+  <!-- Rounded Capture Viewfinder Frame -->
+  <rect x="54" y="54" width="148" height="148" rx="34" ry="34"
+        fill="none" stroke="#B8FAFF" stroke-width="6.5" stroke-opacity="0.72"/>
+  <!-- Refracted Aqua Wave Ribbon -->
+  <path d="M 64 166 C 92 146, 122 182, 154 156 C 172 142, 184 148, 194 140"
+        fill="none" stroke="#69F0AE" stroke-width="11" stroke-linecap="round" opacity="0.92"/>
+  <!-- Bold Prismwake 'P' + Prism Monogram -->
+  <path d="M 92 180 L 92 78 L 138 78 C 164 78, 178 93, 178 114 C 178 135, 164 150, 138 150 L 92 150"
+        fill="none" stroke="url(#prismGlyph)" stroke-width="20"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="108,95 154,114 108,133" fill="#9EFFFF" opacity="0.92"/>
+  <!-- Top Glossy Specular Reflection Cap -->
+  <ellipse cx="128" cy="64" rx="76" ry="40" fill="url(#specularCap)"/>
+</svg>

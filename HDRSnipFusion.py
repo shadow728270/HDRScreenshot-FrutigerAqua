@@ -153,7 +153,231 @@ import traceback
 APP_NAME: str = "Prismwake"
 LEGACY_APP_NAME: str = "HDRSnip Fusion"
 APP_TAGLINE: str = "Catch the light. Keep the detail."
-APP_VERSION: str = "0.1.3"
+APP_VERSION: str = "0.1.4"
+APP_USER_MODEL_ID: str = f"Prismwake.DesktopApp.{APP_VERSION}"
+
+# Settings Window responsive geometry constants (v0.1.4)
+SETTINGS_MIN_WIDTH: int = 640
+SETTINGS_DEFAULT_WIDTH: int = 810
+SETTINGS_MAX_DEFAULT_WIDTH: int = 840
+SETTINGS_MIN_HEIGHT: int = 500
+SETTINGS_DEFAULT_HEIGHT: int = 820
+SETTINGS_RESIZE_MARGIN: int = 9
+ICON_STANDARD_SIZES: Tuple[int, ...] = (16, 24, 32, 48, 64, 128, 256)
+
+SETTINGS_ANIMATION_CHOICES: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "off",
+        "Off (Static Glass)",
+        "Static Frutiger Aqua glass with zero continuous water caustics or idle CPU ticks.",
+    ),
+    (
+        "subtle",
+        "Subtle",
+        "Calm atmospheric water movement and gentle tactile gel button reflections.",
+    ),
+    (
+        "medium",
+        "Medium (Default)",
+        "Living multi-depth water caustics and expressive tactile gel physics.",
+    ),
+    (
+        "high",
+        "High",
+        "Deep optical caustics, tertiary capillary branches, and chromatic refraction.",
+    ),
+)
+
+SETTINGS_TONE_MAP_CHOICES: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "sdr_exact_knee",
+        "Balanced SDR White + Highlight Roll-Off",
+        "Recommended: Matches desktop SDR white 1:1 up to the knee, then smoothly rolls off bright HDR highlights.",
+    ),
+    (
+        "reinhard_luma",
+        "Extended Reinhard Luminance",
+        "Luminance-preserving Reinhard operator that compresses extreme HDR peaks while keeping hue saturation.",
+    ),
+    (
+        "aces_filmic",
+        "ACES Filmic Curve",
+        "Cinematic ACES filmic tone curve with high contrast and rich shadow toe.",
+    ),
+)
+
+
+def compute_settings_responsive_geometry(
+    avail_left: int,
+    avail_top: int,
+    avail_width: int,
+    avail_height: int,
+    saved_width: int = 0,
+    saved_height: int = 0,
+) -> Dict[str, int]:
+    """
+    Pure-Python (Qt-independent) responsive geometry solver for `SettingsDialog`.
+    Given a monitor's available work area `(avail_left, avail_top, avail_width, avail_height)`
+    in logical pixels (after DPI scaling), returns:
+      `{"x": x, "y": y, "width": target_w, "height": target_h, "min_width": min_w, "min_height": min_h}`
+    Ensures:
+      1. Desktop monitors (`avail_width >= 1024`) open at `780..840` logical pixels wide
+         (`810` default) so all 6 section cards, combos, spinboxes, and 2-column checkbox
+         grids fit with zero horizontal clipping.
+      2. Smaller or high-DPI-scaled viewports (e.g., `1280x720`, `1366x768`, or `1920x1080 @ 200%`
+         where logical width is `960` or `640`) clamp both `min_width` and `width` cleanly inside
+         the available work area with safe margins and never overflow off-screen.
+      3. Persisted user dimensions (`saved_width`, `saved_height`) are restored ONLY when they
+         fit within `[min_w..max_w]` and `[min_h..max_h]` on the active monitor.
+    """
+    aw = max(360, int(avail_width))
+    ah = max(320, int(avail_height))
+
+    margin_x = 24 if aw >= 720 else 10
+    margin_y = 28 if ah >= 620 else 10
+    max_w = max(340, aw - margin_x * 2)
+    max_h = max(300, ah - margin_y * 2)
+
+    min_w = min(SETTINGS_MIN_WIDTH, max_w)
+    min_h = min(SETTINGS_MIN_HEIGHT, max_h)
+
+    ideal_w = min(
+        SETTINGS_MAX_DEFAULT_WIDTH,
+        max(780, int(round(aw * 0.62))),
+    )
+    default_w = max(min_w, min(max_w, min(SETTINGS_DEFAULT_WIDTH, ideal_w)))
+    default_h = max(min_h, min(max_h, SETTINGS_DEFAULT_HEIGHT))
+
+    if saved_width > 0 and min_w <= int(saved_width) <= max_w:
+        target_w = int(saved_width)
+    else:
+        target_w = default_w
+
+    if saved_height > 0 and min_h <= int(saved_height) <= max_h:
+        target_h = int(saved_height)
+    else:
+        target_h = default_h
+
+    x = int(avail_left) + max(0, (aw - target_w) // 2)
+    y = int(avail_top) + max(0, (ah - target_h) // 2)
+    right_limit = int(avail_left) + aw
+    bottom_limit = int(avail_top) + ah
+    if x + target_w > right_limit:
+        x = max(int(avail_left), right_limit - target_w)
+    if y + target_h > bottom_limit:
+        y = max(int(avail_top), bottom_limit - target_h)
+
+    return {
+        "x": int(x),
+        "y": int(y),
+        "width": int(target_w),
+        "height": int(target_h),
+        "min_width": int(min_w),
+        "min_height": int(min_h),
+        "max_width": int(max_w),
+        "max_height": int(max_h),
+    }
+
+
+def hit_test_frameless_resize_edges(
+    local_x: int,
+    local_y: int,
+    width: int,
+    height: int,
+    margin: int = SETTINGS_RESIZE_MARGIN,
+) -> int:
+    """
+    Pure-Python 8-direction edge/corner hit-tester for `SettingsDialog`.
+    Returns bitmask: 1=Left, 2=Right, 4=Top, 8=Bottom (and combinations 5=TopLeft,
+    6=TopRight, 9=BottomLeft, 10=BottomRight).
+    """
+    w = max(1, int(width))
+    h = max(1, int(height))
+    x = int(local_x)
+    y = int(local_y)
+    m = max(4, int(margin))
+
+    # Bottom-right 24x24 grip corner always triggers Bottom|Right diagonal resize
+    if x >= w - 24 and y >= h - 24:
+        return 2 | 8
+
+    edges = 0
+    if x <= m:
+        edges |= 1
+    elif x >= w - m:
+        edges |= 2
+    if y <= m:
+        edges |= 4
+    elif y >= h - m:
+        edges |= 8
+    return edges
+
+
+def compute_interactive_resize_rect(
+    start_left: int,
+    start_top: int,
+    start_width: int,
+    start_height: int,
+    edges: int,
+    dx: int,
+    dy: int,
+    min_width: int,
+    min_height: int,
+    avail_left: int = 0,
+    avail_top: int = 0,
+    avail_width: int = 3840,
+    avail_height: int = 2160,
+) -> Tuple[int, int, int, int]:
+    """
+    Pure-Python interactive resize solver enforcing minimum window size and monitor
+    work-area boundaries across all 4 edges and 4 corners.
+    Returns `(new_left, new_top, new_width, new_height)`.
+    """
+    left = int(start_left)
+    top = int(start_top)
+    right = left + int(start_width) - 1
+    bottom = top + int(start_height) - 1
+
+    avail_r = int(avail_left) + int(avail_width) - 1
+    avail_b = int(avail_top) + int(avail_height) - 1
+    min_w = max(320, int(min_width))
+    min_h = max(280, int(min_height))
+    max_w = max(min_w, int(avail_width))
+    max_h = max(min_h, int(avail_height))
+
+    if edges & 1:  # Left
+        new_left = max(int(avail_left), min(right - min_w + 1, left + int(dx)))
+        if (right - new_left + 1) <= max_w:
+            left = new_left
+    elif edges & 2:  # Right
+        new_right = min(avail_r, max(left + min_w - 1, right + int(dx)))
+        if (new_right - left + 1) <= max_w:
+            right = new_right
+
+    if edges & 4:  # Top
+        new_top = max(int(avail_top), min(bottom - min_h + 1, top + int(dy)))
+        if (bottom - new_top + 1) <= max_h:
+            top = new_top
+    elif edges & 8:  # Bottom
+        new_bottom = min(avail_b, max(top + min_h - 1, bottom + int(dy)))
+        if (new_bottom - top + 1) <= max_h:
+            bottom = new_bottom
+
+    return (left, top, right - left + 1, bottom - top + 1)
+
+
+def elide_middle_path_text(path_str: str, max_chars: int = 48) -> str:
+    r"""
+    Pure-Python middle path elision fallback (`C:\Users\...\Pictures\Prismwake`)
+    preserving both the drive/root prefix and the final folder name.
+    """
+    cleaned = str(path_str or "").strip()
+    if len(cleaned) <= max_chars or max_chars < 12:
+        return cleaned
+    head_len = max(6, (max_chars - 3) // 2)
+    tail_len = max(6, max_chars - 3 - head_len)
+    return f"{cleaned[:head_len]}...{cleaned[-tail_len:]}"
+
 
 # v0.1.2 / v0.1.3 Annotation Tool Constants
 MIN_STROKE_THICKNESS: int = 1
@@ -903,8 +1127,68 @@ def ensure_per_monitor_dpi_awareness() -> None:
         pass
 
 
-# Initialize Per-Monitor DPI Awareness V2 immediately upon module load on Windows
+def ensure_windows_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> bool:
+    """
+    Sets the explicit Windows Shell AppUserModelID so the Windows 10/11 taskbar,
+    Alt+Tab switcher, and jump lists group all Prismwake windows under the Prismwake
+    identity and display the embedded Prismwake icon rather than a generic Python host icon.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        shell32 = ctypes.windll.shell32
+        fn = getattr(shell32, "SetCurrentProcessExplicitAppUserModelID", None)
+        if fn is not None:
+            fn.argtypes = [ctypes.c_wchar_p]
+            fn.restype = ctypes.HRESULT
+            hr = fn(str(app_id))
+            return int(hr) == 0
+    except Exception:
+        pass
+    return False
+
+
+def get_bundled_resource_path(*relative_candidates: str) -> Optional[Path]:
+    """
+    Resolves an application asset path (such as `prismwake.ico` or `prismwake-mark.svg`)
+    across PyInstaller `--onefile` (`sys._MEIPASS`), executable directory, and source tree.
+    """
+    search_roots: List[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        try:
+            search_roots.append(Path(meipass).resolve())
+        except Exception:
+            pass
+    try:
+        search_roots.append(Path(__file__).resolve().parent)
+    except Exception:
+        pass
+    try:
+        search_roots.append(Path(sys.executable).resolve().parent)
+    except Exception:
+        pass
+    try:
+        search_roots.append(Path.cwd().resolve())
+    except Exception:
+        pass
+
+    for root in search_roots:
+        for rel in relative_candidates:
+            if not rel:
+                continue
+            cand = root / rel
+            try:
+                if cand.exists() and cand.is_file() and cand.stat().st_size > 0:
+                    return cand
+            except OSError:
+                continue
+    return None
+
+
+# Initialize Per-Monitor DPI Awareness V2 and Windows AppUserModelID upon module load
 ensure_per_monitor_dpi_awareness()
+ensure_windows_app_user_model_id()
 
 ANIMATION_INTENSITY_LEVELS = ("off", "subtle", "medium", "high")
 ANIMATION_INTENSITY_SCALES = {
@@ -1088,6 +1372,9 @@ class AppConfig:
     disable_native_hdr_capture: bool = False
     disable_async_tone_workers: bool = False
     disable_dwm_acrylic_blur: bool = False
+    # Persistent Settings Window dimensions (0 = automatic responsive sizing)
+    settings_window_width: int = 0
+    settings_window_height: int = 0
 
     @property
     def is_safe_mode_active(self) -> bool:
@@ -1243,6 +1530,13 @@ class AppConfig:
                 ):
                     if str_key in filtered:
                         filtered[str_key] = str(filtered[str_key] or "").strip()
+                for dim_key in ("settings_window_width", "settings_window_height"):
+                    if dim_key in filtered:
+                        try:
+                            val_d = int(filtered[dim_key])
+                            filtered[dim_key] = max(0, min(7680, val_d))
+                        except Exception:
+                            filtered[dim_key] = 0
                 cfg = cls(**filtered)
         except Exception as exc:
             print(f"[HDRSnip Fusion] Warning: Failed to load config: {exc}")
@@ -9504,6 +9798,62 @@ def save_pixmap_or_image_atomically(
         raise
 
 
+def prepare_clipboard_safe_qimage(source: Any) -> "QImage":
+    """
+    Converts a rendered `QPixmap` or `QImage` into a standalone, deeply-copied,
+    self-owned 32-bit `Format_RGB32` `QImage` with opaque alpha (`0xFF000000`) and
+    contiguous scanlines.
+    Why this matters on Windows 10/11:
+      - Passing a `QPixmap` backed by a temporary NumPy buffer or an unaligned `Format_RGB888`
+        24-bit buffer to `QClipboard.setPixmap()` can force synchronous DIB format conversion
+        or leave `Win + V` (Windows Clipboard History / Cloud Clipboard) reading a transient
+        surface after the overlay window closes.
+      - Converting to a self-owned `Format_RGB32` `QImage` (`copy()`) guarantees that Qt's
+        Windows OLE clipboard provider receives a native 32-bpp BGRX DIB immediately with
+        zero external buffer lifetime dependencies.
+    """
+    if not HAS_QT:
+        raise RuntimeError("PyQt6 is required for clipboard image preparation")
+    if isinstance(source, QPixmap):
+        qimg = source.toImage()
+    elif isinstance(source, QImage):
+        qimg = source
+    else:
+        raise TypeError(f"Expected QPixmap or QImage, got {type(source).__name__}")
+
+    if qimg.isNull() or qimg.width() <= 0 or qimg.height() <= 0:
+        return QImage()
+
+    if qimg.format() != QImage.Format.Format_RGB32:
+        qimg = qimg.convertToFormat(QImage.Format.Format_RGB32)
+    else:
+        qimg = qimg.copy()
+    return qimg
+
+
+def copy_pixmap_to_clipboard_safely(pixmap: "QPixmap") -> bool:
+    """
+    Safely places `pixmap` onto the system clipboard as a standalone 32-bit RGB32 image
+    and flushes clipboard ownership so pasting (`Ctrl+V` and `Win+V`) works reliably even
+    immediately after `SnipOverlayWindow.close()` at 1080p, 1440p, and 4K.
+    """
+    if not HAS_QT or pixmap is None or pixmap.isNull():
+        return False
+    try:
+        safe_qimg = prepare_clipboard_safe_qimage(pixmap)
+        if safe_qimg.isNull():
+            return False
+        safe_pix = QPixmap.fromImage(safe_qimg)
+        cb = QApplication.clipboard()
+        if cb is None:
+            return False
+        cb.setPixmap(safe_pix)
+        return True
+    except Exception as exc:
+        DIAG_LOG.error("CLIPBOARD", "Failed to copy screenshot to clipboard", exc)
+        return False
+
+
 def save_screenshot_to_directory(
     image_obj: Any,
     save_dir_str: str,
@@ -12583,7 +12933,7 @@ if HAS_QT:
 
         def copy_snip(self) -> None:
             pix = self.render_final_cropped_pixmap()
-            QApplication.clipboard().setPixmap(pix)
+            copy_pixmap_to_clipboard_safely(pix)
             self.close()
 
         def _handle_save_error(
@@ -12638,7 +12988,7 @@ if HAS_QT:
                         pix, target_dir_str, prefix=getattr(self.config, "screenshot_prefix", DEFAULT_SCREENSHOT_PREFIX)
                     )
                     if copy_to_clipboard:
-                        QApplication.clipboard().setPixmap(pix)
+                        copy_pixmap_to_clipboard_safely(pix)
                     DIAG_LOG.milestone(
                         "SAVE_SNIP",
                         f"Saved full-resolution screenshot to '{out_path}' "
@@ -15430,8 +15780,12 @@ if HAS_QT:
             self._downloading: bool = False
 
             self.setWindowTitle(
-                f"HDRSnip Fusion v{check_result.latest_version} is available"
+                f"{APP_NAME} v{check_result.latest_version} is available"
             )
+            try:
+                self.setWindowIcon(create_tray_icon_pixmap())
+            except Exception:
+                pass
             self.setMinimumWidth(500)
             self.setWindowFlags(
                 Qt.WindowType.Dialog
@@ -15522,7 +15876,7 @@ if HAS_QT:
                     f"Installed version: v{APP_VERSION} (Python Source Mode)  •  "
                     f"Latest stable release: v{check_result.latest_version}\n"
                     "You are running from Python source (.py). Automatic EXE replacement "
-                    "is only active in packaged HDRSnipFusion.exe builds."
+                    "is only active in packaged Prismwake.exe / HDRSnipFusion.exe builds."
                 )
             elif is_prot:
                 sub_text = (
@@ -15680,22 +16034,152 @@ if HAS_QT:
             super().mouseReleaseEvent(event)
 
 
-    class SettingsDialog(QDialog):
-        """
-        Polished Frutiger Aqua Glass Control Panel Settings Dialog (v0.1.1):
-          - Organized into six scannable frosted glass section cards inside a smooth,
-            high-DPI-safe transparent scroll area:
-            1. Capture & Startup (Hotkey + Windows Startup & SDR Fallback)
-            2. Screenshot Saving (Default Save Location read-only path + Browse...)
-            3. Frutiger Aqua Glass & Animation (Live Animation Intensity & Glass Transparency)
-            4. HDR Capture & Tone Mapping (Curve, SDR White Level, Highlight Knee, Gamma 2.2 & White Boost)
-            5. Application Updates (Current Version: v0.1.1, Auto-check, Auto-install, Check for Updates)
-            6. Stability & Diagnostics (Subordinated deep-ocean card with status pill, Safe Mode & Isolation grid)
-          - Preserves genuinely rounded transparent corners (native rectangular Acrylic disabled),
-            living water glass backdrop, custom draggable glass title bar, and tactile 3D gel buttons.
+    class ElidedPathLineEdit(QLineEdit):
+        r"""
+        Read-only Frutiger Aqua path display widget that automatically elides long
+        filesystem paths in the middle (`C:\Users\...\Pictures\Prismwake`) when resized,
+        while preserving the full raw path in `.full_path()`, `.text()`, and the tooltip.
         """
 
-        LABEL_COL_WIDTH: int = 154
+        def __init__(self, full_path: str = "", parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self._full_path: str = ""
+            self._display_elided: str = ""
+            self.setReadOnly(True)
+            self.setFullPath(full_path)
+
+        def full_path(self) -> str:
+            return self._full_path
+
+        def setFullPath(self, path_str: str) -> None:
+            cleaned = str(path_str or "").strip()
+            self._full_path = cleaned
+            super().setText(cleaned)
+            self._update_elided_display()
+
+        def setText(self, text: str) -> None:  # type: ignore[override]
+            self.setFullPath(text)
+
+        def text(self) -> str:  # type: ignore[override]
+            return self._full_path
+
+        def displayedText(self) -> str:
+            return self._display_elided or self._full_path
+
+        def _update_elided_display(self) -> None:
+            if not self._full_path:
+                self._display_elided = ""
+                return
+            avail_px = max(80, self.width() - 24)
+            fm = QFontMetrics(self.font())
+            if fm.horizontalAdvance(self._full_path) <= avail_px:
+                self._display_elided = self._full_path
+            else:
+                self._display_elided = fm.elidedText(
+                    self._full_path,
+                    Qt.TextElideMode.ElideMiddle,
+                    avail_px,
+                )
+            self.update()
+
+        def resizeEvent(self, event) -> None:
+            super().resizeEvent(event)
+            self._update_elided_display()
+
+        def paintEvent(self, event) -> None:
+            # Let QLineEdit draw its styled Frutiger Aqua background & border first
+            orig_text = super().text()
+            try:
+                super().setText(self._display_elided or self._full_path)
+                super().paintEvent(event)
+            finally:
+                super().setText(orig_text)
+
+
+    class AquaResizeGripWidget(QWidget):
+        """
+        Subtle, custom-painted Frutiger Aqua diagonal crystal grip indicator in the
+        bottom-right corner of `SettingsDialog` showing the window is freely resizable.
+        """
+
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.setFixedSize(16, 16)
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        def paintEvent(self, event) -> None:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen_hi = QPen(QColor(210, 252, 255, 195), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            pen_sh = QPen(QColor(0, 38, 82, 160), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            for offset in (4, 8, 12):
+                p.setPen(pen_sh)
+                p.drawLine(offset + 1, 15, 15, offset + 1)
+                p.setPen(pen_hi)
+                p.drawLine(offset, 14, 14, offset)
+            p.end()
+
+
+    class SettingsDialog(QDialog):
+        """
+        Polished, Responsive & Resizable Frutiger Aqua Glass Control Panel Settings Dialog (v0.1.4):
+          - Fixes all v0.1.3 horizontal clipping across 1280x720, 1366x768, 1920x1080,
+            2560x1440, and 3840x2160 displays at 100%, 125%, 150%, and 200% Windows scaling.
+          - Uses concise dropdown item labels (`Ocean Current`, `Medium (Default)`,
+            `Balanced SDR White + Highlight Roll-Off`) paired with live wrapping description
+            subtitles and rich per-item tooltips so combo boxes never force horizontal overflow.
+          - Supports smooth 8-direction frameless resizing from all 4 edges and 4 corners
+            with appropriate resize cursors, minimum/maximum screen bounds, a subtle
+            Frutiger Aqua bottom-right resize grip, and persistent user dimensions in `AppConfig`.
+          - Strengthens glass contrast and control legibility across all 4 Frutiger Aqua themes
+            (`Ocean Current`, `Emerald Glass`, `Sunset Coral`, `Vista Sapphire`).
+        """
+
+        LABEL_COL_WIDTH: int = 166
+        RESIZE_MARGIN: int = SETTINGS_RESIZE_MARGIN
+
+        # Concise dropdown choices + full descriptions for tooltips and helper labels
+        ANIMATION_CHOICES: Tuple[Tuple[str, str, str], ...] = (
+            (
+                "off",
+                "Off (Static Glass)",
+                "Static Frutiger Aqua glass with zero continuous water caustics or idle CPU ticks.",
+            ),
+            (
+                "subtle",
+                "Subtle",
+                "Calm atmospheric water movement and gentle tactile gel button reflections.",
+            ),
+            (
+                "medium",
+                "Medium (Default)",
+                "Living multi-depth water caustics and expressive tactile gel physics.",
+            ),
+            (
+                "high",
+                "High",
+                "Deep optical caustics, tertiary capillary branches, and chromatic refraction.",
+            ),
+        )
+
+        TONE_MAP_CHOICES: Tuple[Tuple[str, str, str], ...] = (
+            (
+                "sdr_exact_knee",
+                "Balanced SDR White + Highlight Roll-Off",
+                "Recommended: Matches desktop SDR white 1:1 up to the knee, then smoothly rolls off bright HDR highlights.",
+            ),
+            (
+                "reinhard_luma",
+                "Extended Reinhard Luminance",
+                "Luminance-preserving Reinhard operator that compresses extreme HDR peaks while keeping hue saturation.",
+            ),
+            (
+                "aces_filmic",
+                "ACES Filmic Curve",
+                "Cinematic ACES filmic tone curve with high contrast and rich shadow toe.",
+            ),
+        )
 
         def __init__(
             self,
@@ -15713,6 +16197,12 @@ if HAS_QT:
                 config.save_directory or DEFAULT_SAVE_DIR
             )
             self._drag_offset: Optional[QPoint] = None
+            self._resize_edges: int = 0  # Bitmask: 1=Left, 2=Right, 4=Top, 8=Bottom
+            self._resize_start_global: Optional[QPoint] = None
+            self._resize_start_geom: Optional[QRect] = None
+            self._user_resized: bool = False
+            self._initial_geometry_applied: bool = False
+
             self._wave_paths = (
                 QPainterPath(),
                 QPainterPath(),
@@ -15733,7 +16223,12 @@ if HAS_QT:
             self.setWindowTitle(
                 f"{APP_NAME} v{APP_VERSION} • Frutiger Aqua Settings"
             )
-            self.setMinimumWidth(568)
+            try:
+                self.setWindowIcon(create_tray_icon_pixmap())
+            except Exception:
+                pass
+            self.setMinimumSize(SETTINGS_MIN_WIDTH, SETTINGS_MIN_HEIGHT)
+            self.setMouseTracking(True)
             self.setWindowFlags(
                 Qt.WindowType.Dialog
                 | Qt.WindowType.FramelessWindowHint
@@ -15744,14 +16239,31 @@ if HAS_QT:
             self.setStyleSheet(
                 """
                 QLabel {
-                    color: #F4FFFF;
+                    color: #F6FFFF;
                     font-family: 'Segoe UI', sans-serif;
                     font-size: 12px;
                     font-weight: 600;
                     background: transparent;
                 }
+                QLabel#FieldLabel {
+                    color: #FFFFFF;
+                    font-family: 'Segoe UI', sans-serif;
+                    font-size: 12px;
+                    font-weight: 700;
+                    background: transparent;
+                }
+                QLabel#HelperSubLabel {
+                    color: #D6F8FF;
+                    font-family: 'Segoe UI', sans-serif;
+                    font-size: 11px;
+                    font-weight: 500;
+                    background: rgba(4, 34, 68, 110);
+                    border: 1px solid rgba(150, 238, 255, 85);
+                    border-radius: 7px;
+                    padding: 3px 8px;
+                }
                 QLabel#SectionHeader {
-                    color: #A8FAFF;
+                    color: #B4FCFF;
                     font-family: 'Segoe UI', sans-serif;
                     font-size: 11px;
                     font-weight: bold;
@@ -15759,47 +16271,47 @@ if HAS_QT:
                     padding-bottom: 1px;
                 }
                 QLabel#DiagSectionHeader {
-                    color: #88E8FF;
+                    color: #96EEFF;
                     font-family: 'Segoe UI', sans-serif;
                     font-size: 11px;
                     font-weight: bold;
                     letter-spacing: 0.6px;
                 }
                 QLabel#ValueBadge {
-                    background: rgba(6, 58, 108, 175);
-                    color: #ECFFFF;
-                    border: 1px solid rgba(165, 248, 255, 195);
+                    background: rgba(5, 48, 94, 205);
+                    color: #F2FFFF;
+                    border: 1px solid rgba(175, 250, 255, 210);
                     border-radius: 9px;
-                    padding: 3px 6px;
+                    padding: 3px 7px;
                     font-size: 11px;
                     font-weight: bold;
                 }
                 QLabel#UpdateStatusLabel {
-                    background: rgba(6, 48, 92, 168);
-                    color: #CCF8FF;
-                    border: 1px solid rgba(145, 240, 255, 155);
+                    background: rgba(5, 42, 84, 195);
+                    color: #E2FCFF;
+                    border: 1px solid rgba(150, 242, 255, 175);
                     border-radius: 8px;
-                    padding: 4px 9px;
+                    padding: 5px 10px;
                     font-size: 11px;
                     font-weight: 600;
                 }
                 QFrame#AquaSectionCard {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(255, 255, 255, 44),
-                        stop:0.5 rgba(205, 248, 255, 28),
-                        stop:1 rgba(160, 238, 255, 38));
-                    border: 1px solid rgba(215, 252, 255, 155);
+                        stop:0 rgba(8, 52, 98, 148),
+                        stop:0.5 rgba(6, 42, 82, 162),
+                        stop:1 rgba(8, 56, 104, 154));
+                    border: 1px solid rgba(205, 250, 255, 175);
                     border-radius: 13px;
                 }
                 QFrame#AquaDiagCard {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(6, 46, 88, 108),
-                        stop:1 rgba(4, 32, 66, 128));
-                    border: 1px solid rgba(130, 232, 255, 115);
+                        stop:0 rgba(5, 38, 76, 172),
+                        stop:1 rgba(3, 26, 56, 188));
+                    border: 1px solid rgba(135, 232, 255, 140);
                     border-radius: 13px;
                 }
                 QFrame#SectionDivider {
-                    background: rgba(195, 248, 255, 58);
+                    background: rgba(195, 248, 255, 72);
                     max-height: 1px;
                     min-height: 1px;
                     border: none;
@@ -15812,58 +16324,62 @@ if HAS_QT:
                     background: transparent;
                 }
                 QScrollBar:vertical {
-                    background: rgba(6, 46, 88, 95);
-                    width: 9px;
+                    background: rgba(4, 36, 72, 120);
+                    width: 10px;
                     margin: 2px 0 2px 2px;
-                    border-radius: 4px;
+                    border-radius: 5px;
                 }
                 QScrollBar::handle:vertical {
-                    background: rgba(145, 244, 255, 185);
+                    background: rgba(155, 246, 255, 200);
                     min-height: 28px;
-                    border-radius: 4px;
+                    border-radius: 5px;
                 }
                 QScrollBar::handle:vertical:hover {
-                    background: rgba(210, 255, 255, 235);
+                    background: rgba(220, 255, 255, 245);
                 }
                 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     height: 0px;
                 }
                 QKeySequenceEdit, QComboBox, QDoubleSpinBox, QLineEdit#SavePathEdit {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(255, 255, 255, 232),
-                        stop:0.48 rgba(218, 246, 255, 222),
-                        stop:0.52 rgba(186, 235, 252, 226),
-                        stop:1 rgba(238, 253, 255, 238));
-                    color: #002E5C;
-                    border: 1.5px solid rgba(255, 255, 255, 242);
+                        stop:0 rgba(255, 255, 255, 244),
+                        stop:0.48 rgba(226, 249, 255, 236),
+                        stop:0.52 rgba(198, 240, 254, 238),
+                        stop:1 rgba(242, 254, 255, 246));
+                    color: #00264D;
+                    border: 1.5px solid rgba(255, 255, 255, 248);
                     border-radius: 9px;
                     padding: 4px 10px;
-                    min-height: 20px;
+                    min-height: 22px;
                     font-family: 'Segoe UI', sans-serif;
                     font-size: 12px;
                     font-weight: bold;
                 }
                 QKeySequenceEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QLineEdit#SavePathEdit:hover {
-                    border: 1.5px solid #84FAFF;
+                    border: 1.5px solid #88FAFF;
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(255, 255, 255, 248),
-                        stop:0.5 rgba(228, 251, 255, 238),
-                        stop:1 rgba(242, 255, 255, 250));
+                        stop:0 rgba(255, 255, 255, 252),
+                        stop:0.5 rgba(235, 252, 255, 246),
+                        stop:1 rgba(246, 255, 255, 254));
+                }
+                QKeySequenceEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QLineEdit#SavePathEdit:focus {
+                    border: 2px solid #00E5FF;
                 }
                 QDoubleSpinBox {
                     padding-right: 24px;
                 }
                 QComboBox QAbstractItemView {
-                    background-color: #0B4A84;
+                    background-color: #073B6E;
                     color: #FFFFFF;
-                    selection-background-color: #00C6FF;
-                    selection-color: #002244;
-                    border: 1px solid #90F4FF;
+                    selection-background-color: #00D2FF;
+                    selection-color: #001E3C;
+                    border: 1.5px solid #9CF6FF;
                     border-radius: 8px;
                     padding: 4px;
+                    outline: 0;
                 }
                 QCheckBox {
-                    color: #F0FFFF;
+                    color: #F4FFFF;
                     font-family: 'Segoe UI', sans-serif;
                     font-size: 12px;
                     font-weight: 600;
@@ -15871,7 +16387,7 @@ if HAS_QT:
                     background: transparent;
                 }
                 QCheckBox#DiagIsoCheck {
-                    color: #D2F6FF;
+                    color: #DCF8FF;
                     font-size: 11px;
                     font-weight: 600;
                     spacing: 6px;
@@ -15882,8 +16398,8 @@ if HAS_QT:
                     border-radius: 8px;
                     border: 1.5px solid #FFFFFF;
                     background: qradialgradient(cx:0.35, cy:0.35, radius:0.8,
-                        stop:0 rgba(255, 255, 255, 205),
-                        stop:1 rgba(10, 95, 160, 192));
+                        stop:0 rgba(255, 255, 255, 215),
+                        stop:1 rgba(8, 86, 152, 205));
                 }
                 QCheckBox::indicator:hover {
                     border: 1.5px solid #84FFFF;
@@ -15899,30 +16415,48 @@ if HAS_QT:
             )
 
             outer_layout = QVBoxLayout(self)
-            outer_layout.setContentsMargins(18, 14, 18, 16)
+            outer_layout.setContentsMargins(18, 14, 18, 14)
             outer_layout.setSpacing(9)
 
             # -----------------------------------------------------------------
-            # Draggable Frutiger Aqua Title Bar (shows installed version v0.1.1)
+            # Draggable Frutiger Aqua Title Bar (shows Prismwake icon + version)
             # -----------------------------------------------------------------
-            title_row = QHBoxLayout()
+            self.title_bar_widget = QWidget(self)
+            self.title_bar_widget.setMouseTracking(True)
+            title_row = QHBoxLayout(self.title_bar_widget)
             title_row.setContentsMargins(2, 0, 2, 2)
+            title_row.setSpacing(8)
+
+            self.title_icon_lbl = QLabel(self.title_bar_widget)
+            self.title_icon_lbl.setFixedSize(22, 22)
+            try:
+                icon_pix = create_prismwake_pixmap(22)
+                if not icon_pix.isNull():
+                    self.title_icon_lbl.setPixmap(icon_pix)
+            except Exception:
+                pass
+            title_row.addWidget(self.title_icon_lbl)
+
             title_lbl = QLabel(
-                f"✦  {APP_NAME} v{APP_VERSION} — {APP_TAGLINE}"
+                f"{APP_NAME} v{APP_VERSION} — {APP_TAGLINE}",
+                self.title_bar_widget,
             )
             title_lbl.setStyleSheet(
                 "font-size: 14px; font-weight: bold; color: #FFFFFF;"
             )
-            title_row.addWidget(title_lbl)
-            title_row.addStretch()
+            title_lbl.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
+            title_row.addWidget(title_lbl, 1)
 
-            close_x = AeroGelButton("✕", variant="ruby", parent=self)
-            close_x.setFixedSize(30, 26)
-            close_x.clicked.connect(self.reject)
-            title_row.addWidget(close_x)
-            outer_layout.addLayout(title_row)
+            self.close_x_btn = AeroGelButton("✕", variant="ruby", parent=self.title_bar_widget)
+            self.close_x_btn.setFixedSize(30, 26)
+            self.close_x_btn.setToolTip("Close Settings without saving (Esc)")
+            self.close_x_btn.clicked.connect(self.reject)
+            title_row.addWidget(self.close_x_btn)
+            outer_layout.addWidget(self.title_bar_widget)
 
-            # Transparent Scroll Area so all 6 cards remain responsive on high-DPI displays
+            # Transparent Scroll Area so all 6 cards remain responsive on all displays/DPIs
             self.scroll_area = QScrollArea(self)
             self.scroll_area.setObjectName("AquaScrollArea")
             self.scroll_area.setWidgetResizable(True)
@@ -15930,26 +16464,60 @@ if HAS_QT:
             self.scroll_area.setHorizontalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff
             )
+            self.scroll_area.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
             self.scroll_contents = QWidget(self.scroll_area)
             self.scroll_contents.setObjectName("AquaScrollContents")
+            self.scroll_contents.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
             cards_layout = QVBoxLayout(self.scroll_contents)
-            cards_layout.setContentsMargins(0, 0, 4, 0)
+            cards_layout.setContentsMargins(0, 0, 6, 0)
             cards_layout.setSpacing(9)
 
-            # Helper for aligned label + control rows
+            # Helper for aligned label + expanding control rows (with optional wrapping subtitle)
             def _add_labeled_row(
-                parent_vbox: QVBoxLayout, label_text: str, field_widget: QWidget
+                parent_vbox: QVBoxLayout,
+                label_text: str,
+                field_widget: QWidget,
+                helper_label: Optional[QLabel] = None,
             ) -> None:
                 row = QHBoxLayout()
                 row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(10)
+                row.setSpacing(12)
                 lbl = QLabel(label_text)
-                lbl.setFixedWidth(self.LABEL_COL_WIDTH)
+                lbl.setObjectName("FieldLabel")
+                lbl.setMinimumWidth(136)
+                lbl.setMaximumWidth(self.LABEL_COL_WIDTH)
                 lbl.setAlignment(
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+                    if helper_label is not None
+                    else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
+                if helper_label is not None:
+                    lbl.setContentsMargins(0, 5, 0, 0)
                 row.addWidget(lbl)
-                row.addWidget(field_widget, 1)
+
+                field_widget.setMinimumWidth(0)
+                field_widget.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                )
+                if helper_label is not None:
+                    col = QVBoxLayout()
+                    col.setContentsMargins(0, 0, 0, 0)
+                    col.setSpacing(4)
+                    col.addWidget(field_widget)
+                    helper_label.setObjectName("HelperSubLabel")
+                    helper_label.setWordWrap(True)
+                    helper_label.setMinimumWidth(0)
+                    helper_label.setSizePolicy(
+                        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+                    )
+                    col.addWidget(helper_label)
+                    row.addLayout(col, 1)
+                else:
+                    row.addWidget(field_widget, 1)
                 parent_vbox.addLayout(row)
 
             def _make_divider(parent_widget: QWidget) -> QFrame:
@@ -15979,25 +16547,32 @@ if HAS_QT:
 
             cap_vbox.addWidget(_make_divider(capture_card))
 
-            cap_chk_row = QHBoxLayout()
-            cap_chk_row.setContentsMargins(2, 0, 2, 0)
-            cap_chk_row.setSpacing(16)
+            cap_chk_grid = QGridLayout()
+            cap_chk_grid.setContentsMargins(2, 0, 2, 0)
+            cap_chk_grid.setHorizontalSpacing(16)
+            cap_chk_grid.setVerticalSpacing(5)
+            cap_chk_grid.setColumnStretch(0, 1)
+            cap_chk_grid.setColumnStretch(1, 1)
+
             self.startup_chk = QCheckBox("Start in tray when Windows starts")
+            self.startup_chk.setMinimumWidth(0)
             self.startup_chk.setChecked(config.start_with_windows)
+
             self.fallback_chk = QCheckBox(
-                "Allow SDR fallback if HDR capture is unavailable"
+                "Allow SDR fallback if HDR unavailable"
             )
+            self.fallback_chk.setMinimumWidth(0)
             self.fallback_chk.setToolTip(
-                "Explicit opt-in for ordinary 8-bit SDR capture fallback (may overexpose active HDR displays)"
+                "Explicit opt-in for ordinary 8-bit SDR capture fallback when native DXGI HDR capture is unavailable (may overexpose active HDR displays)"
             )
             self.fallback_chk.setChecked(config.allow_sdr_fallback)
-            cap_chk_row.addWidget(self.startup_chk)
-            cap_chk_row.addWidget(self.fallback_chk, 1)
-            cap_vbox.addLayout(cap_chk_row)
+            cap_chk_grid.addWidget(self.startup_chk, 0, 0)
+            cap_chk_grid.addWidget(self.fallback_chk, 0, 1)
+            cap_vbox.addLayout(cap_chk_grid)
             cards_layout.addWidget(capture_card)
 
             # -----------------------------------------------------------------
-            # Card 2: Screenshot Saving (Part 1 — Default Save Location)
+            # Card 2: Screenshot Saving (Default Save Location with Elided Path)
             # -----------------------------------------------------------------
             saving_card = QFrame(self.scroll_contents)
             saving_card.setObjectName("AquaSectionCard")
@@ -16010,13 +16585,16 @@ if HAS_QT:
             sav_vbox.addWidget(sav_hdr)
 
             save_loc_row = QWidget(saving_card)
+            save_loc_row.setMinimumWidth(0)
             save_loc_layout = QHBoxLayout(save_loc_row)
             save_loc_layout.setContentsMargins(0, 0, 0, 0)
             save_loc_layout.setSpacing(8)
 
-            self.save_dir_edit = QLineEdit(self._selected_save_directory, save_loc_row)
+            self.save_dir_edit = ElidedPathLineEdit(
+                self._selected_save_directory, save_loc_row
+            )
             self.save_dir_edit.setObjectName("SavePathEdit")
-            self.save_dir_edit.setReadOnly(True)
+            self.save_dir_edit.setMinimumWidth(140)
             self.save_dir_edit.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
@@ -16025,11 +16603,11 @@ if HAS_QT:
                 "Clicking Save (Ctrl+S) or Quick Save (Ctrl+Shift+S) writes PNGs directly here. "
                 "Press Ctrl+Alt+S in the overlay to Save As to a custom path."
             )
-            self.save_dir_edit.setCursorPosition(len(self._selected_save_directory))
 
             self.browse_save_dir_btn = AeroGelButton(
                 "Browse...", variant="sapphire", parent=save_loc_row
             )
+            self.browse_save_dir_btn.setFixedWidth(96)
             self.browse_save_dir_btn.setToolTip(
                 "Choose the default folder where screenshots are saved when pressing Save or Ctrl+S"
             )
@@ -16041,7 +16619,7 @@ if HAS_QT:
             cards_layout.addWidget(saving_card)
 
             # -----------------------------------------------------------------
-            # Card 3: Frutiger Aqua Glass & Animation
+            # Card 3: Frutiger Aqua Theme, Glass & Animation
             # -----------------------------------------------------------------
             visuals_card = QFrame(self.scroll_contents)
             visuals_card.setObjectName("AquaSectionCard")
@@ -16053,36 +16631,59 @@ if HAS_QT:
             vis_hdr.setObjectName("SectionHeader")
             vis_vbox.addWidget(vis_hdr)
 
-            self.theme_combo = QComboBox()
-            for th_key in AQUA_THEME_NAMES:
+            self.theme_combo = QComboBox(visuals_card)
+            self.theme_combo.setMinimumContentsLength(18)
+            self.theme_combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            for row_i, th_key in enumerate(AQUA_THEME_NAMES):
                 th_spec = AQUA_THEMES[th_key]
-                self.theme_combo.addItem(
-                    f"{th_spec['label']} — {th_spec['description']}", th_key
+                self.theme_combo.addItem(th_spec["label"], th_key)
+                self.theme_combo.setItemData(
+                    row_i,
+                    f"{th_spec['label']} — {th_spec['description']}",
+                    Qt.ItemDataRole.ToolTipRole,
                 )
-            th_idx = self.theme_combo.findData(normalize_aqua_theme(getattr(config, "aqua_theme", "ocean_current")))
+            th_idx = self.theme_combo.findData(
+                normalize_aqua_theme(getattr(config, "aqua_theme", "ocean_current"))
+            )
             if th_idx >= 0:
                 self.theme_combo.setCurrentIndex(th_idx)
+            self.theme_desc_lbl = QLabel("", visuals_card)
             self.theme_combo.currentIndexChanged.connect(self._on_theme_preview)
-            _add_labeled_row(vis_vbox, "Frutiger Aqua Theme:", self.theme_combo)
+            _add_labeled_row(
+                vis_vbox,
+                "Frutiger Aqua Theme:",
+                self.theme_combo,
+                helper_label=self.theme_desc_lbl,
+            )
 
-            self.anim_combo = QComboBox()
-            self.anim_combo.addItem("Off — Static Frutiger Aqua Glass", "off")
-            self.anim_combo.addItem("Subtle — Calm Water & Gentle Gel", "subtle")
-            self.anim_combo.addItem(
-                "Medium — Living Water & Tactile Gel (Default)", "medium"
+            self.anim_combo = QComboBox(visuals_card)
+            self.anim_combo.setMinimumContentsLength(18)
+            self.anim_combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
-            self.anim_combo.addItem(
-                "High — Deep Optical Caustics & Rich Refraction", "high"
-            )
+            for row_i, (a_key, a_short, a_desc) in enumerate(self.ANIMATION_CHOICES):
+                self.anim_combo.addItem(a_short, a_key)
+                self.anim_combo.setItemData(
+                    row_i, f"{a_short} — {a_desc}", Qt.ItemDataRole.ToolTipRole
+                )
             anim_idx = self.anim_combo.findData(config.animation_intensity)
             if anim_idx >= 0:
                 self.anim_combo.setCurrentIndex(anim_idx)
+            self.anim_desc_lbl = QLabel("", visuals_card)
             self.anim_combo.currentIndexChanged.connect(
                 self._on_anim_intensity_preview
             )
-            _add_labeled_row(vis_vbox, "Animation Intensity:", self.anim_combo)
+            _add_labeled_row(
+                vis_vbox,
+                "Animation Intensity:",
+                self.anim_combo,
+                helper_label=self.anim_desc_lbl,
+            )
 
             trans_row = QWidget(visuals_card)
+            trans_row.setMinimumWidth(0)
             trans_layout = QHBoxLayout(trans_row)
             trans_layout.setContentsMargins(0, 0, 0, 0)
             trans_layout.setSpacing(10)
@@ -16094,7 +16695,7 @@ if HAS_QT:
             )
             self.trans_val_lbl = QLabel(f"{self.trans_slider.value()}%", trans_row)
             self.trans_val_lbl.setObjectName("ValueBadge")
-            self.trans_val_lbl.setFixedWidth(46)
+            self.trans_val_lbl.setFixedWidth(50)
             self.trans_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.trans_slider.valueChanged.connect(self._on_transparency_preview)
             trans_layout.addWidget(self.trans_slider, 1)
@@ -16115,27 +16716,36 @@ if HAS_QT:
             hdr_hdr.setObjectName("SectionHeader")
             hdr_vbox.addWidget(hdr_hdr)
 
-            self.mode_combo = QComboBox()
-            self.mode_combo.addItem(
-                "Balanced SDR White + Highlight Roll-Off (Recommended)",
-                "sdr_exact_knee",
+            self.mode_combo = QComboBox(hdr_card)
+            self.mode_combo.setMinimumContentsLength(22)
+            self.mode_combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
-            self.mode_combo.addItem(
-                "Extended Reinhard Luminance", "reinhard_luma"
-            )
-            self.mode_combo.addItem("ACES Filmic Curve", "aces_filmic")
+            for row_i, (m_key, m_short, m_desc) in enumerate(self.TONE_MAP_CHOICES):
+                self.mode_combo.addItem(m_short, m_key)
+                self.mode_combo.setItemData(
+                    row_i, f"{m_short} — {m_desc}", Qt.ItemDataRole.ToolTipRole
+                )
             idx = self.mode_combo.findData(config.tone_map_mode)
             if idx >= 0:
                 self.mode_combo.setCurrentIndex(idx)
-            _add_labeled_row(hdr_vbox, "Tone Mapping Curve:", self.mode_combo)
+            self.mode_desc_lbl = QLabel("", hdr_card)
+            self.mode_combo.currentIndexChanged.connect(self._on_tone_mode_changed)
+            _add_labeled_row(
+                hdr_vbox,
+                "Tone Mapping Curve:",
+                self.mode_combo,
+                helper_label=self.mode_desc_lbl,
+            )
 
-            self.nits_spin = QDoubleSpinBox()
+            self.nits_spin = QDoubleSpinBox(hdr_card)
             self.nits_spin.setRange(0.0, 1000.0)
             self.nits_spin.setSingleStep(10.0)
             self.nits_spin.setDecimals(0)
             self.nits_spin.setSpecialValueText("Auto-Detect (DisplayConfig)")
             self.nits_spin.setSuffix(" nits")
             self.nits_spin.setValue(config.manual_sdr_nits)
+            self.nits_spin.setMinimumWidth(0)
             self.nits_spin.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
@@ -16144,11 +16754,12 @@ if HAS_QT:
             )
             _add_labeled_row(hdr_vbox, "SDR White Level:", self.nits_spin)
 
-            self.knee_spin = QDoubleSpinBox()
+            self.knee_spin = QDoubleSpinBox(hdr_card)
             self.knee_spin.setRange(0.50, 0.98)
             self.knee_spin.setSingleStep(0.05)
             self.knee_spin.setDecimals(2)
             self.knee_spin.setValue(config.knee_start)
+            self.knee_spin.setMinimumWidth(0)
             self.knee_spin.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
@@ -16162,18 +16773,20 @@ if HAS_QT:
             self.gamma_chk = QCheckBox(
                 "Apply Gamma 2.2 TRC correction (fixes washed-out Auto-HDR dark shadows)"
             )
+            self.gamma_chk.setMinimumWidth(0)
             self.gamma_chk.setChecked(config.auto_hdr_gamma22_fix)
             hdr_vbox.addWidget(self.gamma_chk)
 
             self.white_boost_chk = QCheckBox(
-                "Lift neutral SDR whites to 255 (may clip the brightest HDR highlights)"
+                "Lift neutral SDR whites to 255 (may clip brightest HDR highlights)"
             )
+            self.white_boost_chk.setMinimumWidth(0)
             self.white_boost_chk.setChecked(config.boost_sdr_whites)
             hdr_vbox.addWidget(self.white_boost_chk)
             cards_layout.addWidget(hdr_card)
 
             # -----------------------------------------------------------------
-            # Card 5: Application Updates (Part 2 — Built-in GitHub Updater)
+            # Card 5: Application Updates (Built-in GitHub Updater)
             # -----------------------------------------------------------------
             updates_card = QFrame(self.scroll_contents)
             updates_card.setObjectName("AquaSectionCard")
@@ -16192,6 +16805,7 @@ if HAS_QT:
             self.current_version_lbl = QLabel(
                 f"Current Version: v{APP_VERSION}  ({mode_tag})", updates_card
             )
+            self.current_version_lbl.setMinimumWidth(0)
             self.current_version_lbl.setStyleSheet(
                 "color: #FFFFFF; font-weight: bold;"
             )
@@ -16214,35 +16828,43 @@ if HAS_QT:
             ver_row.addWidget(self.check_updates_btn)
             upd_vbox.addLayout(ver_row)
 
-            upd_chk_row = QHBoxLayout()
-            upd_chk_row.setContentsMargins(2, 0, 2, 0)
-            upd_chk_row.setSpacing(16)
+            upd_chk_grid = QGridLayout()
+            upd_chk_grid.setContentsMargins(2, 0, 2, 0)
+            upd_chk_grid.setHorizontalSpacing(16)
+            upd_chk_grid.setVerticalSpacing(5)
+            upd_chk_grid.setColumnStretch(0, 1)
+            upd_chk_grid.setColumnStretch(1, 1)
+
             self.auto_check_updates_chk = QCheckBox(
                 "Automatically check for updates", updates_card
             )
+            self.auto_check_updates_chk.setMinimumWidth(0)
             self.auto_check_updates_chk.setChecked(config.auto_check_updates)
+
             self.auto_install_updates_chk = QCheckBox(
-                "Automatically download updates in background", updates_card
+                "Auto-download updates in background", updates_card
             )
+            self.auto_install_updates_chk.setMinimumWidth(0)
             self.auto_install_updates_chk.setToolTip(
                 "Downloads and SHA-256 verifies stable updates in the background, then prompts to restart and install with helper verification"
             )
             self.auto_install_updates_chk.setChecked(config.auto_install_updates)
-            upd_chk_row.addWidget(self.auto_check_updates_chk)
-            upd_chk_row.addWidget(self.auto_install_updates_chk, 1)
-            upd_vbox.addLayout(upd_chk_row)
+            upd_chk_grid.addWidget(self.auto_check_updates_chk, 0, 0)
+            upd_chk_grid.addWidget(self.auto_install_updates_chk, 0, 1)
+            upd_vbox.addLayout(upd_chk_grid)
 
             self.update_status_lbl = QLabel(
                 "You're running the latest version.", updates_card
             )
             self.update_status_lbl.setObjectName("UpdateStatusLabel")
             self.update_status_lbl.setWordWrap(True)
+            self.update_status_lbl.setMinimumWidth(0)
             upd_vbox.addWidget(self.update_status_lbl)
             self._refresh_update_status_display()
             cards_layout.addWidget(updates_card)
 
             # -----------------------------------------------------------------
-            # Card 6: Stability & Diagnostics (Lower-Priority Subordinated Card)
+            # Card 6: Stability & Diagnostics
             # -----------------------------------------------------------------
             diag_card = QFrame(self.scroll_contents)
             diag_card.setObjectName("AquaDiagCard")
@@ -16260,12 +16882,13 @@ if HAS_QT:
 
             self.safe_mode_banner = QLabel(diag_card)
             self.safe_mode_banner.setWordWrap(True)
+            self.safe_mode_banner.setMinimumWidth(0)
             self.safe_mode_banner.setStyleSheet(
                 """
                 QLabel {
-                    background: rgba(0, 42, 84, 195);
-                    color: #98FFFF;
-                    border: 1px solid rgba(0, 229, 255, 185);
+                    background: rgba(0, 42, 84, 205);
+                    color: #A6FFFF;
+                    border: 1px solid rgba(0, 229, 255, 195);
                     border-radius: 8px;
                     padding: 5px 10px;
                     font-size: 11px;
@@ -16275,11 +16898,15 @@ if HAS_QT:
             )
             diag_vbox.addWidget(self.safe_mode_banner)
 
-            # Primary Diagnostic Safe Mode & Persistent Logging row
-            diag_top_row = QHBoxLayout()
-            diag_top_row.setContentsMargins(0, 0, 0, 0)
-            diag_top_row.setSpacing(14)
+            diag_top_grid = QGridLayout()
+            diag_top_grid.setContentsMargins(0, 0, 0, 0)
+            diag_top_grid.setHorizontalSpacing(14)
+            diag_top_grid.setVerticalSpacing(5)
+            diag_top_grid.setColumnStretch(0, 1)
+            diag_top_grid.setColumnStretch(1, 1)
+
             self.safe_mode_chk = QCheckBox("Enable Diagnostic Safe Mode")
+            self.safe_mode_chk.setMinimumWidth(0)
             self.safe_mode_chk.setToolTip(
                 "Pauses continuous water animations, decorative ripples, Win32 DWM Acrylic blur, and async workers"
             )
@@ -16287,26 +16914,30 @@ if HAS_QT:
             self.safe_mode_chk.toggled.connect(self._on_safe_mode_toggled)
 
             self.diag_log_chk = QCheckBox("Write persistent diagnostic log")
+            self.diag_log_chk.setMinimumWidth(0)
             self.diag_log_chk.setToolTip(
                 r"Writes bounded milestone logs to %APPDATA%\HDRSnip Fusion\diagnostics.log"
             )
             self.diag_log_chk.setChecked(config.enable_diagnostic_logging)
-            diag_top_row.addWidget(self.safe_mode_chk)
-            diag_top_row.addWidget(self.diag_log_chk, 1)
-            diag_vbox.addLayout(diag_top_row)
+            diag_top_grid.addWidget(self.safe_mode_chk, 0, 0)
+            diag_top_grid.addWidget(self.diag_log_chk, 0, 1)
+            diag_vbox.addLayout(diag_top_grid)
 
             diag_vbox.addWidget(_make_divider(diag_card))
 
-            # Compact 2x2 Subsystem Isolation Grid (keeps advanced flags tidy & accessible)
+            # Compact 2x2 Subsystem Isolation Grid
             iso_grid = QGridLayout()
             iso_grid.setContentsMargins(0, 0, 0, 0)
             iso_grid.setHorizontalSpacing(14)
             iso_grid.setVerticalSpacing(5)
+            iso_grid.setColumnStretch(0, 1)
+            iso_grid.setColumnStretch(1, 1)
 
             self.disable_cont_anim_chk = QCheckBox(
                 "Isolate: Pause continuous water animation"
             )
             self.disable_cont_anim_chk.setObjectName("DiagIsoCheck")
+            self.disable_cont_anim_chk.setMinimumWidth(0)
             self.disable_cont_anim_chk.setChecked(
                 config.disable_continuous_animations
             )
@@ -16316,6 +16947,7 @@ if HAS_QT:
                 "Isolate: Disable async tone-map workers"
             )
             self.disable_workers_chk.setObjectName("DiagIsoCheck")
+            self.disable_workers_chk.setMinimumWidth(0)
             self.disable_workers_chk.setChecked(config.disable_async_tone_workers)
             self.disable_workers_chk.toggled.connect(self._on_safe_mode_toggled)
 
@@ -16323,6 +16955,7 @@ if HAS_QT:
                 "Isolate: Disable Win32 DWM Acrylic blur"
             )
             self.disable_acrylic_chk.setObjectName("DiagIsoCheck")
+            self.disable_acrylic_chk.setMinimumWidth(0)
             self.disable_acrylic_chk.setChecked(config.disable_dwm_acrylic_blur)
             self.disable_acrylic_chk.toggled.connect(self._on_safe_mode_toggled)
 
@@ -16330,6 +16963,7 @@ if HAS_QT:
                 "Isolate: Bypass native DXGI (SDR-only)"
             )
             self.disable_hdr_dxgi_chk.setObjectName("DiagIsoCheck")
+            self.disable_hdr_dxgi_chk.setMinimumWidth(0)
             self.disable_hdr_dxgi_chk.setToolTip(
                 "Bypasses native DXGI/D3D11 Desktop Duplication and uses SDR ImageGrab (inaccurate for HDR displays)"
             )
@@ -16350,25 +16984,227 @@ if HAS_QT:
             outer_layout.addWidget(self.scroll_area, 1)
 
             # -----------------------------------------------------------------
-            # Bottom Action Bar (Always Pinned & Visible)
+            # Bottom Action Bar (Always Pinned & Visible + Resize Grip)
             # -----------------------------------------------------------------
             btn_row = QHBoxLayout()
             btn_row.setContentsMargins(0, 2, 0, 0)
             btn_row.setSpacing(8)
-            open_log_btn = AeroGelButton(
+            self.open_log_btn = AeroGelButton(
                 "Open Diagnostics Log", variant="sapphire", parent=self
             )
-            open_log_btn.setToolTip(str(DIAGNOSTIC_LOG_FILE))
-            open_log_btn.clicked.connect(self._open_diagnostic_log)
-            save_btn = AeroGelButton("Save & Apply", variant="emerald", parent=self)
-            save_btn.clicked.connect(self.accept)
-            cancel_btn = AeroGelButton("Cancel", variant="glass", parent=self)
-            cancel_btn.clicked.connect(self.reject)
-            btn_row.addWidget(open_log_btn)
+            self.open_log_btn.setToolTip(str(DIAGNOSTIC_LOG_FILE))
+            self.open_log_btn.clicked.connect(self._open_diagnostic_log)
+            self.save_btn = AeroGelButton("Save & Apply", variant="emerald", parent=self)
+            self.save_btn.clicked.connect(self.accept)
+            self.cancel_btn = AeroGelButton("Cancel", variant="glass", parent=self)
+            self.cancel_btn.clicked.connect(self.reject)
+            self.resize_grip = AquaResizeGripWidget(self)
+            self.resize_grip.setToolTip("Drag any window edge or corner to resize Settings")
+
+            btn_row.addWidget(self.open_log_btn)
             btn_row.addStretch()
-            btn_row.addWidget(cancel_btn)
-            btn_row.addWidget(save_btn)
+            btn_row.addWidget(self.cancel_btn)
+            btn_row.addWidget(self.save_btn)
+            btn_row.addWidget(
+                self.resize_grip,
+                0,
+                Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight,
+            )
             outer_layout.addLayout(btn_row)
+
+            # Sync initial helper descriptions & tooltips
+            self._sync_combo_descriptions()
+
+            # Establish logical keyboard Tab navigation order across all sections
+            self._configure_tab_order()
+
+            # Apply initial responsive geometry immediately so even headless tests
+            # inspecting geometry before showEvent see a properly sized dialog
+            self.apply_responsive_geometry()
+
+        def _configure_tab_order(self) -> None:
+            ordered_widgets = [
+                self.key_edit,
+                self.startup_chk,
+                self.fallback_chk,
+                self.save_dir_edit,
+                self.browse_save_dir_btn,
+                self.theme_combo,
+                self.anim_combo,
+                self.trans_slider,
+                self.mode_combo,
+                self.nits_spin,
+                self.knee_spin,
+                self.gamma_chk,
+                self.white_boost_chk,
+                self.check_updates_btn,
+                self.auto_check_updates_chk,
+                self.auto_install_updates_chk,
+                self.safe_mode_chk,
+                self.diag_log_chk,
+                self.disable_cont_anim_chk,
+                self.disable_workers_chk,
+                self.disable_acrylic_chk,
+                self.disable_hdr_dxgi_chk,
+                self.open_log_btn,
+                self.cancel_btn,
+                self.save_btn,
+            ]
+            for i in range(len(ordered_widgets) - 1):
+                QWidget.setTabOrder(ordered_widgets[i], ordered_widgets[i + 1])
+
+        def _sync_combo_descriptions(self) -> None:
+            # 1. Theme description
+            th_key = normalize_aqua_theme(
+                self.theme_combo.currentData() or "ocean_current"
+            )
+            th_spec = get_aqua_theme_spec(th_key)
+            self.theme_desc_lbl.setText(th_spec["description"])
+            self.theme_combo.setToolTip(
+                f"{th_spec['label']} — {th_spec['description']}"
+            )
+
+            # 2. Animation intensity description
+            anim_key = str(self.anim_combo.currentData() or "medium").lower()
+            anim_desc = next(
+                (desc for k, _s, desc in self.ANIMATION_CHOICES if k == anim_key),
+                self.ANIMATION_CHOICES[2][2],
+            )
+            anim_short = next(
+                (s for k, s, _d in self.ANIMATION_CHOICES if k == anim_key),
+                "Medium (Default)",
+            )
+            self.anim_desc_lbl.setText(anim_desc)
+            self.anim_combo.setToolTip(f"{anim_short} — {anim_desc}")
+
+            # 3. Tone mapping curve description
+            mode_key = str(self.mode_combo.currentData() or "sdr_exact_knee")
+            mode_desc = next(
+                (desc for k, _s, desc in self.TONE_MAP_CHOICES if k == mode_key),
+                self.TONE_MAP_CHOICES[0][2],
+            )
+            mode_short = next(
+                (s for k, s, _d in self.TONE_MAP_CHOICES if k == mode_key),
+                "Balanced SDR White + Highlight Roll-Off",
+            )
+            self.mode_desc_lbl.setText(mode_desc)
+            self.mode_combo.setToolTip(f"{mode_short} — {mode_desc}")
+
+        @staticmethod
+        def compute_responsive_geometry_for_screen(
+            avail_rect: QRect,
+            saved_width: int = 0,
+            saved_height: int = 0,
+        ) -> Tuple[QRect, QSize]:
+            res = compute_settings_responsive_geometry(
+                avail_rect.left(),
+                avail_rect.top(),
+                avail_rect.width(),
+                avail_rect.height(),
+                saved_width=saved_width,
+                saved_height=saved_height,
+            )
+            return (
+                QRect(res["x"], res["y"], res["width"], res["height"]),
+                QSize(res["min_width"], res["min_height"]),
+            )
+
+        @staticmethod
+        def _legacy_compute_responsive_geometry_for_screen(
+            avail_rect: QRect,
+            saved_width: int = 0,
+            saved_height: int = 0,
+        ) -> Tuple[QRect, QSize]:
+            """
+            Computes the optimal `(window_rect, minimum_size)` for `SettingsDialog`
+            inside a monitor's `availableGeometry()` (`avail_rect` in logical pixels):
+              - Desktop monitors with plenty of space default to ~`810` logical px wide
+                (within the `780–840` target range) so all 6 section cards, combos, spinboxes,
+                and 2-column checkbox grids fit with comfortable margins and zero clipping.
+              - Smaller or high-DPI-scaled viewports (e.g., `1280x720` or `1920x1080 @ 200%`
+                where logical available width is `960` or `640`) gracefully clamp both minimum
+                and initial dimensions to fit inside `avail_rect` with safe screen margins,
+                relying on vertical scrolling inside `scroll_area` while keeping the bottom
+                action bar pinned.
+              - Saved user dimensions (`saved_width`, `saved_height`) are restored ONLY when
+                they fit comfortably within the current monitor's available work area.
+            """
+            aw = max(360, int(avail_rect.width()))
+            ah = max(320, int(avail_rect.height()))
+
+            margin_x = 24 if aw >= 720 else 10
+            margin_y = 28 if ah >= 620 else 10
+            max_w = max(340, aw - margin_x * 2)
+            max_h = max(300, ah - margin_y * 2)
+
+            min_w = min(SETTINGS_MIN_WIDTH, max_w)
+            min_h = min(SETTINGS_MIN_HEIGHT, max_h)
+
+            # Default width targets 810 logical px on desktop, or 88% of smaller viewports
+            ideal_w = min(
+                SETTINGS_MAX_DEFAULT_WIDTH,
+                max(780, int(round(aw * 0.62))),
+            )
+            default_w = max(min_w, min(max_w, min(SETTINGS_DEFAULT_WIDTH, ideal_w)))
+            default_h = max(min_h, min(max_h, SETTINGS_DEFAULT_HEIGHT))
+
+            if saved_width > 0 and min_w <= saved_width <= max_w:
+                target_w = int(saved_width)
+            else:
+                target_w = default_w
+
+            if saved_height > 0 and min_h <= saved_height <= max_h:
+                target_h = int(saved_height)
+            else:
+                target_h = default_h
+
+            # Center cleanly within avail_rect and clamp so no edge ever leaves the screen
+            x = avail_rect.left() + max(0, (aw - target_w) // 2)
+            y = avail_rect.top() + max(0, (ah - target_h) // 2)
+            if x + target_w > avail_rect.right() + 1:
+                x = max(avail_rect.left(), avail_rect.right() + 1 - target_w)
+            if y + target_h > avail_rect.bottom() + 1:
+                y = max(avail_rect.top(), avail_rect.bottom() + 1 - target_h)
+
+            return (QRect(x, y, target_w, target_h), QSize(min_w, min_h))
+
+        def _resolve_active_available_geometry(self) -> QRect:
+            try:
+                scr = self.screen()
+                if scr is None and self.parentWidget() is not None:
+                    scr = self.parentWidget().screen()
+                if scr is None:
+                    scr = QGuiApplication.screenAt(QCursor.pos())
+                if scr is None:
+                    scr = QGuiApplication.primaryScreen()
+                if scr is not None:
+                    avail = scr.availableGeometry()
+                    if avail.width() > 0 and avail.height() > 0:
+                        return avail
+            except Exception:
+                pass
+            return QRect(0, 0, 1920, 1040)
+
+        def apply_responsive_geometry(
+            self, avail_override: Optional[QRect] = None
+        ) -> QRect:
+            """
+            Sizes and centers `SettingsDialog` within `avail_override` (or the active
+            monitor's `availableGeometry()`), honoring persisted user size when valid.
+            """
+            avail = (
+                avail_override
+                if avail_override is not None
+                else self._resolve_active_available_geometry()
+            )
+            saved_w = int(getattr(self.config, "settings_window_width", 0) or 0)
+            saved_h = int(getattr(self.config, "settings_window_height", 0) or 0)
+            target_rect, min_sz = self.compute_responsive_geometry_for_screen(
+                avail, saved_width=saved_w, saved_height=saved_h
+            )
+            self.setMinimumSize(min_sz)
+            self.setGeometry(target_rect)
+            return target_rect
 
         def set_selected_save_directory(self, folder_path: str) -> None:
             """Updates the pending save directory in the dialog without committing to AppConfig until Save & Apply."""
@@ -16376,13 +17212,12 @@ if HAS_QT:
             if not cleaned:
                 return
             self._selected_save_directory = cleaned
-            self.save_dir_edit.setText(cleaned)
+            self.save_dir_edit.setFullPath(cleaned)
             self.save_dir_edit.setToolTip(
                 f"Default Save Location: {cleaned}\n"
                 "Clicking Save (Ctrl+S) or Quick Save (Ctrl+Shift+S) writes PNGs directly here. "
                 "Press Ctrl+Alt+S in the overlay to Save As to a custom path."
             )
-            self.save_dir_edit.setCursorPosition(len(cleaned))
 
         def _on_browse_save_directory(self) -> None:
             start_dir = self._selected_save_directory
@@ -16430,7 +17265,9 @@ if HAS_QT:
                     self.install_update_btn.hide()
                 return
 
-            self.update_status_lbl.setText(res.message or "You're running the latest version.")
+            self.update_status_lbl.setText(
+                res.message or "You're running the latest version."
+            )
             if res.status == "update_available":
                 self.install_update_btn.setText(
                     f"Update to v{res.latest_version}..."
@@ -16446,7 +17283,8 @@ if HAS_QT:
             self.update_status_lbl.setText("Checking GitHub Releases for updates...")
             if self.controller is not None:
                 self.controller.check_for_updates(
-                    manual_request=True, notify_dialog_callback=self._on_local_update_check_done
+                    manual_request=True,
+                    notify_dialog_callback=self._on_local_update_check_done,
                 )
             else:
                 job = UpdateCheckJob(self._local_update_signals, manual_request=True)
@@ -16544,11 +17382,18 @@ if HAS_QT:
                 DIAG_LOG.milestone("LOG_VIEW", "Created diagnostic log file on user request")
             if sys.platform == "win32":
                 try:
-                    os.startfile(str(DIAGNOSTIC_LOG_FILE if DIAGNOSTIC_LOG_FILE.exists() else CONFIG_DIR))
+                    os.startfile(
+                        str(
+                            DIAGNOSTIC_LOG_FILE
+                            if DIAGNOSTIC_LOG_FILE.exists()
+                            else CONFIG_DIR
+                        )
+                    )
                 except Exception:
                     os.startfile(str(CONFIG_DIR))
 
         def _on_theme_preview(self) -> None:
+            self._sync_combo_descriptions()
             theme_key = self.theme_combo.currentData()
             if theme_key:
                 self._cached_base_pix = None
@@ -16557,11 +17402,15 @@ if HAS_QT:
                 self.update()
 
         def _on_anim_intensity_preview(self) -> None:
+            self._sync_combo_descriptions()
             level = self.anim_combo.currentData()
             if level:
                 self._water_dirty = True
                 AeroAnimationDirector.instance().set_intensity(str(level))
                 self.update()
+
+        def _on_tone_mode_changed(self) -> None:
+            self._sync_combo_descriptions()
 
         def _on_transparency_preview(self, pct: int) -> None:
             clamped = max(10, min(95, int(pct)))
@@ -16586,15 +17435,15 @@ if HAS_QT:
 
         def showEvent(self, event) -> None:
             self._water_dirty = True
-            # Size dialog comfortably to fit all 6 cards without exceeding high-DPI display bounds
-            try:
-                scr = self.screen() or QGuiApplication.primaryScreen()
-                if scr is not None:
-                    avail = scr.availableGeometry()
-                    ideal_h = min(845, max(540, avail.height() - 44))
-                    self.resize(max(568, self.width()), ideal_h)
-            except Exception:
-                pass
+            if not self._initial_geometry_applied:
+                self.apply_responsive_geometry()
+                self._initial_geometry_applied = True
+            else:
+                # Ensure window stays within current monitor work area if monitor changed
+                avail = self._resolve_active_available_geometry()
+                geom = self.geometry()
+                if not avail.intersects(geom) or geom.width() > avail.width() or geom.height() > avail.height():
+                    self.apply_responsive_geometry(avail)
             super().showEvent(event)
             pct = int(self.trans_slider.value())
             enable_windows_acrylic_blur(
@@ -16610,6 +17459,11 @@ if HAS_QT:
             director.set_transparency(pct)
             director.register_surface(self)
             director.notify_visibility_changed()
+
+        def resizeEvent(self, event) -> None:
+            self._cached_base_pix = None
+            self._water_dirty = True
+            super().resizeEvent(event)
 
         def on_animation_tick(self) -> None:
             if not self.isVisible():
@@ -16641,9 +17495,24 @@ if HAS_QT:
             super().hideEvent(event)
             AeroAnimationDirector.instance().unregister_surface(self)
 
+        def _persist_window_dimensions_if_resized(self) -> None:
+            if self._user_resized and self.width() >= self.minimumWidth() and self.height() >= self.minimumHeight():
+                self.config.settings_window_width = int(self.width())
+                self.config.settings_window_height = int(self.height())
+
+        def accept(self) -> None:
+            self._persist_window_dimensions_if_resized()
+            super().accept()
+
         def reject(self) -> None:
-            # Restore original animation intensity, transparency & Safe Mode flags if user cancels;
-            # unsaved changes to _selected_save_directory or update checkboxes are discarded.
+            # Restore original animation intensity, transparency, theme & Safe Mode flags if user cancels;
+            # persist window size if the user resized the dialog so they don't have to resize again.
+            if self._user_resized:
+                self._persist_window_dimensions_if_resized()
+                try:
+                    self.config.save()
+                except Exception:
+                    pass
             director = AeroAnimationDirector.instance()
             director.apply_config_flags(self.config)
             director.set_intensity(self._original_intensity)
@@ -16670,6 +17539,11 @@ if HAS_QT:
                 draw_frutiger_glass_base(
                     bp, rect, radius=20.0, frosted_pixmap=None, tint_style="dialog"
                 )
+                # Strengthen dialog readability across all 4 Frutiger Aqua themes with a
+                # deep-ocean contrast veil inside the rounded glass border
+                veil_path = QPainterPath()
+                veil_path.addRoundedRect(rect, 20.0, 20.0)
+                bp.fillPath(veil_path, QColor(3, 22, 48, 86))
                 bp.end()
                 self._cached_base_pix = base_pix
                 self._water_dirty = True
@@ -16707,23 +17581,171 @@ if HAS_QT:
                 dirty_rc = event.rect()
                 painter.drawPixmap(dirty_rc, self._cached_water_frame, dirty_rc)
 
+        # -----------------------------------------------------------------
+        # 8-Direction Frameless Edge & Corner Resizing + Title Bar Dragging
+        # -----------------------------------------------------------------
+        def _hit_test_resize_edges(self, local_pos: QPoint) -> int:
+            """
+            Returns a bitmask of resize edges for `local_pos`:
+              1 = Left, 2 = Right, 4 = Top, 8 = Bottom
+            Also treats the bottom-right 22x22 resize grip region as Bottom|Right (10).
+            """
+            m = self.RESIZE_MARGIN
+            w = self.width()
+            h = self.height()
+            x = local_pos.x()
+            y = local_pos.y()
+
+            # Check bottom-right resize grip widget area first
+            if x >= w - 24 and y >= h - 24:
+                return 2 | 8
+
+            edges = 0
+            if x <= m:
+                edges |= 1
+            elif x >= w - m:
+                edges |= 2
+            if y <= m:
+                edges |= 4
+            elif y >= h - m:
+                edges |= 8
+            return edges
+
+        @staticmethod
+        def _cursor_for_resize_edges(edges: int) -> Optional[Qt.CursorShape]:
+            if edges in (1 | 4, 2 | 8):
+                return Qt.CursorShape.SizeFDiagCursor
+            if edges in (2 | 4, 1 | 8):
+                return Qt.CursorShape.SizeBDiagCursor
+            if edges in (1, 2):
+                return Qt.CursorShape.SizeHorCursor
+            if edges in (4, 8):
+                return Qt.CursorShape.SizeVerCursor
+            return None
+
+        def _is_in_draggable_header(self, local_pos: QPoint) -> bool:
+            """Allows dragging from the top title bar or empty outer frame margin."""
+            if local_pos.y() <= 50:
+                child = self.childAt(local_pos)
+                if isinstance(child, AeroGelButton):
+                    return False
+                return True
+            return False
+
+        def _apply_interactive_resize(self, global_pos: QPoint) -> None:
+            if (
+                self._resize_edges == 0
+                or self._resize_start_global is None
+                or self._resize_start_geom is None
+            ):
+                return
+
+            avail = self._resolve_active_available_geometry()
+            min_w = self.minimumWidth()
+            min_h = self.minimumHeight()
+            max_w = max(min_w, avail.width())
+            max_h = max(min_h, avail.height())
+
+            dx = global_pos.x() - self._resize_start_global.x()
+            dy = global_pos.y() - self._resize_start_global.y()
+
+            g = QRect(self._resize_start_geom)
+            left = g.left()
+            right = g.right()
+            top = g.top()
+            bottom = g.bottom()
+
+            if self._resize_edges & 1:  # Left edge
+                new_left = max(avail.left(), min(right - min_w + 1, left + dx))
+                if (right - new_left + 1) <= max_w:
+                    left = new_left
+            elif self._resize_edges & 2:  # Right edge
+                new_right = min(avail.right(), max(left + min_w - 1, right + dx))
+                if (new_right - left + 1) <= max_w:
+                    right = new_right
+
+            if self._resize_edges & 4:  # Top edge
+                new_top = max(avail.top(), min(bottom - min_h + 1, top + dy))
+                if (bottom - new_top + 1) <= max_h:
+                    top = new_top
+            elif self._resize_edges & 8:  # Bottom edge
+                new_bottom = min(avail.bottom(), max(top + min_h - 1, bottom + dy))
+                if (new_bottom - top + 1) <= max_h:
+                    bottom = new_bottom
+
+            new_rect = QRect(QPoint(left, top), QPoint(right, bottom))
+            if new_rect != self.geometry():
+                self._user_resized = True
+                self.setGeometry(new_rect)
+
         def mousePressEvent(self, event) -> None:
             if event.button() == Qt.MouseButton.LeftButton:
-                self._drag_offset = (
-                    event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-                )
+                local_pt = event.position().toPoint()
+                global_pt = event.globalPosition().toPoint()
+                edges = self._hit_test_resize_edges(local_pt)
+                if edges != 0:
+                    self._resize_edges = edges
+                    self._resize_start_global = global_pt
+                    self._resize_start_geom = QRect(self.geometry())
+                    self._drag_offset = None
+                    cur = self._cursor_for_resize_edges(edges)
+                    if cur is not None:
+                        self.setCursor(cur)
+                    event.accept()
+                    return
+                if self._is_in_draggable_header(local_pt):
+                    self._drag_offset = global_pt - self.frameGeometry().topLeft()
+                    self._resize_edges = 0
+                    event.accept()
+                    return
             super().mousePressEvent(event)
 
         def mouseMoveEvent(self, event) -> None:
-            if (
-                self._drag_offset is not None
-                and event.buttons() & Qt.MouseButton.LeftButton
-            ):
-                self.move(event.globalPosition().toPoint() - self._drag_offset)
+            local_pt = event.position().toPoint()
+            global_pt = event.globalPosition().toPoint()
+            if event.buttons() & Qt.MouseButton.LeftButton:
+                if self._resize_edges != 0:
+                    self._apply_interactive_resize(global_pt)
+                    event.accept()
+                    return
+                if self._drag_offset is not None:
+                    avail = self._resolve_active_available_geometry()
+                    target_tl = global_pt - self._drag_offset
+                    # Keep at least 64px of the title bar reachable on screen
+                    clamped_x = max(
+                        avail.left() - self.width() + 80,
+                        min(avail.right() - 80, target_tl.x()),
+                    )
+                    clamped_y = max(
+                        avail.top(),
+                        min(avail.bottom() - 48, target_tl.y()),
+                    )
+                    self.move(clamped_x, clamped_y)
+                    event.accept()
+                    return
+            else:
+                edges = self._hit_test_resize_edges(local_pt)
+                cur = self._cursor_for_resize_edges(edges)
+                if cur is not None:
+                    self.setCursor(cur)
+                else:
+                    self.unsetCursor()
             super().mouseMoveEvent(event)
 
         def mouseReleaseEvent(self, event) -> None:
-            self._drag_offset = None
+            if event.button() == Qt.MouseButton.LeftButton:
+                if self._resize_edges != 0:
+                    self._persist_window_dimensions_if_resized()
+                self._resize_edges = 0
+                self._resize_start_global = None
+                self._resize_start_geom = None
+                self._drag_offset = None
+                local_pt = event.position().toPoint()
+                cur = self._cursor_for_resize_edges(self._hit_test_resize_edges(local_pt))
+                if cur is not None:
+                    self.setCursor(cur)
+                else:
+                    self.unsetCursor()
             super().mouseReleaseEvent(event)
 
         def apply_to_config(self) -> None:
@@ -16733,7 +17755,9 @@ if HAS_QT:
             chosen_save_dir = str(self._selected_save_directory or "").strip()
             if chosen_save_dir:
                 self.config.save_directory = chosen_save_dir
-            theme_key = normalize_aqua_theme(self.theme_combo.currentData() or "ocean_current")
+            theme_key = normalize_aqua_theme(
+                self.theme_combo.currentData() or "ocean_current"
+            )
             self.config.aqua_theme = theme_key
             anim_level = str(self.anim_combo.currentData() or "medium")
             self.config.animation_intensity = anim_level
@@ -16770,63 +17794,199 @@ if HAS_QT:
                 self.disable_hdr_dxgi_chk.isChecked()
             )
             self.config.enable_diagnostic_logging = bool(self.diag_log_chk.isChecked())
+            self._persist_window_dimensions_if_resized()
             director.apply_config_flags(self.config)
             self.config.save()
             set_windows_autostart(self.config.start_with_windows)
 
 
-    def create_tray_icon_pixmap() -> QIcon:
+    _CACHED_PRISMWAKE_APP_ICON: Optional[QIcon] = None
+
+
+    def create_prismwake_pixmap(size: int = 64) -> QPixmap:
         """
-        Generates a 3D Skeuomorphic Frutiger Aqua Glass Orb / Water-Bubble Tray Icon
-        with ocean-to-cyan radial depth, aurora green inner lens, and glossy white crescent.
+        Renders a crisp, size-tuned Prismwake Frutiger Aqua orb + 'P' prism/wave
+        monogram `QPixmap` at `size x size` (`16`..`256`).
+        Prioritizes silhouette legibility at small tray/taskbar sizes (`16x16`, `24x24`, `32x32`)
+        and full Frutiger Aqua 3D glass depth at large sizes (`48x48`..`256x256`).
         """
-        pix = QPixmap(64, 64)
+        sz = max(16, min(512, int(size)))
+        pix = QPixmap(sz, sz)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
-        center = QPointF(32.0, 32.0)
-        radius = 27.0
+        s = sz / 64.0
+        center = QPointF(32.0 * s, 32.0 * s)
+        radius = (29.5 if sz <= 24 else 28.0) * s
 
-        # Outer aqua sphere radial gradient
-        sphere_grad = QRadialGradient(QPointF(22.0, 18.0), 38.0)
-        sphere_grad.setColorAt(0.0, QColor(215, 255, 255, 255))
-        sphere_grad.setColorAt(0.32, QColor(0, 210, 255, 255))
-        sphere_grad.setColorAt(0.72, QColor(0, 105, 205, 255))
-        sphere_grad.setColorAt(1.0, QColor(0, 45, 110, 255))
+        # 1. Outer Frutiger Aqua sphere radial gradient
+        sphere_grad = QRadialGradient(QPointF(21.5 * s, 16.5 * s), 40.0 * s)
+        sphere_grad.setColorAt(0.0, QColor(228, 255, 255, 255))
+        sphere_grad.setColorAt(0.30, QColor(28, 224, 255, 255))
+        sphere_grad.setColorAt(0.70, QColor(0, 114, 212, 255))
+        sphere_grad.setColorAt(1.0, QColor(0, 40, 102, 255))
 
+        rim_w = max(1.1, (2.2 if sz >= 32 else 1.5) * s)
         p.setBrush(QBrush(sphere_grad))
-        p.setPen(QPen(QColor(215, 252, 255, 245), 2.2))
+        p.setPen(QPen(QColor(218, 252, 255, 248), rim_w))
         p.drawEllipse(center, radius, radius)
 
-        # Bottom subsurface emerald-aqua bounce glow crescent
-        bounce_grad = QRadialGradient(QPointF(32.0, 50.0), 20.0)
-        bounce_grad.setColorAt(0.0, QColor(115, 255, 185, 210))
-        bounce_grad.setColorAt(1.0, QColor(0, 255, 200, 0))
+        # 2. Subsurface emerald-mint bounce glow along lower hemisphere
+        bounce_grad = QRadialGradient(QPointF(32.0 * s, 52.0 * s), 22.0 * s)
+        bounce_grad.setColorAt(0.0, QColor(105, 252, 190, 215))
+        bounce_grad.setColorAt(1.0, QColor(0, 240, 200, 0))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(bounce_grad))
-        p.drawEllipse(center, radius - 1.5, radius - 1.5)
+        p.drawEllipse(center, radius - rim_w * 0.5, radius - rim_w * 0.5)
 
-        # Inner glowing viewfinder reticle + Prismwake crystal triangle
+        # 3. Inner viewfinder rounded frame (drawn at >= 32px so 16/24px stay uncluttered)
+        if sz >= 32:
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(195, 252, 255, 165), max(1.2, 1.7 * s)))
+            p.drawRoundedRect(
+                QRectF(14.5 * s, 14.5 * s, 35.0 * s, 35.0 * s), 8.0 * s, 8.0 * s
+            )
+
+        # 4. Refracted emerald-aqua wave ribbon beneath the P monogram
+        wave_path = QPainterPath()
+        wave_path.moveTo(16.0 * s, 43.0 * s)
+        wave_path.cubicTo(
+            24.0 * s, 37.5 * s,
+            32.0 * s, 47.0 * s,
+            40.5 * s, 40.5 * s,
+        )
+        wave_path.cubicTo(
+            44.5 * s, 37.5 * s,
+            47.0 * s, 39.0 * s,
+            49.5 * s, 36.8 * s,
+        )
+        wave_w = max(1.6, (5.2 if sz <= 24 else 3.8) * s)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor(195, 250, 255, 210), 2.2))
-        p.drawRoundedRect(QRectF(17.0, 17.0, 30.0, 30.0), 7.0, 7.0)
-        prism_poly = QPolygonF([QPointF(32.0, 16.0), QPointF(45.0, 42.0), QPointF(19.0, 42.0)])
-        p.setBrush(QColor(150, 252, 255, 190))
-        p.setPen(QPen(QColor(255, 255, 255, 250), 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        p.drawPolygon(prism_poly)
+        p.setPen(
+            QPen(
+                QColor(105, 250, 190, 240),
+                wave_w,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        p.drawPath(wave_path)
 
-        # Top glossy white specular reflection cap (classic Frutiger Aero orb shine)
-        cap_grad = QLinearGradient(QPointF(32.0, 7.0), QPointF(32.0, 31.0))
-        cap_grad.setColorAt(0.0, QColor(255, 255, 255, 235))
-        cap_grad.setColorAt(0.7, QColor(255, 255, 255, 65))
+        # 5. Bold Prismwake 'P' + inner cyan prism facet
+        p_left = (22.5 if sz <= 24 else 23.0) * s
+        p_top = (17.0 if sz <= 24 else 18.5) * s
+        p_bot = (47.5 if sz <= 24 else 45.5) * s
+        p_mid = (34.0 if sz <= 24 else 33.5) * s
+        p_bowl = (44.0 if sz <= 24 else 43.0) * s
+        p_stroke = max(2.0, (7.0 if sz <= 24 else 5.4) * s)
+
+        p_glyph = QPainterPath()
+        p_glyph.moveTo(p_left, p_bot)
+        p_glyph.lineTo(p_left, p_top)
+        p_glyph.lineTo(33.5 * s, p_top)
+        p_glyph.cubicTo(
+            p_bowl, p_top,
+            p_bowl, p_mid,
+            33.5 * s, p_mid,
+        )
+        p_glyph.lineTo(p_left, p_mid)
+
+        # Subtle deep-ocean drop shadow for high contrast
+        p.save()
+        p.translate(max(0.8, 1.1 * s), max(0.8, 1.1 * s))
+        p.setPen(
+            QPen(
+                QColor(0, 30, 72, 195),
+                p_stroke,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        p.drawPath(p_glyph)
+        p.restore()
+
+        # Inner cyan prism triangle inside the P loop
+        prism_tri = QPolygonF(
+            [
+                QPointF(p_left + p_stroke * 0.45, p_top + p_stroke * 0.55),
+                QPointF(p_bowl - p_stroke * 0.45, (p_top + p_mid) * 0.5),
+                QPointF(p_left + p_stroke * 0.45, p_mid - p_stroke * 0.55),
+            ]
+        )
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(148, 255, 255, 228))
+        p.drawPolygon(prism_tri)
+
+        # Main luminous white-cyan P stroke
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(
+            QPen(
+                QColor(255, 255, 255, 255),
+                p_stroke,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        p.drawPath(p_glyph)
+
+        # 6. Top glossy white specular reflection cap
+        cap_grad = QLinearGradient(QPointF(32.0 * s, 5.5 * s), QPointF(32.0 * s, 29.0 * s))
+        cap_grad.setColorAt(0.0, QColor(255, 255, 255, 232))
+        cap_grad.setColorAt(0.68, QColor(255, 255, 255, 62))
         cap_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(cap_grad))
-        p.drawEllipse(QRectF(13.0, 8.0, 38.0, 22.0))
+        p.drawEllipse(QRectF(12.5 * s, 6.5 * s, 39.0 * s, 21.0 * s))
 
         p.end()
-        return QIcon(pix)
+        return pix
+
+
+    def create_tray_icon_pixmap() -> QIcon:
+        """
+        Builds and caches the multi-resolution Prismwake `QIcon` containing all 7
+        standard Windows icon sizes (`16, 24, 32, 48, 64, 128, 256` px).
+        Loads bundled `prismwake.ico` frames when available and guarantees every
+        standard size is populated via `create_prismwake_pixmap(sz)` so the Windows
+        system tray, taskbar, Alt+Tab switcher, and dialog title bars always receive
+        an exact, razor-sharp icon frame.
+        """
+        global _CACHED_PRISMWAKE_APP_ICON
+        if _CACHED_PRISMWAKE_APP_ICON is not None and not _CACHED_PRISMWAKE_APP_ICON.isNull():
+            return _CACHED_PRISMWAKE_APP_ICON
+
+        icon = QIcon()
+        ico_file = get_bundled_resource_path(
+            "prismwake.ico",
+            "assets/prismwake.ico",
+            "docs/assets/prismwake.ico",
+        )
+        loaded_from_ico = False
+        if ico_file is not None:
+            try:
+                file_icon = QIcon(str(ico_file))
+                if not file_icon.isNull():
+                    for sz in ICON_STANDARD_SIZES:
+                        pm = file_icon.pixmap(QSize(sz, sz))
+                        if not pm.isNull() and pm.width() > 0:
+                            icon.addPixmap(pm)
+                            loaded_from_ico = True
+            except Exception:
+                loaded_from_ico = False
+
+        # Ensure every standard Windows icon resolution (16..256) is explicitly present
+        existing_widths = {s.width() for s in icon.availableSizes()}
+        for sz in ICON_STANDARD_SIZES:
+            if not loaded_from_ico or sz not in existing_widths:
+                icon.addPixmap(create_prismwake_pixmap(sz))
+
+        _CACHED_PRISMWAKE_APP_ICON = icon
+        return icon
 
 
     class HDRSnipFusionApplication:
