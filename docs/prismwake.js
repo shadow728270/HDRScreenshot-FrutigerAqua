@@ -175,9 +175,10 @@
      if(!response.ok)throw Error("GitHub HTTP "+response.status);
      const rows=await response.json();if(!Array.isArray(rows)||!rows.length)throw Error("No releases returned");
      releases.replaceChildren();for(const row of rows){if(row.draft||row.prerelease)continue;const date=row.published_at?new Date(row.published_at).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}):"";
-       addRow(row.tag_name+" · "+(row.tag_name==="v0.1.3"?"Prismwake editor upgrade":row.tag_name==="v0.1.2"?"Stroke & Paint Bucket":"Published release"),row.name||"Official stable build","Shipped",row.html_url,date)}
+       addRow(row.tag_name+" · "+(row.tag_name==="v0.1.4"?"Windows polish and reliability":row.tag_name==="v0.1.3"?"Prismwake editor upgrade":row.tag_name==="v0.1.2"?"Stroke & Paint Bucket":"Published release"),row.name||"Official stable build","Shipped",row.html_url,date)}
      releaseState.textContent="Fetched from GitHub · "+new Date().toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});didLoad=true;
-   }catch(e){releases.replaceChildren();addRow("v0.1.3 · Prismwake editor upgrade","Current official stable release","Shipped",repoLink+"/tag/v0.1.3","Oct 24, 2026");
+   }catch(e){releases.replaceChildren();addRow("v0.1.4 · Windows settings and icon polish","Current official stable release","Shipped",repoLink+"/tag/v0.1.4","Oct 25, 2026");
+     addRow("v0.1.3 · Prismwake editor upgrade","Previous stable release","Shipped",repoLink+"/tag/v0.1.3","Oct 24, 2026");
      addRow("v0.1.2 · Stroke & Paint Bucket","Previous stable release","Shipped",repoLink+"/tag/v0.1.2","Oct 24, 2026");
      addRow("v0.1.1 · Saving & updater","Official stable release","Shipped",repoLink+"/tag/v0.1.1","");
      releaseState.textContent="Live GitHub data unavailable; showing verified release information."}
