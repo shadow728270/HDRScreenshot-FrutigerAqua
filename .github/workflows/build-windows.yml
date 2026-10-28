@@ -339,10 +339,14 @@ jobs:
           $pyiWork = Join-Path $testRoot "build"
           $pyiDist = Join-Path $testRoot "dist_next"
           $pyiSpec = Join-Path $testRoot "spec"
+          # The spec is written outside the checkout; PyInstaller resolves
+          # icon/version resources relative to the generated .spec directory.
+          $iconAbs = (Resolve-Path -LiteralPath "prismwake.ico").Path
+          $versionAbs = (Resolve-Path -LiteralPath "prismwake_version_info.txt").Path
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name "Prismwake_vNext" `
-            --icon "prismwake.ico" `
-            --version-file "prismwake_version_info.txt" `
+            --icon $iconAbs `
+            --version-file $versionAbs `
             --workpath $pyiWork `
             --distpath $pyiDist `
             --specpath $pyiSpec `
