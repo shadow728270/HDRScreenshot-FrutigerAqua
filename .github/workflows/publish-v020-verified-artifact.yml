@@ -1,0 +1,57 @@
+name: Publish tested Prismwake v0.2.0 executable
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-v020-verified-artifact.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  release:
+    if: ${{ github.repository == 'shadow728270/HDRScreenshot-FrutigerAqua' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Prismwake-Windows-x64-v0.2.0
+          repository: shadow728270/HDRScreenshot-FrutigerAqua
+          run-id: 40613564964
+          github-token: ${{ github.token }}
+          path: release-assets
+      - name: Verify SHA-256 and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = '94afd049a81cdabd85d75f2eca61253d7b2338098b412614028c6d343320176b'
+          $matches = @(Get-ChildItem -Path 'release-assets' -Recurse -File -Filter 'Prismwake.exe')
+          if ($matches.Count -ne 1) { throw "Expected one verified EXE; found $($matches.Count)" }
+          $exe = $matches[0].FullName
+          $sidecar = Join-Path $matches[0].DirectoryName 'Prismwake.exe.sha256'
+          if (-not (Test-Path -LiteralPath $sidecar)) { throw 'SHA256 sidecar missing' }
+          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = (Get-Item -LiteralPath $exe).Length
+          if ($sha -ne $expected -or $size -ne 299796600) { throw "EXE mismatch: $size bytes, sha256=$sha" }
+          if ((Get-Content -LiteralPath $sidecar -Raw).Trim() -ne "$expected  Prismwake.exe") { throw 'Sidecar digest mismatch' }
+          Write-Host "Verified the original tested EXE ($size bytes, sha256=$sha)"
+          $ErrorActionPreference = 'Continue'
+          gh release view v0.2.0 --repo $env:GITHUB_REPOSITORY --json tagName 2>$null | Out-Null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = 'Stop'
+          if (-not $exists) {
+            gh release create v0.2.0 "${exe}#Prismwake.exe" "${sidecar}#Prismwake.exe.sha256" --repo $env:GITHUB_REPOSITORY --title 'Prismwake v0.2.0 - The Productivity Update' --notes-file 'RELEASE_NOTES_v0.2.0.md' --target $env:GITHUB_SHA
+          } else {
+            gh release upload v0.2.0 "${exe}#Prismwake.exe" "${sidecar}#Prismwake.exe.sha256" --repo $env:GITHUB_REPOSITORY --clobber
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Release creation/upload failed with $LASTEXITCODE" }
+          $relJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v0.2.0"
+          if ($LASTEXITCODE -ne 0) { throw 'Release API verification failed' }
+          $rel = $relJson | ConvertFrom-Json
+          $assets = @($rel.assets | Where-Object { $_.name -eq 'Prismwake.exe' })
+          $checks = @($rel.assets | Where-Object { $_.name -eq 'Prismwake.exe.sha256' })
+          if ($rel.draft -or $rel.prerelease -or $assets.Count -ne 1 -or $checks.Count -ne 1) { throw 'Stable release or its assets missing' }
+          if ([long]$assets[0].size -ne 299796600) { throw 'Published EXE file size incorrect' }
+          if ($assets[0].digest -and $assets[0].digest -ne "sha256:$expected") { throw 'Published EXE digest mismatch' }
+          Write-Host "Verified public release: $($rel.html_url)"

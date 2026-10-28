@@ -15,6 +15,7 @@ permissions:
 jobs:
   build-windows:
     name: Build & Verify Prismwake.exe (Windows x64)
+    if: ${{ !contains(github.event.head_commit.message, '[release-only]') }}
     runs-on: windows-latest
 
     steps:
@@ -509,27 +510,12 @@ jobs:
           $sizeBytes = "${{ steps.verify_exe.outputs.size_bytes }}"
 
           $notesFile = Join-Path $env:RUNNER_TEMP "release_notes_$tag.md"
-          $notesLines = @(
-            "## Prismwake $tag — The Productivity Update",
-            "*Catch the light. Keep the detail.*",
-            "",
-            "### Official Standalone Windows 10/11 Executable",
-            "- **Asset**: ``Prismwake.exe`` (64-bit standalone PyInstaller build with offline RapidOCR ONNX neural + Tesseract fallback OCR, pinned screenshots, searchable SQLite history, and smart capture modes)",
-            "- **Checksum File**: ``Prismwake.exe.sha256``",
-            "- **Version**: ``v$ver``",
-            "- **Size**: ``$sizeBytes`` bytes",
-            "- **SHA-256**: ``$sha256``",
-            "",
-            "```text",
-            "$sha256  Prismwake.exe",
-            "```"
-          )
-          $notesLines -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
+          Copy-Item -LiteralPath "RELEASE_NOTES_v0.2.0.md" -Destination $notesFile -Force
 
           $releaseExists = $false
           try {
-            gh release view $tag --repo "${{ github.repository }}" | Out-Null
-            $releaseExists = $true
+            gh release view $tag --repo "${{ github.repository }}" --json tagName 2>$null | Out-Null
+            $releaseExists = ($LASTEXITCODE -eq 0)
           } catch {
             $releaseExists = $false
           }
@@ -549,6 +535,7 @@ jobs:
               --repo "${{ github.repository }}" `
               --clobber
           }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release create/upload failed (exit $LASTEXITCODE)" }
 
       - name: Verify published GitHub Release single-EXE asset & digest metadata
         if: steps.meta.outputs.is_tag == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.app_version == '0.2.0')
