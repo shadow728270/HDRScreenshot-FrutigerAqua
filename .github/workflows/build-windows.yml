@@ -339,10 +339,21 @@ jobs:
           $pyiWork = Join-Path $testRoot "build"
           $pyiDist = Join-Path $testRoot "dist_next"
           $pyiSpec = Join-Path $testRoot "spec"
-          # The spec is written outside the checkout; PyInstaller resolves
-          # icon/version resources relative to the generated .spec directory.
+          # The test entry script and .spec live in RUNNER_TEMP. Resolve the
+          # checkout root explicitly or dynamic project modules and data can
+          # be excluded from the vNext executable.
+          $projectRoot = (Get-Location).Path
           $iconAbs = (Resolve-Path -LiteralPath "prismwake.ico").Path
           $versionAbs = (Resolve-Path -LiteralPath "prismwake_version_info.txt").Path
+          $vNextDataArgs = @(
+            "--add-data", "$iconAbs;.",
+            "--add-data", "$projectRoot\\THIRD_PARTY_LICENSES.md;.",
+            "--add-data", "$projectRoot\\tesseract_bundle;tesseract_bundle",
+            "--add-data", "$projectRoot\\rapidocr_models;rapidocr_models"
+          )
+          if (Test-Path -LiteralPath "prismwake-mark.svg") {
+            $vNextDataArgs += @("--add-data", "$projectRoot\\prismwake-mark.svg;.")
+          }
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name "Prismwake_vNext" `
             --icon $iconAbs `
@@ -350,7 +361,30 @@ jobs:
             --workpath $pyiWork `
             --distpath $pyiDist `
             --specpath $pyiSpec `
+            --paths $projectRoot `
             --collect-submodules PyQt6 `
+            --collect-all rapidocr `
+            --collect-all onnxruntime `
+            --hidden-import ocr `
+            --hidden-import ocr.engine `
+            --hidden-import ocr.backends `
+            --hidden-import onnxruntime `
+            --hidden-import onnxruntime.capi._pybind_state `
+            --hidden-import rapidocr `
+            --hidden-import cv2 `
+            --hidden-import pyclipper `
+            --hidden-import shapely `
+            --hidden-import omegaconf `
+            --hidden-import yaml `
+            --hidden-import history `
+            --hidden-import history.storage `
+            --hidden-import pinning `
+            --hidden-import pinning.manager `
+            --hidden-import capture `
+            --hidden-import capture.smart_modes `
+            --hidden-import updater `
+            --hidden-import updater.single_exe `
+            @vNextDataArgs `
             $nextSrc
 
           $nextExe = Join-Path $pyiDist "Prismwake_vNext.exe"
@@ -411,7 +445,8 @@ jobs:
               )
           finally:
               os.environ.pop("HDRSNIP_VERIFY_STARTUP_ONLY", None)
-          assert rc_update == 0
+          print(f"Updater result: rc={rc_update}, expected_sha={next_sha}, installed_sha={m.compute_file_sha256(installed_exe)}", flush=True)
+          assert rc_update == 0, f"Update helper returned {rc_update} instead of 0"
           assert m.compute_file_sha256(installed_exe) == next_sha
 
           vfail_dir = staging_root / "v9.9.9"
