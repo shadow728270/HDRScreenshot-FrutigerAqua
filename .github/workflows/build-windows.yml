@@ -1,18 +1,8 @@
-name: Build & Release Windows Executable (Prismwake & Legacy HDRSnipFusion Alias)
+name: Build & Release Prismwake Windows Executable (Single-EXE Architecture)
 
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'Prismwake.py'
-      - 'HDRSnipFusion.py'
-      - 'make_prismwake_icon.py'
-      - 'prismwake-mark.svg'
-      - 'prismwake_version_info.txt'
-      - 'requirements.txt'
-      - 'test_prismwake_v014.py'
-      - 'test_legacy_updater_contract.py'
-      - '.github/workflows/build-windows.yml'
     tags:
       - 'v*.*.*'
   pull_request:
@@ -24,7 +14,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build & Verify Prismwake.exe + HDRSnipFusion.exe (Windows x64)
+    name: Build & Verify Prismwake.exe (Windows x64)
     runs-on: windows-latest
 
     steps:
@@ -33,37 +23,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.11 (64-bit)
+      - name: Set up Python 3.12 (64-bit)
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           architecture: 'x64'
           cache: 'pip'
 
-      - name: Locate entry-point script & verify APP_VERSION consistency
+      - name: Locate canonical Prismwake.py & verify APP_VERSION = "0.2.0"
         id: meta
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $candidates = @("Prismwake.py", "HDRSnipFusion.py", "src/Prismwake.py", "src/HDRSnipFusion.py")
-          $entryScript = $null
-          foreach ($cand in $candidates) {
-            if (Test-Path -LiteralPath $cand) {
-              $entryScript = $cand
-              break
-            }
-          }
-          if (-not $entryScript) {
-            Write-Error "Could not locate Prismwake.py or HDRSnipFusion.py in the repository."
+          $entryScript = "Prismwake.py"
+          if (-not (Test-Path -LiteralPath $entryScript)) {
+            Write-Error "Could not locate canonical Prismwake.py in the repository root."
             exit 1
-          }
-
-          # Ensure both Prismwake.py and HDRSnipFusion.py exist on runner for tests & backward-compatible imports
-          if ((Test-Path -LiteralPath "Prismwake.py") -and (-not (Test-Path -LiteralPath "HDRSnipFusion.py"))) {
-            Copy-Item -LiteralPath "Prismwake.py" -Destination "HDRSnipFusion.py" -Force
-          } elseif ((Test-Path -LiteralPath "HDRSnipFusion.py") -and (-not (Test-Path -LiteralPath "Prismwake.py"))) {
-            Copy-Item -LiteralPath "HDRSnipFusion.py" -Destination "Prismwake.py" -Force
           }
 
           $content = Get-Content -LiteralPath $entryScript -Raw -Encoding UTF8
@@ -93,16 +69,51 @@ jobs:
           "is_tag=$($isTagPush.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "tag_name=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Install runtime & packaging dependencies
+      - name: Install runtime, neural OCR & packaging dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          if (Test-Path -LiteralPath "requirements.txt") {
-            pip install -r requirements.txt
-          } else {
-            pip install PyQt6 numpy Pillow
-          }
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements.txt
           pip install pyinstaller pytest
+          python -c "import onnxruntime, rapidocr; print('Verified neural OCR packages:', onnxruntime.__version__, rapidocr.__version__)"
+
+      - name: Stage & verify offline RapidOCR ONNX models and Tesseract fallback runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rapidModelsDir = Join-Path (Get-Location) "rapidocr_models"
+          New-Item -ItemType Directory -Path $rapidModelsDir -Force | Out-Null
+          python tools/stage_rapidocr_models.py --output-dir $rapidModelsDir --strict
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $rapidModelsDir "model_manifest.json"))) {
+            Write-Error "Failed to stage and verify offline RapidOCR ONNX models!"
+            exit 1
+          }
+
+          $bundleDir = Join-Path (Get-Location) "tesseract_bundle"
+          $tessdataDir = Join-Path $bundleDir "tessdata"
+          New-Item -ItemType Directory -Path $tessdataDir -Force | Out-Null
+
+          if (-not (Test-Path -LiteralPath (Join-Path $bundleDir "tesseract.exe"))) {
+            choco install tesseract --no-progress -y
+            $chocoTess = "C:\Program Files\Tesseract-OCR"
+            if (Test-Path -LiteralPath $chocoTess) {
+              Copy-Item -Path "$chocoTess\*.exe" -Destination $bundleDir -Force
+              Copy-Item -Path "$chocoTess\*.dll" -Destination $bundleDir -Force
+              if (Test-Path -LiteralPath "$chocoTess\tessdata\eng.traineddata") {
+                Copy-Item -LiteralPath "$chocoTess\tessdata\eng.traineddata" -Destination $tessdataDir -Force
+              }
+            }
+          }
+
+          foreach ($lang in @("eng", "ita")) {
+            $tdFile = Join-Path $tessdataDir "$lang.traineddata"
+            if (-not (Test-Path -LiteralPath $tdFile)) {
+              $url = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$lang.traineddata"
+              Invoke-WebRequest -Uri $url -OutFile $tdFile -UseBasicParsing
+            }
+          }
+          Write-Host "Staged offline RapidOCR ONNX models in $rapidModelsDir & Tesseract fallback runtime in $bundleDir"
 
       - name: Generate & verify multi-resolution Prismwake Windows icon (.ico), SVG & PE version metadata
         id: icon_gen
@@ -119,12 +130,11 @@ jobs:
             }
           }
           if (-not $genScript) {
-            Write-Error "Could not locate make_prismwake_icon.py or tools/make_prismwake_icon.py"
+            Write-Error "Could not locate make_prismwake_icon.py"
             exit 1
           }
 
           python $genScript (Get-Location).Path $appVer
-          if ($LASTEXITCODE -ne 0) { throw "Icon generation failed" }
 
           if (-not (Test-Path -LiteralPath "prismwake.ico")) {
             Write-Error "make_prismwake_icon.py did not generate prismwake.ico"
@@ -135,10 +145,9 @@ jobs:
             exit 1
           }
 
-          # Verify all 7 standard Windows icon frames (16, 24, 32, 48, 64, 128, 256) exist in prismwake.ico
           python -c "import pathlib, make_prismwake_icon as g; frames = g.inspect_ico_frames(pathlib.Path('prismwake.ico')); widths = [w for w, h, bpp in frames]; assert widths == [16, 24, 32, 48, 64, 128, 256], f'Unexpected ICO frames: {frames}'; print('Verified multi-size prismwake.ico frames:', frames)"
 
-      - name: Run headless verification, Settings geometry & legacy compatibility test suites on source
+      - name: Run automated test suites & side-by-side neural evaluation on source
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -147,7 +156,7 @@ jobs:
 
           $verOut = (python $entry --version | Out-String).Trim()
           Write-Host "Source --version output: $verOut"
-          if ($verOut -notlike "*Prismwake v$expectedVer*" -and $verOut -notlike "*HDRSnip Fusion v$expectedVer*") {
+          if ($verOut -notlike "*Prismwake v$expectedVer*") {
             Write-Error "Unexpected --version output from source: '$verOut'"
             exit 1
           }
@@ -155,38 +164,40 @@ jobs:
           $srcVerJsonPath = Join-Path $env:RUNNER_TEMP "source_version_check.json"
           if (Test-Path -LiteralPath $srcVerJsonPath) { Remove-Item -LiteralPath $srcVerJsonPath -Force }
           python $entry --write-version-file $srcVerJsonPath
-          if (-not (Test-Path -LiteralPath $srcVerJsonPath)) {
-            Write-Error "Source --write-version-file did not create $srcVerJsonPath"
-            exit 1
-          }
           $srcVerObj = Get-Content -LiteralPath $srcVerJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
           if ($srcVerObj.version -ne $expectedVer -or $srcVerObj.app -ne "Prismwake") {
             Write-Error "Source --write-version-file mismatch: got '$($srcVerObj | ConvertTo-Json -Compress)'"
             exit 1
           }
 
-          # Keep historical version-specific tests frozen. Do not run v0.1.3
-          # candidate assertions as if they described the current release.
-          if (Test-Path -LiteralPath "tests/test_legacy_updater_contract.py") {
-            python -m unittest discover -s tests -p "test_legacy_updater_contract.py" -v
-            if ($LASTEXITCODE -ne 0) { throw "Frozen v0.1.2 updater suite failed" }
+          python -u tests/run_headless_tests.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Headless test suite failed with exit code $LASTEXITCODE"
+            exit 1
           }
-          if (Test-Path -LiteralPath "test_legacy_updater_contract.py") {
-            python test_legacy_updater_contract.py
-            if ($LASTEXITCODE -ne 0) { throw "Cross-version updater suite failed" }
+          python -u tests/smoke_qt_gui.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Native PyQt6 GUI smoke test failed with exit code $LASTEXITCODE"
+            exit 1
           }
-          if (Test-Path -LiteralPath "test_prismwake_v014.py") {
-            python test_prismwake_v014.py
-            if ($LASTEXITCODE -ne 0) { throw "v0.1.4 tests failed" }
+          python -u -m ocr.eval_side_by_side --require-neural --output-json BENCHMARK_OCR_V020.json --output-md BENCHMARK_OCR_V020.md
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Side-by-side neural OCR evaluation failed with exit code $LASTEXITCODE"
+            exit 1
           }
 
-      - name: Build single-file Windows executable with PyInstaller (Prismwake.exe + HDRSnipFusion.exe)
+      - name: Build single-file Windows executable with PyInstaller (Prismwake.exe only)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $entry = "${{ steps.meta.outputs.entry_script }}"
 
-          $dataArgs = @("--add-data", "prismwake.ico;.")
+          $dataArgs = @(
+            "--add-data", "prismwake.ico;.",
+            "--add-data", "THIRD_PARTY_LICENSES.md;.",
+            "--add-data", "tesseract_bundle;tesseract_bundle",
+            "--add-data", "rapidocr_models;rapidocr_models"
+          )
           if (Test-Path -LiteralPath "prismwake-mark.svg") {
             $dataArgs += @("--add-data", "prismwake-mark.svg;.")
           }
@@ -196,99 +207,121 @@ jobs:
             --icon "prismwake.ico" `
             --version-file "prismwake_version_info.txt" `
             --collect-submodules PyQt6 `
+            --collect-all rapidocr `
+            --collect-all onnxruntime `
+            --hidden-import ocr `
+            --hidden-import ocr.engine `
+            --hidden-import ocr.backends `
+            --hidden-import onnxruntime `
+            --hidden-import onnxruntime.capi._pybind_state `
+            --hidden-import rapidocr `
+            --hidden-import cv2 `
+            --hidden-import pyclipper `
+            --hidden-import shapely `
+            --hidden-import omegaconf `
+            --hidden-import yaml `
+            --hidden-import history `
+            --hidden-import history.storage `
+            --hidden-import pinning `
+            --hidden-import pinning.manager `
+            --hidden-import capture `
+            --hidden-import capture.smart_modes `
+            --hidden-import updater `
+            --hidden-import updater.single_exe `
             @dataArgs `
             $entry
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
 
           $prismwakeExe = Join-Path (Get-Location) "dist\Prismwake.exe"
-          $legacyExe = Join-Path (Get-Location) "dist\HDRSnipFusion.exe"
           if (-not (Test-Path -LiteralPath $prismwakeExe)) {
             Write-Error "PyInstaller did not produce expected executable at $prismwakeExe"
             exit 1
           }
+          if (Test-Path -LiteralPath (Join-Path (Get-Location) "dist\HDRSnipFusion.exe")) {
+            Write-Error "Obsolete HDRSnipFusion.exe must not be built in v0.2.0+"
+            exit 1
+          }
 
-          # Create byte-identical HDRSnipFusion.exe alias for seamless v0.1.1 / v0.1.2 / v0.1.3 updater compatibility
-          Copy-Item -LiteralPath $prismwakeExe -Destination $legacyExe -Force
-
-      - name: Verify compiled Prismwake.exe & HDRSnipFusion.exe (PE64 headers, embedded icon, PE FileVersionInfo & identical SHA-256)
+      - name: Verify compiled Prismwake.exe (PE64 headers, release-gated neural + fallback OCR self-test & SHA-256)
         id: verify_exe
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $prismwakeExe = Join-Path (Get-Location) "dist\Prismwake.exe"
-          $legacyExe = Join-Path (Get-Location) "dist\HDRSnipFusion.exe"
           $expectedVer = "${{ steps.meta.outputs.app_version }}"
 
-          foreach ($exePath in @($prismwakeExe, $legacyExe)) {
-            if (-not (Test-Path -LiteralPath $exePath)) {
-              Write-Error "Missing expected built executable: $exePath"
-              exit 1
-            }
-            $item = Get-Item -LiteralPath $exePath
-            if ($item.Length -lt 5242880) {
-              Write-Error "$($item.Name) size ($($item.Length) bytes) is unexpectedly small (< 5 MB)."
-              exit 1
-            }
-            python -c "import sys, pathlib; sys.path.insert(0, '.'); import Prismwake as m; ok, reason = m.validate_windows_pe_executable(pathlib.Path(r'$exePath')); print('PE check for', r'$exePath', ':', ok, reason); sys.exit(0 if ok else 1)"
-            if ($LASTEXITCODE -ne 0) { throw "PE validation failed for $exePath" }
-
-            # Verify Windows PE VersionInfo metadata (ProductName, FileDescription, ProductVersion)
-            $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
-            Write-Host "PE FileVersionInfo for $($item.Name): ProductName='$($fvi.ProductName)', FileDescription='$($fvi.FileDescription)', FileVersion='$($fvi.FileVersion)', ProductVersion='$($fvi.ProductVersion)'"
-            if ($fvi.ProductName -notlike "*Prismwake*" -or $fvi.FileDescription -notlike "*Prismwake*") {
-              Write-Error "PE VersionInfo ProductName/FileDescription missing 'Prismwake' on $($item.Name)"
-              exit 1
-            }
-            if (-not $fvi.FileVersion.StartsWith($expectedVer)) {
-              Write-Error "PE FileVersion '$($fvi.FileVersion)' does not start with expected '$expectedVer'"
-              exit 1
-            }
-
-            $verJsonPath = Join-Path $env:RUNNER_TEMP "compiled_ver_$($item.BaseName).json"
-            if (Test-Path -LiteralPath $verJsonPath) { Remove-Item -LiteralPath $verJsonPath -Force }
-            $proc = Start-Process -FilePath $exePath -ArgumentList @("--write-version-file", $verJsonPath) -Wait -PassThru -WindowStyle Hidden
-            if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $verJsonPath)) {
-              Write-Error "Compiled $($item.Name) --write-version-file failed (exit=$($proc.ExitCode))"
-              exit 1
-            }
-            $verData = Get-Content -LiteralPath $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            Write-Host "Compiled $($item.Name) version payload: $($verData | ConvertTo-Json -Compress)"
-            if ($verData.version -ne $expectedVer -or $verData.tag -ne "v$expectedVer" -or -not $verData.packaged) {
-              Write-Error "Compiled $($item.Name) reported unexpected version metadata: $($verData | ConvertTo-Json -Compress)"
-              exit 1
-            }
+          $item = Get-Item -LiteralPath $prismwakeExe
+          if ($item.Length -lt 5242880) {
+            Write-Error "$($item.Name) size ($($item.Length) bytes) is unexpectedly small (< 5 MB)."
+            exit 1
           }
+          python -c "import sys, pathlib; sys.path.insert(0, '.'); import Prismwake as m; ok, reason = m.validate_windows_pe_executable(pathlib.Path(r'$prismwakeExe')); print('PE check for', r'$prismwakeExe', ':', ok, reason); sys.exit(0 if ok else 1)"
 
-          $shaPrism = (Get-FileHash -LiteralPath $prismwakeExe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $shaLegacy = (Get-FileHash -LiteralPath $legacyExe -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($shaPrism -ne $shaLegacy) {
-            Write-Error "SHA-256 mismatch between Prismwake.exe ($shaPrism) and HDRSnipFusion.exe ($shaLegacy)!"
+          $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($prismwakeExe)
+          Write-Host "PE FileVersionInfo: ProductName='$($fvi.ProductName)', FileDescription='$($fvi.FileDescription)', FileVersion='$($fvi.FileVersion)', ProductVersion='$($fvi.ProductVersion)'"
+          if ($fvi.ProductName -notlike "*Prismwake*" -or $fvi.FileDescription -notlike "*Prismwake*") {
+            Write-Error "PE VersionInfo ProductName/FileDescription missing 'Prismwake'"
+            exit 1
+          }
+          if (-not $fvi.FileVersion.StartsWith($expectedVer)) {
+            Write-Error "PE FileVersion '$($fvi.FileVersion)' does not start with expected '$expectedVer'"
             exit 1
           }
 
-          $sizeBytes = (Get-Item -LiteralPath $prismwakeExe).Length
+          $verJsonPath = Join-Path $env:RUNNER_TEMP "compiled_ver_Prismwake.json"
+          if (Test-Path -LiteralPath $verJsonPath) { Remove-Item -LiteralPath $verJsonPath -Force }
+          $proc = Start-Process -FilePath $prismwakeExe -ArgumentList @("--write-version-file", $verJsonPath) -Wait -PassThru -WindowStyle Hidden
+          if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $verJsonPath)) {
+            Write-Error "Compiled Prismwake.exe --write-version-file failed (exit=$($proc.ExitCode))"
+            exit 1
+          }
+          $verData = Get-Content -LiteralPath $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($verData.version -ne $expectedVer -or $verData.tag -ne "v$expectedVer" -or -not $verData.packaged) {
+            Write-Error "Compiled Prismwake.exe reported unexpected version metadata: $($verData | ConvertTo-Json -Compress)"
+            exit 1
+          }
+
+          $ocrVerJsonPath = Join-Path $env:RUNNER_TEMP "compiled_ocr_verify.json"
+          if (Test-Path -LiteralPath $ocrVerJsonPath) { Remove-Item -LiteralPath $ocrVerJsonPath -Force }
+          $procOcr = Start-Process -FilePath $prismwakeExe -ArgumentList @("--write-ocr-verify-file", $ocrVerJsonPath, "--require-neural") -Wait -PassThru -WindowStyle Hidden
+          if (-not (Test-Path -LiteralPath $ocrVerJsonPath)) {
+            Write-Error "Compiled Prismwake.exe --write-ocr-verify-file --require-neural failed to produce output file (exit=$($procOcr.ExitCode))"
+            exit 1
+          }
+          $ocrData = Get-Content -LiteralPath $ocrVerJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          Write-Host "=== Offline OCR Backend Self-Test Summary ==="
+          Write-Host "  RapidOCR installed        : $($ocrData.summary_table.'RapidOCR installed')"
+          Write-Host "  models verified           : $($ocrData.summary_table.'models verified')"
+          Write-Host "  neural EXE inference      : $($ocrData.summary_table.'neural EXE inference')"
+          Write-Host "  Tesseract fallback        : $($ocrData.summary_table.'Tesseract fallback')"
+          Write-Host "  offline cache-cleared test: $($ocrData.summary_table.'offline cache-cleared test')"
+          Write-Host "  Details                   : $($ocrData.message)"
+          if ($procOcr.ExitCode -ne 0 -or -not $ocrData.ok -or -not $ocrData.neural_exe_inference_pass -or -not $ocrData.tesseract_fallback_pass -or -not $ocrData.offline_cache_cleared_pass) {
+            Write-Error "Compiled Prismwake.exe FAILED release-gated neural + fallback OCR verification: $($ocrData.message)"
+            exit 1
+          }
+
+          $shaPrism = (Get-FileHash -LiteralPath $prismwakeExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sizeBytes = $item.Length
           "$shaPrism  Prismwake.exe" | Out-File -FilePath (Join-Path (Get-Location) "dist\Prismwake.exe.sha256") -Encoding ascii -NoNewline
-          "$shaLegacy  HDRSnipFusion.exe" | Out-File -FilePath (Join-Path (Get-Location) "dist\HDRSnipFusion.exe.sha256") -Encoding ascii -NoNewline
-          Write-Host "Verified identical SHA-256 for Prismwake.exe & HDRSnipFusion.exe: $shaPrism ($sizeBytes bytes)"
+          Write-Host "Verified SHA-256 for Prismwake.exe: $shaPrism ($sizeBytes bytes)"
 
           "prismwake_exe=$prismwakeExe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "exe_path=$legacyExe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "sha256=$shaPrism" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "size_bytes=$sizeBytes" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Verify two-EXE PyInstaller --onefile --windowed updater, PID ancestry, rollback & staging cleanup
+      - name: Verify modern single-EXE updater replacement, PID ancestry, rollback & staging cleanup
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $entry = "${{ steps.meta.outputs.entry_script }}"
-          $baseExe = "${{ steps.verify_exe.outputs.exe_path }}"
+          $baseExe = "${{ steps.verify_exe.outputs.prismwake_exe }}"
           $baseVer = "${{ steps.meta.outputs.app_version }}"
 
           $verParts = $baseVer.Split(".")
           $nextPatch = [int]$verParts[2] + 1
           $nextVer = "$($verParts[0]).$($verParts[1]).$nextPatch"
 
-          $testRoot = Join-Path $env:RUNNER_TEMP "prismwake_two_exe_updater_test"
+          $testRoot = Join-Path $env:RUNNER_TEMP "prismwake_single_exe_updater_test"
           if (Test-Path -LiteralPath $testRoot) {
             Remove-Item -LiteralPath $testRoot -Recurse -Force
           }
@@ -303,17 +336,13 @@ jobs:
           )
           Set-Content -LiteralPath $nextSrc -Value $patchedSrc -Encoding UTF8
 
-          Write-Host "Building second real PyInstaller --onefile --windowed executable (v$nextVer) for updater test..."
           $pyiWork = Join-Path $testRoot "build"
           $pyiDist = Join-Path $testRoot "dist_next"
           $pyiSpec = Join-Path $testRoot "spec"
-          # PyInstaller resolves resources relative to --specpath; use absolute paths.
-          $iconAbs = (Resolve-Path -LiteralPath "prismwake.ico").Path
-          $versionAbs = (Resolve-Path -LiteralPath "prismwake_version_info.txt").Path
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name "Prismwake_vNext" `
-            --icon $iconAbs `
-            --version-file $versionAbs `
+            --icon "prismwake.ico" `
+            --version-file "prismwake_version_info.txt" `
             --workpath $pyiWork `
             --distpath $pyiDist `
             --specpath $pyiSpec `
@@ -326,7 +355,7 @@ jobs:
             exit 1
           }
 
-          $testScript = Join-Path $testRoot "run_two_exe_validation.py"
+          $testScript = Join-Path $testRoot "run_single_exe_validation.py"
           $pyCode = @'
           import json
           import os
@@ -350,49 +379,12 @@ jobs:
           install_dir.mkdir(parents=True, exist_ok=True)
           staging_root.mkdir(parents=True, exist_ok=True)
 
-          # Test legacy HDRSnipFusion.exe installed binary upgrading to vNext via Prismwake.exe staged asset
-          installed_exe = install_dir / "HDRSnipFusion.exe"
+          installed_exe = install_dir / "Prismwake.exe"
           shutil.copy2(base_exe_src, installed_exe)
           base_sha = m.compute_file_sha256(installed_exe)
           next_sha = m.compute_file_sha256(next_exe_src)
-          assert base_sha != next_sha, "Base EXE and Next EXE SHA-256 must differ"
+          assert base_sha != next_sha
 
-          # 1. Test real PyInstaller --onefile bootloader parent PID vs Python child PID
-          confirm_1 = staging_root / "test_pid_confirm.json"
-          token_1 = secrets.token_hex(32)
-          env_1 = m._build_clean_pyinstaller_env()
-          env_1["HDRSNIP_STARTUP_CONFIRM_TOKEN"] = token_1
-          proc_1 = subprocess.Popen(
-              [
-                  str(installed_exe),
-                  "--restarted-after-update",
-                  "--confirm-startup-file",
-                  str(confirm_1),
-                  "--confirm-startup-token",
-                  token_1,
-                  "--verify-startup-only",
-              ],
-              env=env_1,
-              cwd=str(install_dir),
-          )
-          ok_1, reason_1 = m._wait_for_startup_confirmation(
-              proc_1,
-              confirm_file=confirm_1,
-              expected_version=base_ver,
-              expected_token=token_1,
-              expected_executable=installed_exe,
-              timeout_sec=20.0,
-              verify_executable_path=True,
-              allow_clean_exit_after_confirm=True,
-          )
-          assert ok_1, f"Bootloader/Child startup confirmation failed: {reason_1}"
-          payload_1 = json.loads(confirm_1.read_text(encoding="utf-8"))
-          assert int(payload_1["pid"]) != int(proc_1.pid)
-          assert int(payload_1["ppid"]) == int(proc_1.pid)
-          confirm_1.unlink(missing_ok=True)
-          proc_1.wait(timeout=10.0)
-
-          # 2. Test active staging protection & successful update (base_ver -> next_ver)
           vnext_dir = staging_root / f"v{next_ver}"
           vnext_dir.mkdir(parents=True, exist_ok=True)
           staged_next = vnext_dir / "Prismwake.exe"
@@ -406,12 +398,6 @@ jobs:
               restart_after_update=True,
               staging_root=staging_root,
           )
-          assert m.compute_file_sha256(helper_exe) == base_sha
-          assert (vnext_dir / m.ACTIVE_TRANSACTION_LOCK_FILENAME).exists()
-
-          m.cleanup_stale_update_staging(next_ver, staging_root)
-          assert staged_next.exists() and manifest_path.exists() and helper_exe.exists()
-
           os.environ["HDRSNIP_VERIFY_STARTUP_ONLY"] = "1"
           try:
               rc_update = m.run_staged_update_helper(
@@ -421,16 +407,13 @@ jobs:
               )
           finally:
               os.environ.pop("HDRSNIP_VERIFY_STARTUP_ONLY", None)
-
-          assert rc_update == 0, f"Expected run_staged_update_helper rc=0, got {rc_update}"
+          assert rc_update == 0
           assert m.compute_file_sha256(installed_exe) == next_sha
 
-          # 3. Test failed startup & hung child process-tree termination + rollback
           vfail_dir = staging_root / "v9.9.9"
           vfail_dir.mkdir(parents=True, exist_ok=True)
-          staged_fail = vfail_dir / "HDRSnipFusion.exe"
+          staged_fail = vfail_dir / "Prismwake.exe"
           shutil.copy2(base_exe_src, staged_fail)
-
           helper_fail, manifest_fail = m.prepare_staged_update_transaction(
               staged_exe=staged_fail,
               target_version="9.9.9",
@@ -448,123 +431,116 @@ jobs:
               )
           finally:
               os.environ.pop("HDRSNIP_SIMULATE_HUNG_STARTUP", None)
-
           assert rc_fail == 6
           assert m.compute_file_sha256(installed_exe) == next_sha
 
-          # 4. Test post-transaction staging cleanup
           m.cleanup_stale_update_staging(next_ver, staging_root)
           assert not vnext_dir.exists()
-          print("ALL TWO-EXE WINDOWS PYINSTALLER UPDATER CHECKS PASSED!")
+          print("ALL SINGLE-EXE WINDOWS PYINSTALLER UPDATER CHECKS PASSED!")
           '@
           Set-Content -LiteralPath $testScript -Value $pyCode -Encoding UTF8
           python $testScript $baseExe $nextExe $baseVer $nextVer $testRoot
-          if ($LASTEXITCODE -ne 0) { throw "Two EXE update/rollback integration tests failed" }
           Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-      - name: Upload Windows build artifacts (Prismwake.exe + HDRSnipFusion.exe + icon + checksums)
+      - name: Upload Windows build artifacts (Prismwake.exe + Prismwake.exe.sha256 + icon)
         uses: actions/upload-artifact@v4
         with:
           name: Prismwake-Windows-x64-v${{ steps.meta.outputs.app_version }}
           path: |
             dist/Prismwake.exe
             dist/Prismwake.exe.sha256
-            dist/HDRSnipFusion.exe
-            dist/HDRSnipFusion.exe.sha256
             prismwake.ico
             prismwake_version_info.txt
+            BENCHMARK_OCR_V020.json
+            BENCHMARK_OCR_V020.md
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish & attach Prismwake.exe and HDRSnipFusion.exe to GitHub Release (Tag push only)
-        if: steps.meta.outputs.is_tag == 'true'
+      - name: Publish verified Prismwake.exe and SHA-256 to v0.2.0 GitHub Release
+        if: steps.meta.outputs.is_tag == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.app_version == '0.2.0')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $tag = "${{ steps.meta.outputs.tag_name }}"
+          $tag = "v${{ steps.meta.outputs.app_version }}"
           $ver = "${{ steps.meta.outputs.app_version }}"
           $prismwakeExe = "${{ steps.verify_exe.outputs.prismwake_exe }}"
-          $legacyExe = "${{ steps.verify_exe.outputs.exe_path }}"
           $sha256 = "${{ steps.verify_exe.outputs.sha256 }}"
           $sizeBytes = "${{ steps.verify_exe.outputs.size_bytes }}"
 
           $notesFile = Join-Path $env:RUNNER_TEMP "release_notes_$tag.md"
           $notesLines = @(
-            "## Prismwake $tag — Catch the light. Keep the detail.",
-            "*(Formerly HDRSnip Fusion — 100% backward-compatible upgrade)*",
+            "## Prismwake $tag — The Productivity Update",
+            "*Catch the light. Keep the detail.*",
             "",
-            "### Official Standalone Windows 10/11 Executables",
-            "- **Primary Asset**: ``Prismwake.exe`` (64-bit standalone PyInstaller build with multi-resolution Prismwake icon & PE version metadata)",
-            "- **Legacy Updater Compatibility Asset**: ``HDRSnipFusion.exe`` (byte-identical to ``Prismwake.exe`` for automatic updates from v0.1.1/v0.1.2/v0.1.3)",
+            "### Official Standalone Windows 10/11 Executable",
+            "- **Asset**: ``Prismwake.exe`` (64-bit standalone PyInstaller build with offline RapidOCR ONNX neural + Tesseract fallback OCR, pinned screenshots, searchable SQLite history, and smart capture modes)",
+            "- **Checksum File**: ``Prismwake.exe.sha256``",
             "- **Version**: ``v$ver``",
             "- **Size**: ``$sizeBytes`` bytes",
             "- **SHA-256**: ``$sha256``",
             "",
             "```text",
             "$sha256  Prismwake.exe",
-            "$sha256  HDRSnipFusion.exe",
             "```"
           )
           $notesLines -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
 
-          gh release view $tag --repo "${{ github.repository }}" *> $null
-          $releaseExists = $LASTEXITCODE -eq 0
+          $releaseExists = $false
+          try {
+            gh release view $tag --repo "${{ github.repository }}" | Out-Null
+            $releaseExists = $true
+          } catch {
+            $releaseExists = $false
+          }
 
           if (-not $releaseExists) {
             gh release create $tag `
               "$prismwakeExe#Prismwake.exe" `
               "dist\Prismwake.exe.sha256#Prismwake.exe.sha256" `
-              "$legacyExe#HDRSnipFusion.exe" `
-              "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256" `
               --repo "${{ github.repository }}" `
-              --title "Prismwake $tag (formerly HDRSnip Fusion)" `
+              --title "Prismwake $tag — The Productivity Update" `
               --notes-file $notesFile `
-              --verify-tag
-            if ($LASTEXITCODE -ne 0) { throw "GitHub release create failed" }
+              --target $env:GITHUB_SHA
           } else {
             gh release upload $tag `
               "$prismwakeExe#Prismwake.exe" `
               "dist\Prismwake.exe.sha256#Prismwake.exe.sha256" `
-              "$legacyExe#HDRSnipFusion.exe" `
-              "dist\HDRSnipFusion.exe.sha256#HDRSnipFusion.exe.sha256" `
               --repo "${{ github.repository }}" `
               --clobber
-            if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed" }
           }
 
-      - name: Verify published GitHub Release dual assets & digest metadata
-        if: steps.meta.outputs.is_tag == 'true'
+      - name: Verify published GitHub Release single-EXE asset & digest metadata
+        if: steps.meta.outputs.is_tag == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.app_version == '0.2.0')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $tag = "${{ steps.meta.outputs.tag_name }}"
+          $tag = "v${{ steps.meta.outputs.app_version }}"
           $expectedSha = "${{ steps.verify_exe.outputs.sha256 }}"
           $expectedSize = [int64]"${{ steps.verify_exe.outputs.size_bytes }}"
 
           $relJson = gh api "repos/${{ github.repository }}/releases/tags/$tag"
           $rel = $relJson | ConvertFrom-Json
 
-          foreach ($reqName in @("Prismwake.exe", "HDRSnipFusion.exe")) {
-            $exeAsset = $rel.assets | Where-Object { $_.name -eq $reqName } | Select-Object -First 1
-            if (-not $exeAsset) {
-              Write-Error "GitHub Release $tag is missing required asset '$reqName'!"
-              exit 1
-            }
-            if ($exeAsset.state -ne "uploaded") {
-              Write-Error "$reqName asset state is '$($exeAsset.state)' (expected 'uploaded')."
-              exit 1
-            }
-            if ([int64]$exeAsset.size -ne $expectedSize) {
-              Write-Error "Uploaded $reqName size ($($exeAsset.size)) does not match built size ($expectedSize)."
-              exit 1
-            }
-            if ($exeAsset.digest -and ($exeAsset.digest -ne "sha256:$expectedSha")) {
-              Write-Error "Uploaded $reqName digest '$($exeAsset.digest)' does not match expected 'sha256:$expectedSha'."
-              exit 1
-            }
-            Write-Host "Successfully verified $reqName on GitHub Release $tag (url=$($exeAsset.browser_download_url))."
+          $exeAsset = $rel.assets | Where-Object { $_.name -eq "Prismwake.exe" } | Select-Object -First 1
+          if (-not $exeAsset) {
+            Write-Error "GitHub Release $tag is missing required asset 'Prismwake.exe'!"
+            exit 1
           }
+          if ($exeAsset.state -ne "uploaded") {
+            Write-Error "Prismwake.exe asset state is '$($exeAsset.state)' (expected 'uploaded')."
+            exit 1
+          }
+          if ([int64]$exeAsset.size -ne $expectedSize) {
+            Write-Error "Uploaded Prismwake.exe size ($($exeAsset.size)) does not match built size ($expectedSize)."
+            exit 1
+          }
+          $legacyAsset = $rel.assets | Where-Object { $_.name -eq "HDRSnipFusion.exe" }
+          if ($legacyAsset) {
+            Write-Error "GitHub Release $tag must NOT contain retired alias 'HDRSnipFusion.exe'!"
+            exit 1
+          }
+          Write-Host "Successfully verified Prismwake.exe on GitHub Release $tag (url=$($exeAsset.browser_download_url))."

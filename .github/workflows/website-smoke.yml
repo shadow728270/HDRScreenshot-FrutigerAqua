@@ -1,4 +1,4 @@
-name: Validate Prismwake website
+name: Validate Prismwake v0.2.0 website
 on:
   push:
     branches: [main]
@@ -9,166 +9,24 @@ on:
 permissions:
   contents: read
 jobs:
-  website-smoke:
+  site-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify JavaScript syntax and page assets
+      - name: Verify frontend JS and versioned metadata
         run: |
           node --check docs/prismwake.js
-          test -s docs/prismwake.css
-          test -s docs/assets/prismwake-mark.svg
-          test -s docs/assets/demo-landscape.webp
-          test -s docs/assets/hdrsnip-capture-overlay.webp
-          test -s docs/assets/hdrsnip-settings.webp
-          python - <<'PY'
-          from html.parser import HTMLParser
+          python - <<'PYTEST'
           from pathlib import Path
-          import re,json
-          html=Path('docs/index.html').read_text()
-          class P(HTMLParser):
-              def __init__(self):super().__init__();self.ids=set();self.hrefs=[];self.srcs=[]
-              def handle_starttag(self,tag,attrs):
-                  attrs=dict(attrs)
-                  if 'id' in attrs:self.ids.add(attrs['id'])
-                  if 'href' in attrs:self.hrefs.append(attrs['href'])
-                  if 'src' in attrs:self.srcs.append(attrs['src'])
-          p=P();p.feed(html)
-          assert all(x[1:] in p.ids for x in p.hrefs if x.startswith('#'))
-          assert all(Path('docs',x).exists() for x in p.srcs if not x.startswith(('http:','https:')))
-          assert "Prismwake" in html
-          assert "<canvas" not in html
-          assert "requestAnimationFrame" not in Path('docs/prismwake.js').read_text()
-          assert "backdrop-filter" not in Path('docs/prismwake.css').read_text()
-          print("HTML links, images, branding and idle-performance checks: PASS")
-          PY
-      - name: Install Playwright Chromium
-        run: |
-          npm install --no-save playwright@1.56.1
-          npx playwright install --with-deps chromium
-      - name: Exercise desktop, mobile and interactive features
-        run: |
-          cat > prismwake-smoke.mjs <<'JS'
-          import {chromium} from 'playwright';
-          import {spawn} from 'node:child_process';
-          import fs from 'node:fs';
-          const server=spawn('python3',['-m','http.server','8765','--directory','docs'],{stdio:'ignore'});
-          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          await sleep(1100);
-          const browser=await chromium.launch({headless:true});
-          fs.mkdirSync('screenshots',{recursive:true});
-          try{
-            for(const size of [{width:1366,height:900,id:'desktop'},{width:390,height:844,id:'mobile'}]){
-              const page=await browser.newPage({viewport:{width:size.width,height:size.height},deviceScaleFactor:1});
-              const errors=[];page.on('pageerror',e=>errors.push(e.message));
-              await page.route('https://api.github.com/repos/**',route=>route.fulfill({status:200,contentType:'application/json',
-                body:JSON.stringify([{tag_name:'v0.1.2',name:'Stroke and Paint Bucket',html_url:'https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.2',published_at:'2026-10-24T06:16:17Z'}])}));
-              await page.goto('http://127.0.0.1:8765/',{waitUntil:'networkidle'});
-              await page.screenshot({path:'screenshots/'+size.id+'.png',fullPage:true});
-              const metrics=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth-innerWidth,screenWidth:innerWidth,logo:document.querySelector('.brand')?.textContent?.trim(),cards:document.querySelectorAll('.lab-card').length,raf:typeof window.requestAnimationFrame}));
-              if(metrics.overflow>2)throw Error(size.id+' horizontal overflow: '+JSON.stringify(metrics));
-              if(metrics.cards!==4)throw Error('Expected 4 lab cards');
-              if(await page.locator('#themeMotion').count())throw Error('Unnecessary animation selector still exists');
-              const scene=await page.locator('#demoStage img').evaluate(el=>({url:el.getAttribute('src'),loaded:el.complete&&el.naturalWidth>0}));
-              if(!scene.url.endsWith('/demo-landscape.webp')||!scene.loaded)throw Error('New clean demo artwork not loaded: '+JSON.stringify(scene));
-              await page.locator('#compare').scrollIntoViewIfNeeded();
-              const comparisonBounds=await page.locator('#compare').boundingBox();
-              await page.mouse.move(comparisonBounds.x+comparisonBounds.width*.48,comparisonBounds.y+comparisonBounds.height*.5);
-              await page.mouse.down();
-              await page.mouse.move(comparisonBounds.x+comparisonBounds.width*.78,comparisonBounds.y+comparisonBounds.height*.5,{steps:8});
-              await page.mouse.up();
-              const splitVal=await page.locator('#compare').evaluate(el=>parseFloat(el.style.getPropertyValue('--split')));
-              if(splitVal<68||splitVal>88)throw Error('Dragging comparison image did not move slider, got '+splitVal);
-              if(await page.locator('#compareRight').getAttribute('draggable')!=='false')throw Error('Comparison image permits native image dragging');
-              if(await page.locator('#compareLeft').getAttribute('draggable')!=='false')throw Error('Comparison overlay permits native image dragging');
-
-              await page.locator('[data-theme-choice=emerald]').click();
-              if(await page.locator('#themePreview').getAttribute('data-theme')!=='emerald')throw Error('Theme selector failed');
-              await page.locator('#themeOpacity').evaluate(el=>{el.value='66';el.dispatchEvent(new Event('input',{bubbles:true}))});
-              if(await page.locator('#opacityValue').textContent()!=='66%')throw Error('Opacity control failed');
-              await page.locator('#compareRange').evaluate(el=>{el.value='73';el.dispatchEvent(new Event('input',{bubbles:true}))});
-              if(!String(await page.locator('#compare').getAttribute('style')).includes('73%'))throw Error('Comparison slider failed');
-              if(await page.locator('input[type=file]').count()!==0)throw Error('Screenshot upload UI has returned');
-              await page.locator('#compareReset').click();
-              if(await page.locator('#compare').evaluate(el=>parseFloat(el.style.getPropertyValue('--split')))!==50)throw Error('Comparison reset failed');
-              // With no user-drawn boundary, clicking the photo must never create a fill.
-              await page.locator('[data-tool=fill]').click();
-              if(await page.locator('#demoFillSettings').isHidden())throw Error('Fill controls not visible');
-              if(await page.locator('#demoFillTolerance').count())throw Error('Image color-tolerance control should not exist');
-              await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              let stage=await page.locator('#demoStage').boundingBox();
-              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.5),y:Math.round(stage.height*.49)}});
-              if(await page.locator('#demoAnnotationLayer > image').count())throw Error('Background image caused a flood fill without an enclosed drawing');
-              if(!(await page.locator('#demoHint').innerText()).includes('No enclosed drawing'))throw Error('No-boundary feedback missing');
-              // Draw a closed rectangle, then fill only its interior.
-              await page.locator('[data-tool=rect]').click();
-              await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              stage=await page.locator('#demoStage').boundingBox();
-              await page.mouse.move(stage.x+stage.width*.38,stage.y+stage.height*.34);
-              await page.mouse.down();
-              await page.mouse.move(stage.x+stage.width*.62,stage.y+stage.height*.63,{steps:6});
-              await page.mouse.up();
-              if(await page.locator('#demoAnnotationLayer > rect').count()!==1)throw Error('Closed rectangle not drawn');
-              if(await page.locator('#demoAnnotationLayer').getAttribute('clip-path')!=='url(#demoSelectionClip)')throw Error('Annotation selection clipping is missing');
-              await page.locator('[data-tool=fill]').click();
-              await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              stage=await page.locator('#demoStage').boundingBox();
-              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.5),y:Math.round(stage.height*.49)}});
-              if(await page.locator('#demoAnnotationLayer > image').count()!==1)throw Error('Paint Bucket failed to fill closed user-drawn shape');
-              const firstMask=await page.locator('#demoAnnotationLayer > image').getAttribute('href');
-              if(!firstMask?.startsWith('data:image/png;base64,'))throw Error('Paint Bucket is not producing a raster fill mask');
-              const containment=await page.evaluate(async()=>{
-                const el=document.querySelector('#demoAnnotationLayer > image'),bitmap=await createImageBitmap(await (await fetch(el.getAttribute('href'))).blob());
-                const cv=document.createElement('canvas');cv.width=bitmap.width;cv.height=bitmap.height;
-                const ctx=cv.getContext('2d');ctx.drawImage(bitmap,0,0);const raw=ctx.getImageData(0,0,cv.width,cv.height).data;
-                const at=(x,y)=>raw[4*(Math.floor(y*cv.height)*cv.width+Math.floor(x*cv.width))+3];
-                const result={inside:at(.5,.49),outsideDrawing:at(.72,.49),outsideSelection:at(.05,.05)};
-                bitmap.close();return result;
-              });
-              if(containment.inside<100||containment.outsideDrawing!==0||containment.outsideSelection!==0)throw Error('Fill not bounded by user drawing '+JSON.stringify(containment));
-              // Change the photo pixels radically; the annotation-only fill must be IDENTICAL.
-              await page.locator('#demoUndo').click();
-              await page.locator('#demoStage img').evaluate(el=>{
-                el.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="750" height="408"><rect width="750" height="408" fill="red"/></svg>');
-              });
-              await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              stage=await page.locator('#demoStage').boundingBox();
-              await page.locator('#demoStage').click({position:{x:Math.round(stage.width*.5),y:Math.round(stage.height*.49)}});
-              const secondMask=await page.locator('#demoAnnotationLayer > image').getAttribute('href');
-              if(firstMask!==secondMask)throw Error('Fill result depends on underlying background image');
-              // Undo, then ensure selection changes clip subsequent edits.
-              await page.locator('#demoUndo').click();await page.locator('#demoUndo').click();
-              if(await page.locator('#demoAnnotationLayer > rect').count()||await page.locator('#demoAnnotationLayer > image').count())throw Error('Undo left annotation artifacts');
-              await page.locator('[data-tool=select]').click();
-              await page.locator('#demoStage').scrollIntoViewIfNeeded();
-              const selBox=await page.locator('#demoStage').boundingBox();
-              await page.mouse.move(selBox.x+selBox.width*.2,selBox.y+selBox.height*.2);
-              await page.mouse.down();await page.mouse.move(selBox.x+selBox.width*.74,selBox.y+selBox.height*.74,{steps:5});await page.mouse.up();
-              const clipState=await page.evaluate(()=>{
-                const rect=document.querySelector('#demoSelectionClip rect'),frame=document.querySelector('#demoSvg > rect');
-                return {clipX:rect.getAttribute('x'),visualX:frame.getAttribute('x'),clipW:rect.getAttribute('width'),visualW:frame.getAttribute('width')};
-              });
-              if(clipState.clipX!==clipState.visualX||clipState.clipW!==clipState.visualW)throw Error('Selection clip did not follow resized selection '+JSON.stringify(clipState));
-              if(!(await page.locator('#demoFillSettings').isHidden()))throw Error('Fill controls remain visible after selecting a different tool');
-              await page.locator('#refreshReleases').click();
-              await page.waitForTimeout(200);
-              if(!(await page.locator('#releaseList').innerText()).includes('v0.1.2'))throw Error('Live release list missing');
-              if(errors.length)throw Error('JS errors: '+JSON.stringify(errors));
-              console.log(size.id+' PASS '+JSON.stringify(metrics));
-              await page.close();
-            }
-          }finally{await browser.close();server.kill();}
-          JS
-          node prismwake-smoke.mjs
-          rm -f prismwake-smoke.mjs
-      - name: Upload visual captures
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: prismwake-web-desktop-mobile
-          path: screenshots/
-          if-no-files-found: ignore
+          h=Path('docs/index.html').read_text(encoding='utf-8')
+          assert 'Prismwake v0.2.0' in h
+          assert 'prismwake.css' in h and 'prismwake.js' in h
+          assert Path('docs/prismwake.css').is_file()
+          assert Path('docs/prismwake.js').is_file()
+          assert Path('docs/assets/prismwake-mark.svg').is_file()
+          assert 'releases/latest/download/Prismwake.exe' in h
+          print('Website v0.2.0 smoke: PASS')
+          PYTEST

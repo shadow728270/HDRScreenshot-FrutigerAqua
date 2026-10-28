@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Prismwake v0.1.4 — Multi-Resolution Windows Icon, SVG Mark & PE Version Resource Generator
+Prismwake v0.2.0 — Multi-Resolution Windows Icon, SVG Mark & PE Version Resource Generator
 ===========================================================================================
 Deterministically generates:
   1. `prismwake-mark.svg` — Official scalable Frutiger Aqua vector identity mark
@@ -9,7 +9,7 @@ Deterministically generates:
                             16x16, 24x24, 32x32, 48x48, 64x64, 128x128, and 256x256
   3. `prismwake_version_info.txt` — PyInstaller Windows PE VSVersionInfo resource file
                                     declaring ProductName/FileDescription = "Prismwake"
-                                    and FileVersion/ProductVersion = "0.1.4.0"
+                                    and FileVersion/ProductVersion = "0.2.0.0"
 
 Design notes across icon resolutions:
   - Small sizes (16x16, 24x24, 32x32):
@@ -79,10 +79,10 @@ PRISMWAKE_SVG_CONTENT: str = """<svg xmlns="http://www.w3.org/2000/svg" viewBox=
 """
 
 
-def build_version_info_text(version_str: str = "0.1.4") -> str:
+def build_version_info_text(version_str: str = "0.2.0") -> str:
     """
     Generates a PyInstaller-compatible Windows VSVersionInfo specification file
-    declaring Prismwake v0.1.4.0 metadata for File Explorer, Task Manager, and Properties.
+    declaring Prismwake v0.2.0.0 metadata for File Explorer, Task Manager, and Properties.
     """
     parts = [int(p) for p in version_str.strip().lstrip("vV").split(".")[:3]]
     while len(parts) < 3:
@@ -418,7 +418,7 @@ def inspect_ico_frames(ico_path: Path) -> List[Tuple[int, int, int]]:
 
 
 def generate_all_prismwake_assets(
-    output_dir: Path, version_str: str = "0.1.4"
+    output_dir: Path, version_str: str = "0.2.0"
 ) -> dict:
     """
     Generates `prismwake-mark.svg`, `prismwake.ico`, and `prismwake_version_info.txt`
@@ -457,7 +457,7 @@ if __name__ == "__main__":
     import sys
 
     target_dir = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parent
-    ver = sys.argv[2].strip() if len(sys.argv) > 2 else "0.1.4"
+    ver = sys.argv[2].strip() if len(sys.argv) > 2 else "0.2.0"
     result = generate_all_prismwake_assets(target_dir, version_str=ver)
     verified = inspect_ico_frames(result["ico_path"])
     print(

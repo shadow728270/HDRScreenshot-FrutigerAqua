@@ -62,6 +62,7 @@ import urllib.request
 import weakref
 import bisect
 from collections import deque
+import traceback
 import webbrowser
 import zlib
 from dataclasses import dataclass, field
@@ -69,6 +70,160 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageFilter
+
+# Prismwake v0.2.0 Modular Productivity Subsystems (Pinned Screenshots, Offline OCR,
+# Persistent Searchable History, Smart Capture Modes, and Single-EXE Updater)
+_PRISMWAKE_MODULE_DIR = Path(__file__).resolve().parent
+if str(_PRISMWAKE_MODULE_DIR) not in sys.path:
+    sys.path.insert(0, str(_PRISMWAKE_MODULE_DIR))
+
+OCR_IMPORT_ERROR: Optional[str] = None
+try:
+    from ocr import (
+        SUPPORTED_OCR_LANGUAGES,
+        VALID_OCR_QUALITY_MODES,
+        OCR_QUALITY_MODE_LABELS,
+        AUTOMATIC_OCR_STATUS_TEXT,
+        OCR_AQUA_THEME_PALETTES,
+        OcrWordBox,
+        OcrLineBox,
+        OcrRecognitionResult,
+        OcrEngineStatus,
+        OcrImageProfile,
+        OcrPreprocessCandidate,
+        CancellationToken as OcrCancellationToken,
+        detect_tesseract_runtime,
+        query_ocr_engine_status,
+        analyze_image_for_ocr,
+        preprocess_image_for_ocr,
+        generate_ocr_preprocessing_candidates,
+        select_adaptive_psms,
+        score_ocr_candidate,
+        refine_ocr_result_layout_and_spacing,
+        OcrBackend,
+        OcrBackendStatus,
+        RapidOcrBackend,
+        TesseractOcrBackend,
+        HybridOcrOrchestrator,
+        get_production_ocr_orchestrator,
+        set_production_ocr_orchestrator,
+        override_production_ocr_orchestrator,
+        recognize_production_ocr,
+        verify_rapidocr_model_directory,
+        verify_packaged_ocr_launch,
+        recognize_image_ocr,
+        recognize_image_ocr_legacy,
+        verify_packaged_tesseract_launch,
+        format_ocr_summary,
+        count_recognized_words_and_lines,
+        format_quick_ocr_badge_text,
+        format_quick_ocr_footer_label,
+        resolve_ocr_aqua_theme_palette,
+        compute_quick_ocr_panel_geometry,
+        compute_advanced_ocr_panel_geometry,
+    )
+    from ocr.engine import OcrResultsDialog as _OcrResultsDialog, OcrWorkerJob as _OcrWorkerJob
+except Exception as _ocr_import_exc:
+    OCR_IMPORT_ERROR = f"{type(_ocr_import_exc).__name__}: {_ocr_import_exc}\n{traceback.format_exc()}"
+    SUPPORTED_OCR_LANGUAGES = {"eng": "English (eng)", "ita": "Italian (ita)", "eng+ita": "English + Italian (eng+ita)"}
+    VALID_OCR_QUALITY_MODES = ("auto", "fast", "accurate")
+    OCR_QUALITY_MODE_LABELS = {"auto": "Automatic (Recommended)", "fast": "Fast", "accurate": "Maximum Accuracy"}
+    AUTOMATIC_OCR_STATUS_TEXT = "Automatic image optimization · Offline OCR"
+    _OcrResultsDialog = None
+    _OcrWorkerJob = None
+
+    def verify_packaged_tesseract_launch(*_a: Any, **_kw: Any) -> Tuple[bool, str]:
+        return False, f"OCR module failed to import: {OCR_IMPORT_ERROR}"
+
+    def verify_packaged_ocr_launch(*_a: Any, **_kw: Any) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "message": f"OCR module failed to import: {OCR_IMPORT_ERROR}",
+            "rapidocr_installed": False,
+            "models_verified": False,
+            "neural_exe_inference_pass": False,
+            "tesseract_fallback_pass": False,
+            "offline_cache_cleared_pass": False,
+        }
+
+try:
+    from history import (
+        HISTORY_SCHEMA_VERSION,
+        VALID_HISTORY_MODES,
+        VALID_HISTORY_SORT_MODES,
+        HistoryEntry,
+        HistoryStorageStats,
+        ScreenshotHistoryStore,
+        get_default_history_root,
+    )
+    from history.storage import (
+        HistoryWindow as _HistoryWindow,
+        register_history_aqua_toolkit as _register_history_aqua_toolkit,
+    )
+except Exception:
+    VALID_HISTORY_MODES = ("off", "saved_or_copied", "all_completed")
+    _HistoryWindow = None
+    _register_history_aqua_toolkit = None
+
+try:
+    from pinning import (
+        PIN_ZOOM_PRESETS,
+        PIN_OPACITY_PRESETS,
+        MIN_PIN_OPACITY_PCT,
+        MAX_PIN_OPACITY_PCT,
+        MIN_PIN_DIMENSION,
+        VirtualMonitorRect,
+        PinnedScreenshotState,
+        PinnedScreenshotManager,
+        clamp_pin_opacity_pct,
+        clamp_pin_zoom_pct,
+        compute_aspect_locked_size,
+        compute_fit_zoom_pct,
+        recover_offscreen_pin_rect,
+        apply_win32_window_capture_exclusion,
+        apply_win32_window_click_through,
+    )
+except Exception:
+    pass
+
+try:
+    from capture import (
+        VALID_CAPTURE_MODES,
+        DELAY_PRESET_SECONDS,
+        RESERVED_WINDOWS_SHORTCUTS,
+        DetectedWindowInfo,
+        WindowCaptureSessionController,
+        MonitorCaptureTarget,
+        DelayedCaptureController,
+        HotkeyConflictReport,
+        clamp_capture_delay_seconds,
+        normalize_capture_mode,
+        detect_window_at_physical_point,
+        enumerate_capturable_windows,
+        clip_window_bounds_to_monitor,
+        validate_hotkey_assignments,
+    )
+    from capture.smart_modes import (
+        DelayedCountdownOverlay as _DelayedCountdownOverlay,
+        MonitorSelectorDialog as _MonitorSelectorDialog,
+    )
+except Exception:
+    VALID_CAPTURE_MODES = ("region", "window", "fullscreen", "delayed", "ocr")
+    _DelayedCountdownOverlay = None
+    _MonitorSelectorDialog = None
+
+try:
+    from updater import (
+        CANONICAL_EXECUTABLE_NAME,
+        CANONICAL_CHECKSUM_NAME,
+        SUPPORTED_SINGLE_EXE_ASSETS,
+        resolve_v020_release_asset_names,
+        verify_single_exe_release_assets,
+    )
+except Exception:
+    CANONICAL_EXECUTABLE_NAME = "Prismwake.exe"
+    CANONICAL_CHECKSUM_NAME = "Prismwake.exe.sha256"
+    SUPPORTED_SINGLE_EXE_ASSETS = ("Prismwake.exe",)
 
 # Only import PyQt6 when running the GUI (allows headless unit testing of HDR math)
 try:
@@ -106,6 +261,7 @@ try:
         QPixmap,
         QPolygonF,
         QRadialGradient,
+        QShortcut,
     )
     from PyQt6.QtWidgets import (
         QApplication,
@@ -153,7 +309,7 @@ import traceback
 APP_NAME: str = "Prismwake"
 LEGACY_APP_NAME: str = "HDRSnip Fusion"
 APP_TAGLINE: str = "Catch the light. Keep the detail."
-APP_VERSION: str = "0.1.4"
+APP_VERSION: str = "0.2.0"
 APP_USER_MODEL_ID: str = f"Prismwake.DesktopApp.{APP_VERSION}"
 
 # Settings Window responsive geometry constants (v0.1.4)
@@ -567,11 +723,10 @@ GITHUB_LATEST_RELEASE_API_URL: str = (
     f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
 )
 PRIMARY_RELEASE_ASSET_NAME: str = "Prismwake.exe"
-LEGACY_RELEASE_ASSET_NAME: str = "HDRSnipFusion.exe"
-EXPECTED_RELEASE_ASSET_NAME: str = "HDRSnipFusion.exe"
+EXPECTED_RELEASE_ASSET_NAME: str = "Prismwake.exe"
+EXPECTED_RELEASE_CHECKSUM_NAME: str = "Prismwake.exe.sha256"
 SUPPORTED_RELEASE_ASSET_NAMES: Tuple[str, ...] = (
     PRIMARY_RELEASE_ASSET_NAME,
-    LEGACY_RELEASE_ASSET_NAME,
 )
 DEFAULT_SCREENSHOT_PREFIX: str = "Prismwake"
 LEGACY_SCREENSHOT_PREFIX: str = "HDRSnipFusion"
@@ -917,6 +1072,120 @@ class PerformanceTelemetry:
     last_freed_bytes: int = 0
     total_captures: int = 0
     total_releases: int = 0
+    annotation_move_count: int = 0
+    annotation_move_total_ms: float = 0.0
+    annotation_move_peak_ms: float = 0.0
+    annotation_paint_count: int = 0
+    annotation_paint_total_ms: float = 0.0
+    annotation_paint_peak_ms: float = 0.0
+    annotation_dirty_area_total_px: int = 0
+    annotation_full_area_total_px: int = 0
+    annotation_full_repaint_count: int = 0
+    annotation_partial_repaint_count: int = 0
+    committed_cache_rebuilds: int = 0
+    incremental_commits: int = 0
+
+    @property
+    def avg_annotation_move_ms(self) -> float:
+        if self.annotation_move_count <= 0:
+            return 0.0
+        return self.annotation_move_total_ms / float(self.annotation_move_count)
+
+    @property
+    def avg_annotation_paint_ms(self) -> float:
+        if self.annotation_paint_count <= 0:
+            return 0.0
+        return self.annotation_paint_total_ms / float(self.annotation_paint_count)
+
+    @property
+    def avg_annotation_dirty_area_px(self) -> float:
+        if self.annotation_paint_count <= 0:
+            return 0.0
+        return self.annotation_dirty_area_total_px / float(self.annotation_paint_count)
+
+    @property
+    def dirty_area_ratio_pct(self) -> float:
+        if self.annotation_full_area_total_px <= 0:
+            return 0.0
+        return (self.annotation_dirty_area_total_px / float(self.annotation_full_area_total_px)) * 100.0
+
+    def record_annotation_move(
+        self,
+        duration_ms: float,
+        *,
+        dirty_area_px: int = 0,
+        total_area_px: int = 0,
+    ) -> None:
+        dur = max(0.0, float(duration_ms))
+        self.annotation_move_count += 1
+        self.annotation_move_total_ms += dur
+        if dur > self.annotation_move_peak_ms:
+            self.annotation_move_peak_ms = dur
+        if dirty_area_px > 0 and total_area_px > 0:
+            self.annotation_dirty_area_total_px += int(dirty_area_px)
+            self.annotation_full_area_total_px += int(total_area_px)
+
+    def record_committed_cache_rebuild(self) -> None:
+        self.committed_cache_rebuilds += 1
+
+    def record_incremental_annotation_commit(self) -> None:
+        self.incremental_commits += 1
+
+    def reset(self) -> None:
+        self.reset_annotation_stats()
+
+    def snapshot(self) -> Dict[str, Any]:
+        avg_ratio = (
+            float(self.annotation_dirty_area_total_px) / float(self.annotation_full_area_total_px)
+            if self.annotation_full_area_total_px > 0
+            else 0.0
+        )
+        return {
+            "annotation_move_count": self.annotation_move_count,
+            "avg_annotation_move_ms": self.avg_annotation_move_ms,
+            "annotation_paint_count": self.annotation_paint_count,
+            "avg_annotation_paint_ms": self.avg_annotation_paint_ms,
+            "avg_dirty_area_px": self.avg_annotation_dirty_area_px,
+            "avg_dirty_area_ratio": avg_ratio,
+            "dirty_area_ratio_pct": self.dirty_area_ratio_pct,
+            "committed_cache_rebuilds": self.committed_cache_rebuilds,
+            "incremental_commits": self.incremental_commits,
+        }
+
+    def record_annotation_paint(self, duration_ms: float, dirty_area_px: int, full_area_px: int) -> None:
+        dur = max(0.0, float(duration_ms))
+        d_px = max(0, int(dirty_area_px))
+        f_px = max(1, int(full_area_px))
+        self.annotation_paint_count += 1
+        self.annotation_paint_total_ms += dur
+        if dur > self.annotation_paint_peak_ms:
+            self.annotation_paint_peak_ms = dur
+        self.annotation_dirty_area_total_px += d_px
+        self.annotation_full_area_total_px += f_px
+        if d_px >= int(f_px * 0.92):
+            self.annotation_full_repaint_count += 1
+        else:
+            self.annotation_partial_repaint_count += 1
+
+    def record_committed_cache_update(self, *, incremental: bool = True) -> None:
+        if incremental:
+            self.incremental_commits += 1
+        else:
+            self.committed_cache_rebuilds += 1
+
+    def reset_annotation_stats(self) -> None:
+        self.annotation_move_count = 0
+        self.annotation_move_total_ms = 0.0
+        self.annotation_move_peak_ms = 0.0
+        self.annotation_paint_count = 0
+        self.annotation_paint_total_ms = 0.0
+        self.annotation_paint_peak_ms = 0.0
+        self.annotation_dirty_area_total_px = 0
+        self.annotation_full_area_total_px = 0
+        self.annotation_full_repaint_count = 0
+        self.annotation_partial_repaint_count = 0
+        self.committed_cache_rebuilds = 0
+        self.incremental_commits = 0
 
     @property
     def avg_toolbar_paint_ms(self) -> float:
@@ -1041,8 +1310,22 @@ class PerformanceTelemetry:
         return est
 
     def snapshot(self) -> dict:
+        avg_dirty_ratio = (
+            float(self.annotation_dirty_area_total_px) / float(self.annotation_full_area_total_px)
+            if self.annotation_full_area_total_px > 0
+            else 0.0
+        )
         return {
             "measured_fps": round(self.measured_fps, 2),
+            "annotation_move_count": self.annotation_move_count,
+            "avg_annotation_move_ms": round(self.avg_annotation_move_ms, 4),
+            "annotation_paint_count": self.annotation_paint_count,
+            "avg_annotation_paint_ms": round(self.avg_annotation_paint_ms, 4),
+            "avg_dirty_area_px": round(self.avg_annotation_dirty_area_px, 1),
+            "avg_dirty_area_ratio": round(avg_dirty_ratio, 6),
+            "dirty_area_ratio_pct": round(self.dirty_area_ratio_pct, 3),
+            "committed_cache_rebuilds": self.committed_cache_rebuilds,
+            "incremental_commits": self.incremental_commits,
             "avg_toolbar_paint_ms": round(self.avg_toolbar_paint_ms, 3),
             "peak_toolbar_paint_ms": round(self.toolbar_paint_peak_ms, 3),
             "avg_caustic_synth_ms": round(self.avg_caustic_synth_ms, 3),
@@ -1069,6 +1352,16 @@ class PerformanceTelemetry:
             "last_buffer_lifetime_sec": round(self.last_buffer_lifetime_sec, 3),
             "total_captures": self.total_captures,
             "total_releases": self.total_releases,
+            "avg_annotation_move_ms": round(self.avg_annotation_move_ms, 3),
+            "peak_annotation_move_ms": round(self.annotation_move_peak_ms, 3),
+            "avg_annotation_paint_ms": round(self.avg_annotation_paint_ms, 3),
+            "peak_annotation_paint_ms": round(self.annotation_paint_peak_ms, 3),
+            "avg_annotation_dirty_area_px": int(round(self.avg_annotation_dirty_area_px)),
+            "dirty_area_ratio_pct": round(self.dirty_area_ratio_pct, 2),
+            "annotation_full_repaint_count": self.annotation_full_repaint_count,
+            "annotation_partial_repaint_count": self.annotation_partial_repaint_count,
+            "committed_cache_rebuilds": self.committed_cache_rebuilds,
+            "incremental_commits": self.incremental_commits,
         }
 
 
@@ -1375,6 +1668,36 @@ class AppConfig:
     # Persistent Settings Window dimensions (0 = automatic responsive sizing)
     settings_window_width: int = 0
     settings_window_height: int = 0
+    # --- Prismwake v0.2.0 Productivity Settings ---
+    # 1. Smart Capture Modes & Global Shortcuts
+    default_capture_mode: str = "region"  # "region", "window", "fullscreen", "delayed", "ocr"
+    capture_delay_seconds: int = 0        # 0, 3, 5, 10, or custom 1..60s
+    window_capture_use_dwm_bounds: bool = True
+    window_capture_highlight_border: bool = True
+    window_hotkey_str: str = "Ctrl+Shift+W"
+    fullscreen_hotkey_str: str = "Ctrl+Shift+F"
+    ocr_hotkey_str: str = "Ctrl+Shift+O"
+    history_hotkey_str: str = "Ctrl+Shift+H"
+    # 2. Persistent Screenshot History & Privacy
+    history_mode: str = "saved_or_copied"  # "off", "saved_or_copied", "all_completed"
+    history_directory: str = ""            # "" = default %LOCALAPPDATA%\Prismwake\History
+    history_max_items: int = 500
+    history_max_storage_mb: int = 1024
+    history_retention_days: int = 90
+    history_index_ocr: bool = True
+    # 3. Offline Text Recognition (OCR — 100% Automatic Image Optimization)
+    ocr_language: str = "eng"              # "eng", "ita", "eng+ita"
+    ocr_quality_mode: str = "auto"         # "auto", "fast", "accurate"
+    ocr_auto_invert_dark: bool = True
+    ocr_upscale_small_text: bool = True
+    ocr_auto_copy_text: bool = False
+    ocr_show_panel_after_auto_copy: bool = True
+    # 4. Pinned Floating Screenshots
+    pin_default_opacity_pct: int = 100     # 15..100
+    pin_default_zoom_pct: int = 100        # 25..300
+    pin_always_on_top: bool = True
+    pin_show_border: bool = True
+    pin_exclude_from_capture: bool = True
 
     @property
     def is_safe_mode_active(self) -> bool:
@@ -1537,6 +1860,27 @@ class AppConfig:
                             filtered[dim_key] = max(0, min(7680, val_d))
                         except Exception:
                             filtered[dim_key] = 0
+                if "default_capture_mode" in filtered:
+                    filtered["default_capture_mode"] = normalize_capture_mode(filtered["default_capture_mode"])
+                if "capture_delay_seconds" in filtered:
+                    filtered["capture_delay_seconds"] = clamp_capture_delay_seconds(filtered["capture_delay_seconds"])
+                if "history_mode" in filtered:
+                    hm = str(filtered["history_mode"] or "saved_or_copied").strip().lower()
+                    filtered["history_mode"] = hm if hm in VALID_HISTORY_MODES else "saved_or_copied"
+                if "ocr_language" in filtered:
+                    ol = str(filtered["ocr_language"] or "eng").strip().lower()
+                    filtered["ocr_language"] = ol if ol in SUPPORTED_OCR_LANGUAGES else "eng"
+                if "ocr_quality_mode" in filtered:
+                    qm = str(filtered["ocr_quality_mode"] or "auto").strip().lower()
+                    filtered["ocr_quality_mode"] = qm if qm in VALID_OCR_QUALITY_MODES else "auto"
+                if "ocr_auto_copy_text" in filtered:
+                    filtered["ocr_auto_copy_text"] = bool(filtered["ocr_auto_copy_text"])
+                if "ocr_show_panel_after_auto_copy" in filtered:
+                    filtered["ocr_show_panel_after_auto_copy"] = bool(filtered["ocr_show_panel_after_auto_copy"])
+                if "pin_default_opacity_pct" in filtered:
+                    filtered["pin_default_opacity_pct"] = clamp_pin_opacity_pct(filtered["pin_default_opacity_pct"])
+                if "pin_default_zoom_pct" in filtered:
+                    filtered["pin_default_zoom_pct"] = clamp_pin_zoom_pct(filtered["pin_default_zoom_pct"])
                 cfg = cls(**filtered)
         except Exception as exc:
             print(f"[HDRSnip Fusion] Warning: Failed to load config: {exc}")
@@ -3002,7 +3346,9 @@ def resolve_qt_screen_for_frame(
     )
 
 
-def capture_screen_dxgi_hdr(config: AppConfig) -> CapturedFrame:
+def capture_screen_dxgi_hdr(
+    config: AppConfig, *, target_monitor_device_name: Optional[str] = None
+) -> CapturedFrame:
     """
     Captures the physical monitor containing the mouse cursor across ALL GPU adapters via
     Direct3D11 + DXGI Desktop Duplication BEFORE any overlay window is shown.
@@ -3047,6 +3393,15 @@ def capture_screen_dxgi_hdr(config: AppConfig) -> CapturedFrame:
         target_monitor = resolve_physical_monitor_for_cursor(
             orig_cursor, win32_monitors
         )
+        if target_monitor_device_name:
+            desired_name = str(target_monitor_device_name).strip().casefold()
+            chosen = next(
+                (m for m in win32_monitors if m.device_name.strip().casefold() == desired_name),
+                None,
+            )
+            if chosen is None:
+                raise RuntimeError(f"Selected display is no longer available: {target_monitor_device_name}")
+            target_monitor = chosen
         monitor_name = target_monitor.device_name
         monitor_rect = target_monitor.physical_rect
 
@@ -5684,7 +6039,7 @@ if HAS_QT:
             self._sync_timer()
             for ref in list(self._surfaces):
                 w = ref()
-                if w is not None:
+                if self._surface_alive(w):
                     if self.scale <= 0.0 and hasattr(w, "on_animations_disabled"):
                         w.on_animations_disabled()
                     if hasattr(w, "on_transparency_changed"):
@@ -5707,7 +6062,7 @@ if HAS_QT:
             self._theme = norm
             for ref in list(self._surfaces):
                 w = ref()
-                if w is not None:
+                if self._surface_alive(w):
                     if hasattr(w, "on_transparency_changed"):
                         w.on_transparency_changed()
                     elif w.isVisible():
@@ -5730,7 +6085,7 @@ if HAS_QT:
             self._transparency = clamped
             for ref in list(self._surfaces):
                 w = ref()
-                if w is not None:
+                if self._surface_alive(w):
                     if hasattr(w, "on_transparency_changed"):
                         w.on_transparency_changed()
                     elif w.isVisible():
@@ -5741,15 +6096,27 @@ if HAS_QT:
                 return self._elapsed.nsecsElapsed() * 1e-9
             return time.perf_counter()
 
+        def _timer_alive(self) -> bool:
+            """Avoid touching a Qt timer whose native QObject was destroyed at shutdown.
+
+            Python may still hold this director while Qt is tearing down widgets. The
+            timer's wrapper can remain reachable even after its C++ object is gone.
+            """
+            try:
+                from PyQt6 import sip
+                return self._timer is not None and not sip.isdeleted(self._timer)
+            except RuntimeError:
+                return False
+
         def is_timer_active(self) -> bool:
-            return self._timer.isActive()
+            return self._timer_alive() and self._timer.isActive()
 
         def count_active_timers(self) -> int:
             """Returns the exact number of active QTimers and QVariantAnimations across registered UI surfaces."""
-            count = 1 if self._timer.isActive() else 0
+            count = 1 if self.is_timer_active() else 0
             for ref in list(self._surfaces):
                 w = ref()
-                if w is not None and w.isVisible():
+                if self._surface_alive(w) and w.isVisible():
                     for child in w.findChildren(QWidget):
                         for attr in (
                             "_hover_anim",
@@ -5778,7 +6145,7 @@ if HAS_QT:
             self._sync_timer()
             for ref in list(self._surfaces):
                 w = ref()
-                if w is not None:
+                if self._surface_alive(w):
                     if hasattr(w, "_water_dirty"):
                         w._water_dirty = True
                     if self.scale <= 0.0 and hasattr(w, "on_animations_disabled"):
@@ -5789,18 +6156,31 @@ if HAS_QT:
                         else:
                             w.update()
 
+        @staticmethod
+        def _surface_alive(widget: Any) -> bool:
+            if widget is None:
+                return False
+            try:
+                from PyQt6 import sip
+                return not sip.isdeleted(widget)
+            except RuntimeError:
+                return False
+            except ImportError:
+                return True
+
         def register_surface(self, widget: QWidget) -> None:
             for ref in list(self._surfaces):
                 w = ref()
                 if w is widget:
                     self._sync_timer()
                     return
+            self._surfaces = [r for r in self._surfaces if self._surface_alive(r())]
             self._surfaces.append(weakref.ref(widget))
             self._sync_timer()
 
         def unregister_surface(self, widget: QWidget) -> None:
             self._surfaces = [
-                ref for ref in self._surfaces if ref() is not None and ref() is not widget
+                ref for ref in self._surfaces if self._surface_alive(ref()) and ref() is not widget
             ]
             self._sync_timer()
 
@@ -5808,13 +6188,18 @@ if HAS_QT:
             self._sync_timer()
 
         def stop_all(self) -> None:
-            self._timer.stop()
+            if self._timer_alive():
+                self._timer.stop()
             for ref in list(self._surfaces):
                 w = ref()
-                if w is not None and hasattr(w, "on_animations_disabled"):
+                if self._surface_alive(w) and hasattr(w, "on_animations_disabled"):
                     w.on_animations_disabled()
 
         def _sync_timer(self) -> None:
+            # Closing a QApplication can delete the underlying QTimer before all
+            # widgets have finished emitting hideEvent / visibility notifications.
+            if not self._timer_alive():
+                return
             if self.scale <= 0.0:
                 if self._timer.isActive():
                     self._timer.stop()
@@ -5828,7 +6213,7 @@ if HAS_QT:
             alive: List[weakref.ReferenceType] = []
             for ref in self._surfaces:
                 w = ref()
-                if w is not None:
+                if self._surface_alive(w):
                     alive.append(ref)
                     if w.isVisible():
                         has_visible = True
@@ -5849,6 +6234,8 @@ if HAS_QT:
                     )
 
         def _on_tick(self) -> None:
+            if not self._timer_alive():
+                return
             if self.scale <= 0.0:
                 self._timer.stop()
                 return
@@ -5858,7 +6245,7 @@ if HAS_QT:
             alive: List[weakref.ReferenceType] = []
             for ref in self._surfaces:
                 w = ref()
-                if w is not None:
+                if self._surface_alive(w):
                     alive.append(ref)
                     if w.isVisible():
                         any_visible = True
@@ -8659,6 +9046,99 @@ class AnnotationItem:
     _cached_cache_key: Any = field(default=None, init=False, repr=False, compare=False)
     _cached_effect_rgb: Any = field(default=None, init=False, repr=False, compare=False)
     _cached_effect_key: Any = field(default=None, init=False, repr=False, compare=False)
+    _cached_pen_path: Any = field(default=None, init=False, repr=False, compare=False)
+    _cached_pen_path_len: int = field(default=0, init=False, repr=False, compare=False)
+    _cached_pts_bounds: Optional[Tuple[float, float, float, float]] = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _cached_pts_bounds_len: int = field(default=0, init=False, repr=False, compare=False)
+
+    @property
+    def _cached_qt_path_len(self) -> int:
+        return self._cached_pen_path_len
+
+    def get_bounding_box(self) -> Tuple[float, float, float, float]:
+        if self._cached_pts_bounds is not None and self._cached_pts_bounds_len == len(self.points):
+            bx0, by0, bx1, by1 = self._cached_pts_bounds
+            pad = max(8.0, float(self.thickness) * 1.5 + 4.0)
+            return (bx0 - pad, by0 - pad, bx1 + pad, by1 + pad)
+        if not self.points:
+            return (0.0, 0.0, 1.0, 1.0)
+        xs = [float(pt[0]) for pt in self.points]
+        ys = [float(pt[1]) for pt in self.points]
+        pad = max(8.0, float(self.thickness) * 1.5 + 4.0)
+        return (min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
+
+    def append_stroke_point(self, x: Any, y: Optional[float] = None) -> Tuple[float, float, float, float]:
+        """
+        Appends `(x, y)` to a freehand stroke in O(1) time, incrementally extending
+        the cached `QPainterPath` and bounding box without re-scanning all historical points.
+        Returns `(seg_min_x, seg_min_y, seg_max_x, seg_max_y)` for dirty-rectangle updates.
+        """
+        if y is None and isinstance(x, (tuple, list)):
+            fx = float(x[0])
+            fy = float(x[1])
+        else:
+            fx = float(x)
+            fy = float(y or 0.0)
+        n_before = len(self.points)
+        if n_before >= 2:
+            px1, py1 = self.points[-1]
+            px0, py0 = self.points[-2]
+            seg_min_x = min(px0, px1, fx)
+            seg_min_y = min(py0, py1, fy)
+            seg_max_x = max(px0, px1, fx)
+            seg_max_y = max(py0, py1, fy)
+        elif n_before == 1:
+            px0, py0 = self.points[0]
+            seg_min_x = min(px0, fx)
+            seg_min_y = min(py0, fy)
+            seg_max_x = max(px0, fx)
+            seg_max_y = max(py0, fy)
+        else:
+            seg_min_x = seg_max_x = fx
+            seg_min_y = seg_max_y = fy
+
+        self.points.append((fx, fy))
+        n_after = n_before + 1
+
+        if self._cached_pts_bounds is not None and self._cached_pts_bounds_len == n_before:
+            bx0, by0, bx1, by1 = self._cached_pts_bounds
+            self._cached_pts_bounds = (min(bx0, fx), min(by0, fy), max(bx1, fx), max(by1, fy))
+            self._cached_pts_bounds_len = n_after
+        elif n_after == 1:
+            self._cached_pts_bounds = (fx, fy, fx, fy)
+            self._cached_pts_bounds_len = 1
+        else:
+            self._cached_pts_bounds = None
+            self._cached_pts_bounds_len = 0
+
+        if HAS_QT:
+            if self._cached_pen_path is not None and self._cached_pen_path_len == n_before and n_before >= 1:
+                self._cached_pen_path.lineTo(QPointF(fx, fy))
+                self._cached_pen_path_len = n_after
+            else:
+                path = QPainterPath(QPointF(float(self.points[0][0]), float(self.points[0][1])))
+                for pt in self.points[1:]:
+                    path.lineTo(QPointF(float(pt[0]), float(pt[1])))
+                self._cached_pen_path = path
+                self._cached_pen_path_len = n_after
+
+        return (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
+
+    def get_or_build_pen_path(self) -> Any:
+        """Returns the cached `QPainterPath` for this stroke, building it once if needed."""
+        if not HAS_QT or not self.points:
+            return None
+        n_pts = len(self.points)
+        if self._cached_pen_path is not None and self._cached_pen_path_len == n_pts:
+            return self._cached_pen_path
+        path = QPainterPath(QPointF(float(self.points[0][0]), float(self.points[0][1])))
+        for pt in self.points[1:]:
+            path.lineTo(QPointF(float(pt[0]), float(pt[1])))
+        self._cached_pen_path = path
+        self._cached_pen_path_len = n_pts
+        return path
 
     def effective_tool_kind(self) -> Tuple[str, str]:
         """
@@ -8690,6 +9170,10 @@ class AnnotationItem:
         if self.logical_bbox is not None:
             lx, ly, lw, lh = self.logical_bbox
             self.logical_bbox = (lx + fdx, ly + fdy, lw, lh)
+        self._cached_pen_path = None
+        self._cached_pen_path_len = 0
+        self._cached_pts_bounds = None
+        self._cached_pts_bounds_len = 0
         self.invalidate_render_cache()
 
     def logical_bounding_box(self) -> Optional[Tuple[float, float, float, float]]:
@@ -8703,17 +9187,38 @@ class AnnotationItem:
             cx, cy = float(self.points[0][0]), float(self.points[0][1])
             r = float(clamp_callout_radius(self.callout_radius))
             return (cx - r, cy - r, r * 2.0, r * 2.0)
-        xs = [float(p[0]) for p in self.points]
-        ys = [float(p[1]) for p in self.points]
+        n_pts = len(self.points)
+        if self._cached_pts_bounds is not None and self._cached_pts_bounds_len == n_pts:
+            min_x, min_y, max_x, max_y = self._cached_pts_bounds
+        elif n_pts == 1:
+            min_x = max_x = float(self.points[0][0])
+            min_y = max_y = float(self.points[0][1])
+            self._cached_pts_bounds = (min_x, min_y, max_x, max_y)
+            self._cached_pts_bounds_len = 1
+        elif n_pts == 2:
+            p0x, p0y = float(self.points[0][0]), float(self.points[0][1])
+            p1x, p1y = float(self.points[1][0]), float(self.points[1][1])
+            min_x, max_x = (p0x, p1x) if p0x <= p1x else (p1x, p0x)
+            min_y, max_y = (p0y, p1y) if p0y <= p1y else (p1y, p0y)
+            self._cached_pts_bounds = (min_x, min_y, max_x, max_y)
+            self._cached_pts_bounds_len = 2
+        else:
+            xs = [float(p[0]) for p in self.points]
+            ys = [float(p[1]) for p in self.points]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            self._cached_pts_bounds = (min_x, min_y, max_x, max_y)
+            self._cached_pts_bounds_len = n_pts
+
         pad = (
             float(clamp_stroke_thickness(self.thickness)) * 0.65
             if (mode == "brush" or family == "pen")
             else 0.0
         )
-        x0 = min(xs) - pad
-        y0 = min(ys) - pad
-        x1 = max(xs) + pad
-        y1 = max(ys) + pad
+        x0 = min_x - pad
+        y0 = min_y - pad
+        x1 = max_x + pad
+        y1 = max_y + pad
         return (x0, y0, max(1.0, x1 - x0), max(1.0, y1 - y0))
 
     def hit_test(self, x: float, y: float, tolerance_px: float = 8.0) -> bool:
@@ -8748,11 +9253,16 @@ class AnnotationItem:
         """Returns the compressed byte size of this annotation's stored flood-fill mask."""
         return len(self.compressed_mask) if self.compressed_mask else 0
 
-    def invalidate_render_cache(self) -> None:
+    def invalidate_render_cache(self, *, clear_path: bool = False) -> None:
         self._cached_qimage = None
         self._cached_cache_key = None
         self._cached_effect_rgb = None
         self._cached_effect_key = None
+        if clear_path:
+            self._cached_pen_path = None
+            self._cached_pen_path_len = 0
+            self._cached_pts_bounds = None
+            self._cached_pts_bounds_len = 0
 
     def get_or_create_qimage(self) -> Any:
         """
@@ -9163,11 +9673,14 @@ def apply_region_blur_rgb(
     blur_radius: int,
     *,
     mask: Optional[np.ndarray] = None,
+    fast_preview: bool = False,
 ) -> np.ndarray:
     """
     Applies a fast, region-bounded Gaussian blur strictly to `src_rgb[iy0:iy1, ix0:ix1]`
     (sampling up to `2 * blur_radius` context padding within `src_rgb` bounds so borders do
-    not darken). Returns the blurred `(iy1 - iy0, ix1 - ix0, 3)` uint8 patch.
+    not darken). When `fast_preview=True` during live mouse drag on large regions, uses
+    pyramid downsampling before GaussianBlur so 1440p/4K drag stays >120 FPS, while
+    committed annotations and final exports always run at 100% full resolution.
     """
     from PIL import ImageFilter
 
@@ -9178,10 +9691,32 @@ def apply_region_blur_rgb(
     py0 = max(0, iy0 - pad)
     px1 = min(w, ix1 + pad)
     py1 = min(h, iy1 + pad)
+    pw = max(1, px1 - px0)
+    ph = max(1, py1 - py0)
+
+    if fast_preview and mask is None and rad >= 3 and (pw * ph) > 36_000:
+        ds = 4 if (pw * ph) > 350_000 else (3 if (pw * ph) > 120_000 else 2)
+        sub_strided = np.ascontiguousarray(src_rgb[py0:py1:ds, px0:px1:ds, :3], dtype=np.uint8)
+        pil_small = Image.fromarray(sub_strided)
+        blurred_small = pil_small.filter(ImageFilter.GaussianBlur(radius=max(1.0, float(rad) / float(ds))))
+        b_arr = np.asarray(blurred_small, dtype=np.uint8)
+        sy0 = (iy0 - py0) // ds
+        sx0 = (ix0 - px0) // ds
+        sy1 = max(sy0 + 1, min(b_arr.shape[0], (iy1 - py0 + ds - 1) // ds))
+        sx1 = max(sx0 + 1, min(b_arr.shape[1], (ix1 - px0 + ds - 1) // ds))
+        return np.ascontiguousarray(b_arr[sy0:sy1, sx0:sx1, :3])
 
     sub_patch = np.ascontiguousarray(src_rgb[py0:py1, px0:px1, :3], dtype=np.uint8)
     pil_patch = Image.fromarray(sub_patch)
-    blurred_pil = pil_patch.filter(ImageFilter.GaussianBlur(radius=float(rad)))
+    if fast_preview and rad >= 4 and (pw * ph) > 65_000:
+        ds = 4 if (pw * ph) > 450_000 and rad >= 6 else (3 if (pw * ph) > 180_000 else 2)
+        small_w = max(2, pw // ds)
+        small_h = max(2, ph // ds)
+        small_pil = pil_patch.resize((small_w, small_h), Image.Resampling.BILINEAR)
+        blurred_small = small_pil.filter(ImageFilter.GaussianBlur(radius=max(1.0, float(rad) / float(ds))))
+        blurred_pil = blurred_small.resize((pw, ph), Image.Resampling.NEAREST)
+    else:
+        blurred_pil = pil_patch.filter(ImageFilter.GaussianBlur(radius=float(rad)))
     blurred_arr = np.asarray(blurred_pil, dtype=np.uint8)
     cropped_blur = np.ascontiguousarray(
         blurred_arr[(iy0 - py0) : (iy1 - py0), (ix0 - px0) : (ix1 - px0), :3]
@@ -9211,10 +9746,10 @@ def apply_world_aligned_pixelation_rgb(
     Mosaic cell boundaries are snapped to global physical screenshot coordinates
     `(world_offset_x + x, world_offset_y + y)` in multiples of `block_size` so moving or
     resizing a pixelation annotation never causes the mosaic pattern to jitter or swim.
+    Uses vectorized C-speed 2D block reduction when cells lie within image bounds.
     """
     h, w, _ = src_rgb.shape
     bsize = max(2, int(block_size))
-    out_patch = np.ascontiguousarray(src_rgb[iy0:iy1, ix0:ix1, :3].copy(), dtype=np.uint8)
 
     # Compute global coordinate range [gx0, gx1), [gy0, gy1)
     gx0 = world_offset_x + ix0
@@ -9224,12 +9759,29 @@ def apply_world_aligned_pixelation_rgb(
 
     cell_gx_start = (gx0 // bsize) * bsize
     cell_gy_start = (gy0 // bsize) * bsize
+    nx = (gx1 - cell_gx_start + bsize - 1) // bsize
+    ny = (gy1 - cell_gy_start + bsize - 1) // bsize
+    sy_start = cell_gy_start - world_offset_y
+    sx_start = cell_gx_start - world_offset_x
+    sy_end = sy_start + ny * bsize
+    sx_end = sx_start + nx * bsize
 
+    if sy_start >= 0 and sx_start >= 0 and sy_end <= h and sx_end <= w and nx > 0 and ny > 0:
+        aligned = src_rgb[sy_start:sy_end, sx_start:sx_end, :3]
+        means = np.round(aligned.reshape(ny, bsize, nx, bsize, 3).mean(axis=(1, 3))).astype(np.uint8)
+        y_idx = (np.arange(gy0, gy1) - cell_gy_start) // bsize
+        x_idx = (np.arange(gx0, gx1) - cell_gx_start) // bsize
+        out_patch = np.ascontiguousarray(means[y_idx[:, None], x_idx[None, :]], dtype=np.uint8)
+        if mask is not None and mask.shape == out_patch.shape[:2]:
+            orig_sub = src_rgb[iy0:iy1, ix0:ix1, :3]
+            cond = (mask >= 128)[:, :, None]
+            return np.where(cond, out_patch, orig_sub)
+        return out_patch
+
+    out_patch = np.ascontiguousarray(src_rgb[iy0:iy1, ix0:ix1, :3].copy(), dtype=np.uint8)
     for cell_gy in range(cell_gy_start, gy1, bsize):
-        # Local y interval inside src_rgb (0..h) for sampling the full cell
         sy0 = max(0, cell_gy - world_offset_y)
         sy1 = min(h, cell_gy + bsize - world_offset_y)
-        # Local y interval inside out_patch (0..iy1-iy0)
         dy0 = max(0, (cell_gy - world_offset_y) - iy0)
         dy1 = min(iy1 - iy0, (cell_gy + bsize - world_offset_y) - iy0)
         if sy1 <= sy0 or dy1 <= dy0:
@@ -10083,6 +10635,11 @@ if HAS_QT:
         HANDLE_SIZE = 12  # 3D glossy water-droplet orb diameter
         BORDER_GRAB_MARGIN = 6.0
         overlay_closed = pyqtSignal(object)
+        pin_requested = pyqtSignal(object, int, int)       # (QPixmap, global_x, global_y)
+        ocr_requested = pyqtSignal(object)                 # (QPixmap,)
+        capture_completed = pyqtSignal(object, str, str)   # (QPixmap, capture_mode, saved_path_str)
+        delayed_capture_requested = pyqtSignal(int, str)   # (delay_seconds, target_mode)
+        monitor_picker_requested = pyqtSignal(str)         # target capture mode
 
         HANDLE_CURSORS = [
             Qt.CursorShape.SizeFDiagCursor,
@@ -10100,6 +10657,9 @@ if HAS_QT:
             frame: CapturedFrame,
             config: AppConfig,
             t_trigger_start: Optional[float] = None,
+            *,
+            workflow_mode: Optional[str] = None,
+            candidate_windows: Optional[Sequence[DetectedWindowInfo]] = None,
         ) -> None:
             super().__init__(None)
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -10261,6 +10821,19 @@ if HAS_QT:
             self.redo_stack: List[AnnotationItem] = []
             self.current_annotation: Optional[AnnotationItem] = None
             self._cursor_pos_local: Optional[QPointF] = None
+            self._last_magnifier_rect: Optional[QRect] = None
+
+            # 4-Layer Cached Annotation Rendering Pipeline state:
+            #   Layer 1: _scaled_bg_pixmap (static screenshot scaled to overlay logical size)
+            #   Layer 2: _committed_annotations_pixmap & _composite_committed_pixmap (Layer 1 + Layer 2)
+            #   Layer 3: Active in-progress stroke / tool preview rendered only inside dirty_rect
+            #   Layer 4: Fast 4-rect exterior dim mask, selection border/orbs, badge, and cursor ring
+            self._scaled_bg_pixmap: Optional[QPixmap] = None
+            self._committed_annotations_pixmap: Optional[QPixmap] = None
+            self._committed_vectors_pixmap: Optional[QPixmap] = None
+            self._composite_committed_pixmap: Optional[QPixmap] = None
+            self._committed_cache_dirty: bool = True
+            self._committed_filter_sel_rect: Optional[QRect] = None
 
             # Async Paint Bucket flood-fill worker state
             self._fill_signals = FloodFillSignals()
@@ -10269,8 +10842,25 @@ if HAS_QT:
             self._fill_running: bool = False
             self._cancel_fill_event = threading.Event()
 
+            self.capture_workflow_mode: str = normalize_capture_mode(
+                workflow_mode or getattr(config, "default_capture_mode", "region")
+            )
+            own_hwnd_set = {int(self.winId())} if self.winId() else set()
+            self.window_capture_controller = WindowCaptureSessionController(
+                monitor_rect=frame.virtual_rect,
+                dpi_scale=float(frame.monitor_dpi_scale or 1.0),
+                px_scale_x=float(self._px_scale_x or 1.0),
+                px_scale_y=float(self._px_scale_y or 1.0),
+                client_only=False,
+                use_dwm_bounds=bool(getattr(config, "window_capture_use_dwm_bounds", True)),
+                candidate_windows=candidate_windows,
+                exclude_hwnds=own_hwnd_set,
+                exclude_pid=os.getpid(),
+            )
             self._build_floating_toolbar()
+            self._build_mode_hud_bar()
             self.setCursor(Qt.CursorShape.CrossCursor)
+            self.set_capture_workflow_mode(self.capture_workflow_mode)
 
             if getattr(self.frame, "is_preview", False) and self.frame.raw_scrgb_float is not None:
                 self._start_initial_full_render()
@@ -10345,6 +10935,14 @@ if HAS_QT:
                     _debug_monitor_log(f"Native HWND placement check note: {exc}")
 
             self._sync_coordinate_scales()
+            if hasattr(self, "window_capture_controller"):
+                self.window_capture_controller.px_scale_x = float(self._px_scale_x or 1.0)
+                self.window_capture_controller.px_scale_y = float(self._px_scale_y or 1.0)
+            self._reposition_mode_hud()
+            if self.capture_workflow_mode == "fullscreen" and not self.has_selection:
+                self.set_capture_workflow_mode("fullscreen")
+            elif self.capture_workflow_mode == "window" and not self.has_selection:
+                self.hover_window_at(self.initial_cursor_local.x(), self.initial_cursor_local.y())
             self.raise_()
             self.activateWindow()
             self.setFocus()
@@ -10366,11 +10964,148 @@ if HAS_QT:
         def resizeEvent(self, event) -> None:
             super().resizeEvent(event)
             self._sync_coordinate_scales()
+            if hasattr(self, "window_capture_controller"):
+                self.window_capture_controller.px_scale_x = float(self._px_scale_x or 1.0)
+                self.window_capture_controller.px_scale_y = float(self._px_scale_y or 1.0)
+            self._scaled_bg_pixmap = None
+            self._committed_cache_dirty = True
             self._badge_cached_rect = None
             if hasattr(self, "toolbar") and self.toolbar is not None:
                 self.toolbar.invalidate_backdrop()
             if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
                 self.context_toolbar.invalidate_backdrop()
+            if hasattr(self, "mode_hud_bar") and self.mode_hud_bar is not None:
+                self.mode_hud_bar.invalidate_backdrop()
+                self._reposition_mode_hud()
+
+        def _ensure_scaled_bg_pixmap(self) -> QPixmap:
+            """Returns Layer 1 (`_scaled_bg_pixmap`) sized to the overlay's logical geometry."""
+            target_sz = self.size()
+            if target_sz.isEmpty():
+                return self.bg_pixmap
+            if (
+                getattr(self, "_scaled_bg_pixmap", None) is not None
+                and not self._scaled_bg_pixmap.isNull()
+                and self._scaled_bg_pixmap.size() == target_sz
+            ):
+                return self._scaled_bg_pixmap
+            if self.bg_pixmap.size() == target_sz:
+                self._scaled_bg_pixmap = self.bg_pixmap
+                return self._scaled_bg_pixmap
+            scaled = QPixmap(target_sz)
+            sp = QPainter(scaled)
+            sp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            sp.drawPixmap(self.rect(), self.bg_pixmap)
+            sp.end()
+            self._scaled_bg_pixmap = scaled
+            return scaled
+
+        def _rebuild_committed_annotations_cache(self) -> None:
+            """
+            Rebuilds Layer 2 (`_committed_annotations_pixmap`, `_committed_vectors_pixmap`,
+            and `_composite_committed_pixmap`) from `self.annotations`.
+            Called only when the committed annotation stack changes non-incrementally
+            (undo, redo, moving an existing annotation, HDR white-scale update, or resize).
+            Never called on mouseMoveEvent during freehand or shape drawing.
+            """
+            w = max(1, self.width())
+            h = max(1, self.height())
+            sz = QSize(w, h)
+            bg_layer = self._ensure_scaled_bg_pixmap()
+
+            if (
+                getattr(self, "_committed_annotations_pixmap", None) is None
+                or self._committed_annotations_pixmap.size() != sz
+            ):
+                self._committed_annotations_pixmap = QPixmap(w, h)
+            if (
+                getattr(self, "_committed_vectors_pixmap", None) is None
+                or self._committed_vectors_pixmap.size() != sz
+            ):
+                self._committed_vectors_pixmap = QPixmap(w, h)
+
+            self._committed_annotations_pixmap.fill(Qt.GlobalColor.transparent)
+            self._committed_vectors_pixmap.fill(Qt.GlobalColor.transparent)
+
+            if self.annotations:
+                ap = QPainter(self._committed_annotations_pixmap)
+                ap.setRenderHint(QPainter.RenderHint.Antialiasing)
+                ap.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                self._draw_all_annotations(ap, include_current=False)
+                ap.end()
+
+                has_non_filters = any(
+                    it.effective_tool_kind()[0] not in ("blur", "pixelate")
+                    for it in self.annotations
+                )
+                if has_non_filters:
+                    vp = QPainter(self._committed_vectors_pixmap)
+                    vp.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    vp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    self._draw_all_annotations(vp, include_current=False, skip_region_filters=True)
+                    vp.end()
+
+            self._composite_committed_pixmap = bg_layer.copy()
+            if self.annotations:
+                cp = QPainter(self._composite_committed_pixmap)
+                cp.drawPixmap(0, 0, self._committed_annotations_pixmap)
+                cp.end()
+
+            self._committed_cache_dirty = False
+            self._committed_filter_sel_rect = (
+                self.selection_rect.normalized().toRect() if self.has_selection else None
+            )
+            PERF_TELEMETRY.record_committed_cache_update(incremental=False)
+
+        def _commit_single_annotation_to_cache(self, item: AnnotationItem) -> None:
+            """
+            Incrementally commits `item` onto Layer 2 (`_committed_annotations_pixmap` and
+            `_composite_committed_pixmap`) in O(bbox) time without re-rendering existing annotations.
+            Falls back to a full cache rebuild only when a newly committed Pass 1 (`blur`/`pixelate`)
+            or Pass 2 (`fill`) item must be ordered underneath already-committed Pass 3 vectors.
+            """
+            item.invalidate_render_cache(clear_path=False)
+            if (
+                getattr(self, "_committed_cache_dirty", True)
+                or getattr(self, "_composite_committed_pixmap", None) is None
+                or self._composite_committed_pixmap.size() != self.size()
+            ):
+                self._rebuild_committed_annotations_cache()
+                return
+
+            family, _ = item.effective_tool_kind()
+            prior_items = self.annotations[:-1] if (self.annotations and self.annotations[-1] is item) else self.annotations
+            if family in ("blur", "pixelate"):
+                if any(it.effective_tool_kind()[0] not in ("blur", "pixelate") for it in prior_items):
+                    self._rebuild_committed_annotations_cache()
+                    return
+            elif family == "fill":
+                if any(it.effective_tool_kind()[0] not in ("blur", "pixelate", "fill") for it in prior_items):
+                    self._rebuild_committed_annotations_cache()
+                    return
+
+            if self._committed_annotations_pixmap is not None:
+                ap = QPainter(self._committed_annotations_pixmap)
+                ap.setRenderHint(QPainter.RenderHint.Antialiasing)
+                ap.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                self._draw_single_annotation(ap, item)
+                ap.end()
+
+            if family not in ("blur", "pixelate") and self._committed_vectors_pixmap is not None:
+                vp = QPainter(self._committed_vectors_pixmap)
+                vp.setRenderHint(QPainter.RenderHint.Antialiasing)
+                vp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                self._draw_single_annotation(vp, item)
+                vp.end()
+
+            if self._composite_committed_pixmap is not None:
+                cp = QPainter(self._composite_committed_pixmap)
+                cp.setRenderHint(QPainter.RenderHint.Antialiasing)
+                cp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                self._draw_single_annotation(cp, item)
+                cp.end()
+
+            PERF_TELEMETRY.record_committed_cache_update(incremental=True)
 
         def _sample_frosted_region(self, logical_rect: QRect) -> Optional[QPixmap]:
             """Samples physical pixels from the captured screenshot and returns a blurred acrylic QPixmap."""
@@ -10404,29 +11139,32 @@ if HAS_QT:
         def _sample_parent_patch(self, logical_rect: QRect) -> Optional[QPixmap]:
             """
             Renders the exact static overlay background behind `logical_rect` once into a small
-            QPixmap so AeroGlassToolbar can paint opaquely without ever triggering a fullscreen
-            SnipOverlayWindow repaint during 30 FPS water/button animations.
+            QPixmap using the cached `_composite_committed_pixmap` so AeroGlassToolbar never
+            triggers a full annotation replay.
             """
             w = max(1, logical_rect.width())
             h = max(1, logical_rect.height())
+            if (
+                getattr(self, "_committed_cache_dirty", True)
+                or getattr(self, "_composite_committed_pixmap", None) is None
+                or self._composite_committed_pixmap.size() != self.size()
+            ):
+                self._rebuild_committed_annotations_cache()
+
             patch = QPixmap(w, h)
             patch.fill(Qt.GlobalColor.black)
             p = QPainter(patch)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.translate(-logical_rect.x(), -logical_rect.y())
 
-            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            p.drawPixmap(self.rect(), self.bg_pixmap)
+            if self._composite_committed_pixmap is not None:
+                p.drawPixmap(logical_rect, self._composite_committed_pixmap, logical_rect)
+            else:
+                p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                p.drawPixmap(self.rect(), self.bg_pixmap)
 
-            overlay_path = QPainterPath()
-            overlay_path.addRect(QRectF(logical_rect))
-            if self.has_selection:
-                sel_path = QPainterPath()
-                sel_path.addRect(self.selection_rect.normalized())
-                overlay_path = overlay_path.subtracted(sel_path)
-            p.fillPath(overlay_path, QColor(4, 22, 42, 138))
-
-            self._draw_all_annotations(p)
+            hole_rc = self.selection_rect.normalized() if self.has_selection else None
+            self._draw_exterior_dim_mask(p, hole_rc, logical_rect)
             p.end()
             return patch
 
@@ -10442,6 +11180,8 @@ if HAS_QT:
                 img_arr.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
             ).copy()
             self.bg_pixmap = QPixmap.fromImage(qimg)
+            self._scaled_bg_pixmap = None
+            self._committed_cache_dirty = True
             self._badge_cached_rect = None
             if hasattr(self, "toolbar") and self.toolbar is not None:
                 self.toolbar.invalidate_backdrop()
@@ -10569,6 +11309,24 @@ if HAS_QT:
             self.redo_btn.clicked.connect(self.redo_annotation)
             layout.addWidget(self.redo_btn)
 
+            # Text / Offline OCR (Frutiger Aqua Gel Pill)
+            self.ocr_btn = AeroGelButton("Text (OCR)", variant="glass", parent=self.toolbar)
+            self.ocr_btn.setToolTip(
+                "Extract Text Offline (OCR) from selected region (O or Ctrl+O)"
+            )
+            self.ocr_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.ocr_btn.clicked.connect(self.ocr_snip)
+            layout.addWidget(self.ocr_btn)
+
+            # Pin to Screen (Frutiger Aqua Gel Pill)
+            self.pin_btn = AeroGelButton("Pin", variant="glass", parent=self.toolbar)
+            self.pin_btn.setToolTip(
+                "Pin selected region as an independent floating desktop window (Ctrl+P)"
+            )
+            self.pin_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.pin_btn.clicked.connect(self.pin_snip)
+            layout.addWidget(self.pin_btn)
+
             # Save (Frutiger Emerald Gel Pill)
             self.save_btn = AeroGelButton("Save", variant="emerald", parent=self.toolbar)
             self.save_btn.setToolTip(
@@ -10596,6 +11354,209 @@ if HAS_QT:
 
             # Build slim, context-sensitive secondary Frutiger Aqua toolbar for Thickness & Paint Bucket controls
             self._build_context_toolbar()
+
+        def _build_mode_hud_bar(self) -> None:
+            """
+            Unified Frutiger Aqua Capture-Mode Chooser HUD anchored at top-center of the capture overlay.
+            Allows switching between Region, Window, Monitor (Fullscreen), OCR (Text Capture), and
+            Delayed Capture (3s/5s/10s) inside the capture flow without cluttering the tray menu.
+            """
+            self.mode_hud_bar = AeroGlassToolbar(
+                self, self._sample_frosted_region, self._sample_parent_patch
+            )
+            self.mode_hud_bar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            hud_layout = QHBoxLayout(self.mode_hud_bar)
+            hud_layout.setContentsMargins(10, 5, 10, 5)
+            hud_layout.setSpacing(6)
+
+            mode_lbl = AeroToolbarLabel("Mode:", tint_hex="#B8F8FF", parent=self.mode_hud_bar)
+            hud_layout.addWidget(mode_lbl)
+
+            self.mode_hud_buttons: Dict[str, AeroGelButton] = {}
+            mode_specs = [
+                ("region", "✦ Region (1)", "Interactive region selection + annotation editor (Shortcut: 1)"),
+                ("window", "▣ Window (2)", "True Window Capture: hover any window to highlight, click to snap to exact window bounds (Shortcut: 2)"),
+                ("fullscreen", "🖥 Monitor (3)", "Select entire monitor display (Shortcut: 3)"),
+            ]
+            for m_id, m_label, m_tip in mode_specs:
+                btn = AeroGelButton(m_label, variant="glass", parent=self.mode_hud_bar)
+                btn.setCheckable(True)
+                btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                btn.setToolTip(m_tip)
+                btn.setChecked(m_id == self.capture_workflow_mode)
+                if m_id == "fullscreen":
+                    btn.clicked.connect(lambda _c=False: self.request_monitor_picker("fullscreen"))
+                else:
+                    btn.clicked.connect(lambda _c=False, mode_key=m_id: self.set_capture_workflow_mode(mode_key))
+                hud_layout.addWidget(btn)
+                self.mode_hud_buttons[m_id] = btn
+
+            self.win_client_area_btn = AeroGelButton("Client Area", variant="glass", parent=self.mode_hud_bar)
+            self.win_client_area_btn.setCheckable(True)
+            self.win_client_area_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.win_client_area_btn.setToolTip(
+                "Toggle between Full Window bounds (DWM extended frame) and inner Client Area (Shortcut: W)"
+            )
+            self.win_client_area_btn.clicked.connect(self.toggle_window_client_area_mode)
+            self.win_client_area_btn.setVisible(self.capture_workflow_mode == "window")
+            hud_layout.addWidget(self.win_client_area_btn)
+
+            # The frozen overlay lives on one physical display only. A display picker
+            # switches to another display by taking a new HDR-aware framebuffer capture.
+            self.change_display_btn = AeroGelButton("Change Display", variant="glass", parent=self.mode_hud_bar)
+            self.change_display_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.change_display_btn.setToolTip("Select another monitor and recapture its actual framebuffer")
+            self.change_display_btn.clicked.connect(lambda _c=False: self.request_monitor_picker("window"))
+            self.change_display_btn.setVisible(self.capture_workflow_mode == "window")
+            hud_layout.addWidget(self.change_display_btn)
+
+            self.delay_hud_btn = AeroGelButton("⏱ Delay (5)", variant="sapphire", parent=self.mode_hud_bar)
+            self.delay_hud_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.delay_hud_btn.setToolTip(
+                "Start a non-blocking Delayed Capture countdown (3s / 5s / 10s) in the active mode (Shortcut: 5)"
+            )
+            self.delay_hud_btn.clicked.connect(self._show_delay_hud_menu)
+            hud_layout.addWidget(self.delay_hud_btn)
+
+            hud_close_btn = AeroGelButton("✕", variant="ruby", parent=self.mode_hud_bar)
+            hud_close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            hud_close_btn.setToolTip("Cancel Capture (Esc)")
+            hud_close_btn.clicked.connect(self.close)
+            hud_layout.addWidget(hud_close_btn)
+
+            self.mode_hud_bar.adjustSize()
+            self._reposition_mode_hud()
+            self.mode_hud_bar.show()
+            self.mode_hud_bar.raise_()
+
+        def _reposition_mode_hud(self) -> None:
+            if not hasattr(self, "mode_hud_bar") or self.mode_hud_bar is None:
+                return
+            if self.mode_hud_bar.layout() is not None:
+                self.mode_hud_bar.layout().activate()
+            self.mode_hud_bar.adjustSize()
+            hw = self.mode_hud_bar.width()
+            hh = self.mode_hud_bar.height()
+            hx = max(10, (self.width() - hw) // 2)
+            hy = 14
+            self.mode_hud_bar.move(hx, hy)
+            self.mode_hud_bar.invalidate_backdrop()
+            self.mode_hud_bar.show()
+            self.mode_hud_bar.raise_()
+
+        def _show_delay_hud_menu(self) -> None:
+            menu = QMenu(self)
+            target_mode = (
+                self.capture_workflow_mode
+                if self.capture_workflow_mode in ("region", "window", "fullscreen", "ocr")
+                else "region"
+            )
+            for sec in (3, 5, 10):
+                act = menu.addAction(f"Capture {target_mode.capitalize()} in {sec} Seconds")
+                act.triggered.connect(lambda _c=False, s=sec, tm=target_mode: self.request_delayed_capture(s, tm))
+            menu.exec(self.delay_hud_btn.mapToGlobal(QPoint(0, self.delay_hud_btn.height() + 4)))
+
+        def request_monitor_picker(self, mode: str = "fullscreen") -> None:
+            """Close the one-monitor frozen overlay, then let the controller select a real display."""
+            if self._closed:
+                return
+            requested_mode = "window" if mode == "window" else "fullscreen"
+            self.monitor_picker_requested.emit(requested_mode)
+            self.hide()
+            self.close()
+
+        def request_delayed_capture(self, delay_seconds: int = 3, target_mode: Optional[str] = None) -> None:
+            eff_target = normalize_capture_mode(target_mode or self.capture_workflow_mode)
+            if eff_target == "delayed":
+                eff_target = "region"
+            sec = max(1, clamp_capture_delay_seconds(delay_seconds or 3))
+            self.hide()
+            self.close()
+            self.delayed_capture_requested.emit(sec, eff_target)
+
+        def toggle_window_client_area_mode(self, checked: Optional[bool] = None) -> bool:
+            new_val = (not self.window_capture_controller.client_only) if checked is None else bool(checked)
+            self.window_capture_controller.set_client_only(new_val)
+            if hasattr(self, "win_client_area_btn"):
+                self.win_client_area_btn.blockSignals(True)
+                self.win_client_area_btn.setChecked(new_val)
+                self.win_client_area_btn.blockSignals(False)
+            if self.window_capture_controller.locked_local_rect is not None and self.has_selection:
+                lx, ly, lw, lh = self.window_capture_controller.locked_local_rect
+                self.selection_rect = QRectF(float(lx), float(ly), float(lw), float(lh))
+                self._reposition_toolbar()
+            self.update()
+            return new_val
+
+        def set_capture_workflow_mode(self, mode: str) -> str:
+            norm = normalize_capture_mode(mode)
+            if norm == "delayed":
+                self.request_delayed_capture(max(3, int(getattr(self.config, "capture_delay_seconds", 3) or 3)), "region")
+                return "delayed"
+            prev_mode = getattr(self, "capture_workflow_mode", "region")
+            self.capture_workflow_mode = norm
+            if hasattr(self, "mode_hud_buttons"):
+                for mid, btn in self.mode_hud_buttons.items():
+                    btn.blockSignals(True)
+                    btn.setChecked(mid == norm)
+                    btn.blockSignals(False)
+                    btn.update()
+            if hasattr(self, "win_client_area_btn"):
+                self.win_client_area_btn.setVisible(norm == "window")
+            if hasattr(self, "change_display_btn"):
+                self.change_display_btn.setVisible(norm == "window")
+
+            if norm == "fullscreen":
+                self.window_capture_controller.clear_locked_selection()
+                self.has_selection = True
+                self.selection_rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+                self._reposition_toolbar()
+            elif norm == "window":
+                if prev_mode != "window":
+                    self.has_selection = False
+                    self.selection_rect = QRectF()
+                    self.window_capture_controller.clear_locked_selection()
+                    if hasattr(self, "toolbar") and self.toolbar is not None:
+                        self.toolbar.hide()
+                    if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                        self.context_toolbar.hide()
+                cur_pt = self._cursor_pos_local or self.initial_cursor_local
+                self.hover_window_at(cur_pt.x(), cur_pt.y())
+            else:
+                if prev_mode in ("fullscreen", "window"):
+                    self.window_capture_controller.clear_locked_selection()
+                    if prev_mode == "fullscreen":
+                        self.has_selection = False
+                        self.selection_rect = QRectF()
+                        if hasattr(self, "toolbar") and self.toolbar is not None:
+                            self.toolbar.hide()
+
+            self._reposition_mode_hud()
+            self.update()
+            return norm
+
+        def hover_window_at(self, local_x: float, local_y: float) -> Optional[DetectedWindowInfo]:
+            """Update the highlighted candidate window under local overlay coordinates `(local_x, local_y)`."""
+            self._cursor_pos_local = QPointF(float(local_x), float(local_y))
+            res = self.window_capture_controller.update_hover_local(local_x, local_y)
+            self.update()
+            return res[0] if res is not None else None
+
+        def click_window_at(self, local_x: float, local_y: float) -> Optional[DetectedWindowInfo]:
+            """
+            Snap the capture selection to the exact bounds of the window under `(local_x, local_y)`.
+            Clicking a different window immediately moves the capture area to that window.
+            """
+            res = self.window_capture_controller.click_select_local(local_x, local_y)
+            if res is None:
+                return None
+            win, (lx, ly, lw, lh) = res
+            self.has_selection = True
+            self.selection_rect = QRectF(float(lx), float(ly), float(lw), float(lh))
+            self._reposition_toolbar()
+            self._reposition_mode_hud()
+            self.update()
+            return win
 
         def _build_context_toolbar(self) -> None:
             self.context_toolbar = AeroGlassToolbar(
@@ -11384,6 +12345,18 @@ if HAS_QT:
                 self.toolbar.invalidate_backdrop()
             if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
                 self.context_toolbar.invalidate_backdrop()
+            if hasattr(self, "mode_hud_bar") and self.mode_hud_bar is not None:
+                self.mode_hud_bar.invalidate_backdrop()
+
+        def _invalidate_toolbars_intersecting(self, dirty_rect: Optional[QRect] = None) -> None:
+            """Only invalidates a floating toolbar's backdrop if `dirty_rect` overlaps its geometry."""
+            if dirty_rect is None or dirty_rect.isEmpty():
+                self._invalidate_all_toolbars()
+                return
+            for attr in ("toolbar", "context_toolbar", "mode_hud_bar"):
+                tb = getattr(self, attr, None)
+                if tb is not None and tb.isVisible() and tb.geometry().intersects(dirty_rect):
+                    tb.invalidate_backdrop()
 
         def cancel_active_flood_fill(self) -> None:
             """Cooperatively cancels any in-flight background Paint Bucket operation."""
@@ -11403,17 +12376,23 @@ if HAS_QT:
                 self.cancel_active_flood_fill()
                 return
             if self.annotations:
-                self.redo_stack.append(self.annotations.pop())
-                self._invalidate_all_toolbars()
-                self.update()
+                undone = self.annotations.pop()
+                self.redo_stack.append(undone)
+                dirty = self._compute_annotation_dirty_rect(undone)
+                self._rebuild_committed_annotations_cache()
+                self._invalidate_toolbars_intersecting(dirty)
+                self.update(dirty if not dirty.isEmpty() else self.rect())
 
         def redo_annotation(self) -> None:
             if self._fill_running:
                 return
             if self.redo_stack:
-                self.annotations.append(self.redo_stack.pop())
-                self._invalidate_all_toolbars()
-                self.update()
+                redone = self.redo_stack.pop()
+                self.annotations.append(redone)
+                dirty = self._compute_annotation_dirty_rect(redone)
+                self._commit_single_annotation_to_cache(redone)
+                self._invalidate_toolbars_intersecting(dirty)
+                self.update(dirty if not dirty.isEmpty() else self.rect())
 
         def _render_selection_composite_for_fill(
             self, crop_rect: QRect
@@ -11558,8 +12537,10 @@ if HAS_QT:
                 _ = item.get_or_create_qimage()
                 self.annotations.append(item)
                 self.redo_stack.clear()
-                self._invalidate_all_toolbars()
-                self.update()
+                dirty_fill = self._compute_annotation_dirty_rect(item)
+                self._commit_single_annotation_to_cache(item)
+                self._invalidate_toolbars_intersecting(dirty_fill)
+                self.update(dirty_fill if not dirty_fill.isEmpty() else self.rect())
                 return item
 
             # Asynchronous background worker path for large 1080p/1440p/4K selections
@@ -11600,10 +12581,13 @@ if HAS_QT:
                     self._reposition_toolbar()
             self.setCursor(Qt.CursorShape.CrossCursor)
             if isinstance(payload, dict) and isinstance(payload.get("item"), AnnotationItem):
-                self.annotations.append(payload["item"])
+                fill_it = payload["item"]
+                self.annotations.append(fill_it)
                 self.redo_stack.clear()
-                self._invalidate_all_toolbars()
-                self.update()
+                dirty_fill = self._compute_annotation_dirty_rect(fill_it)
+                self._commit_single_annotation_to_cache(fill_it)
+                self._invalidate_toolbars_intersecting(dirty_fill)
+                self.update(dirty_fill if not dirty_fill.isEmpty() else self.rect())
 
         def _get_handle_rects(self, r: QRectF) -> List[QRectF]:
             s = self.HANDLE_SIZE
@@ -11743,158 +12727,369 @@ if HAS_QT:
                 self.context_toolbar.hide()
 
         # ---------------------------------------------------------------------
-        # Painting (Frozen Image + Deep Aqua Dim Mask + Aero Frame & Orbs)
+        # Painting (4-Layer Cached Pipeline: Static BG + Committed Cache + Active Preview + UI Chrome)
         # ---------------------------------------------------------------------
+        def _draw_exterior_dim_mask(
+            self,
+            painter: QPainter,
+            hole_rect: Optional[QRectF],
+            dirty_rc: QRect,
+        ) -> None:
+            """
+            Draws the deep ocean-tinted dim mask (`QColor(4, 22, 42, 138)`) outside `hole_rect`
+            using at most 4 non-overlapping axis-aligned `fillRect` bands intersected with `dirty_rc`.
+            Skips completely in O(1) when `dirty_rc` lies strictly inside `hole_rect`!
+            """
+            dim_color = QColor(4, 22, 42, 138)
+            if hole_rect is None or hole_rect.isEmpty():
+                painter.fillRect(dirty_rc, dim_color)
+                return
+
+            hr = hole_rect.normalized()
+            hx0 = hr.left()
+            hy0 = hr.top()
+            hx1 = hr.right()
+            hy1 = hr.bottom()
+
+            # Fast O(1) skip when the dirty rectangle is completely inside the selection box!
+            if (
+                float(dirty_rc.left()) >= hx0
+                and float(dirty_rc.top()) >= hy0
+                and float(dirty_rc.right() + 1) <= hx1
+                and float(dirty_rc.bottom() + 1) <= hy1
+            ):
+                return
+
+            fw = float(self.width())
+            fh = float(self.height())
+            df = QRectF(dirty_rc)
+            # 1. Top band: [0..fw, 0..hy0]
+            if hy0 > 0.0 and df.top() < hy0:
+                b_top = QRectF(0.0, 0.0, fw, hy0).intersected(df)
+                if not b_top.isEmpty():
+                    painter.fillRect(b_top, dim_color)
+            # 2. Bottom band: [0..fw, hy1..fh]
+            if hy1 < fh and df.bottom() > hy1:
+                b_bot = QRectF(0.0, hy1, fw, fh - hy1).intersected(df)
+                if not b_bot.isEmpty():
+                    painter.fillRect(b_bot, dim_color)
+            # 3. Left band: [0..hx0, hy0..hy1]
+            mid_h = max(0.0, hy1 - hy0)
+            if hx0 > 0.0 and mid_h > 0.0 and df.left() < hx0:
+                b_left = QRectF(0.0, hy0, hx0, mid_h).intersected(df)
+                if not b_left.isEmpty():
+                    painter.fillRect(b_left, dim_color)
+            # 4. Right band: [hx1..fw, hy0..hy1]
+            if hx1 < fw and mid_h > 0.0 and df.right() > hx1:
+                b_right = QRectF(hx1, hy0, fw - hx1, mid_h).intersected(df)
+                if not b_right.isEmpty():
+                    painter.fillRect(b_right, dim_color)
+
+        def _compute_annotation_dirty_rect(self, item: Optional[AnnotationItem]) -> QRect:
+            """Computes a bounded logical `QRect` covering `item` plus stroke/arrowhead/shadow padding."""
+            if item is None:
+                return QRect()
+            family, mode = item.effective_tool_kind()
+            if family == "fill":
+                if item.logical_bbox is not None:
+                    lx, ly, lw, lh = item.logical_bbox
+                    return QRectF(lx - 6.0, ly - 6.0, lw + 12.0, lh + 12.0).toRect().intersected(self.rect())
+                if item.fill_bbox is not None:
+                    bx, by, bw, bh = item.fill_bbox
+                    sx = max(1e-4, float(self._px_scale_x))
+                    sy = max(1e-4, float(self._px_scale_y))
+                    return QRectF(
+                        float(bx) / sx - 6.0,
+                        float(by) / sy - 6.0,
+                        float(bw) / sx + 12.0,
+                        float(bh) / sy + 12.0,
+                    ).toRect().intersected(self.rect())
+                return self.rect()
+            if not item.points:
+                return QRect()
+            if family == "callout":
+                cx, cy = float(item.points[0][0]), float(item.points[0][1])
+                rad = float(clamp_callout_radius(item.callout_radius)) + 10.0
+                return QRectF(cx - rad, cy - rad, rad * 2.0, rad * 2.0 + 4.0).toRect().intersected(self.rect())
+            if family == "text":
+                cx, cy = float(item.points[0][0]), float(item.points[0][1])
+                fsize = max(10, min(72, int(getattr(item, "font_size", 0) or DEFAULT_TEXT_FONT_SIZE)))
+                tw = max(180.0, float(len(item.text or " ") + 2) * fsize * 0.85)
+                th = float(fsize) * 2.2 + 16.0
+                return QRectF(cx - 10.0, cy - float(fsize) * 1.4 - 8.0, tw, th).toRect().intersected(self.rect())
+
+            bbox = item.logical_bounding_box()
+            if bbox is None:
+                return QRect()
+            bx, by, bw, bh = bbox
+            sw = float(clamp_stroke_thickness(item.thickness))
+            if family == "arrow":
+                pad = max(28.0, sw * 2.4 + 18.0)
+            elif family in ("blur", "pixelate"):
+                pad = max(20.0, sw + float(max(item.blur_radius, item.pixel_size)) + 14.0)
+            else:
+                pad = max(16.0, sw * 1.2 + 12.0)
+            return QRectF(bx - pad, by - pad, bw + pad * 2.0, bh + pad * 2.0).toRect().intersected(self.rect())
+
+        def _compute_cursor_ring_dirty_rect(self, pt: Optional[QPointF]) -> QRect:
+            if pt is None:
+                return QRect()
+            r_pad = int(self.stroke_width) + 14
+            return QRect(int(pt.x()) - r_pad, int(pt.y()) - r_pad, r_pad * 2, r_pad * 2).intersected(self.rect())
+
         def paintEvent(self, event) -> None:
+            t_paint_0 = time.perf_counter()
             if not self._first_paint_recorded:
                 self._first_paint_recorded = True
-                t_first_paint = (time.perf_counter() - self._t_trigger_start) * 1000.0
+                t_first_paint = (t_paint_0 - self._t_trigger_start) * 1000.0
                 PERF_TELEMETRY.record_stage("first_visible_paint", t_first_paint)
                 self._log_latency_breakdown()
 
+            dirty_rc = event.rect().intersected(self.rect())
+            if dirty_rc.isEmpty():
+                return
+
+            # Ensure Layer 1 + Layer 2 committed composite cache is up to date
+            cur_sel_int = self.selection_rect.normalized().toRect() if self.has_selection else None
+            has_committed_filters = any(
+                it.effective_tool_kind()[0] in ("blur", "pixelate") for it in self.annotations
+            )
+            if (
+                getattr(self, "_committed_cache_dirty", True)
+                or getattr(self, "_composite_committed_pixmap", None) is None
+                or self._composite_committed_pixmap.size() != self.size()
+                or (has_committed_filters and getattr(self, "_committed_filter_sel_rect", None) != cur_sel_int)
+            ):
+                self._rebuild_committed_annotations_cache()
+
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setClipRegion(event.region())
+            painter.setClipRect(dirty_rc)
 
-            # 1. Draw full screen frozen capture
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            painter.drawPixmap(self.rect(), self.bg_pixmap)
+            # 1 & 2. Blit Layer 1 (Static Screenshot) + Layer 2 (Committed Annotations) strictly inside dirty_rc
+            if self._composite_committed_pixmap is not None:
+                painter.drawPixmap(dirty_rc, self._composite_committed_pixmap, dirty_rc)
+            else:
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                painter.drawPixmap(self.rect(), self.bg_pixmap)
+                self._draw_all_annotations(painter, include_current=False)
 
-            # 2. Draw subtle deep ocean-tinted dim mask outside selection
-            overlay_path = QPainterPath()
-            overlay_path.addRect(QRectF(self.rect()))
-            if self.has_selection:
-                sel_norm = self.selection_rect.normalized()
-                sel_path = QPainterPath()
-                sel_path.addRect(sel_norm)
-                overlay_path = overlay_path.subtracted(sel_path)
+            # 3. Draw Layer 3 (Active In-Progress Stroke / Tool Preview ONLY)
+            if self.current_annotation is not None:
+                cur_family, _ = self.current_annotation.effective_tool_kind()
+                self._draw_single_annotation(painter, self.current_annotation)
+                # If the active tool is a Pass 1 filter (Blur/Pixelate) and there are already committed
+                # Pass 2/3 vector annotations, composite `_committed_vectors_pixmap` on top so vectors
+                # never appear blurred while dragging a new filter box!
+                if (
+                    cur_family in ("blur", "pixelate")
+                    and self._committed_vectors_pixmap is not None
+                    and any(it.effective_tool_kind()[0] not in ("blur", "pixelate") for it in self.annotations)
+                ):
+                    painter.drawPixmap(dirty_rc, self._committed_vectors_pixmap, dirty_rc)
 
-            painter.fillPath(overlay_path, QColor(4, 22, 42, 138))
+            # 4. Draw Layer 4: Fast 4-Rect Exterior Dim Mask + Selection Border, Orbs & Badge
+            win_hover_rect: Optional[QRectF] = None
+            if (
+                getattr(self, "capture_workflow_mode", "region") == "window"
+                and hasattr(self, "window_capture_controller")
+                and self.window_capture_controller.hovered_local_rect is not None
+            ):
+                hlx, hly, hlw, hlh = self.window_capture_controller.hovered_local_rect
+                win_hover_rect = QRectF(float(hlx), float(hly), float(hlw), float(hlh))
 
-            # 3. Draw annotations (anchored to screen coordinates!)
-            self._draw_all_annotations(painter)
+            hole_rect = self.selection_rect.normalized() if self.has_selection else win_hover_rect
+            self._draw_exterior_dim_mask(painter, hole_rect, dirty_rc)
 
-            # 4. Draw Frutiger Aero glowing selection border, 3D Water-Droplet Orbs, and Frosted Badge
+            # 4b. In Window Capture mode, draw live target window highlight outline & title pill
+            if (
+                getattr(self, "capture_workflow_mode", "region") == "window"
+                and win_hover_rect is not None
+                and self.window_capture_controller.hovered_window is not None
+                and (
+                    not self.has_selection
+                    or self.window_capture_controller.locked_window is None
+                    or self.window_capture_controller.hovered_window.hwnd != self.window_capture_controller.locked_window.hwnd
+                )
+            ):
+                hw = self.window_capture_controller.hovered_window
+                painter.save()
+                painter.setBrush(QColor(0, 215, 255, 22))
+                painter.setPen(QPen(QColor(0, 228, 255, 110), 6.0, Qt.PenStyle.SolidLine))
+                painter.drawRect(win_hover_rect)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor(115, 255, 225, 240), 2.4, Qt.PenStyle.DashLine))
+                painter.drawRect(win_hover_rect)
+
+                badge_str = f"{hw.display_badge_text(client_only=self.window_capture_controller.client_only)}  •  Click to capture"
+                b_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+                painter.setFont(b_font)
+                bfm = painter.fontMetrics()
+                btw = bfm.horizontalAdvance(badge_str) + 28
+                bth = bfm.height() + 12
+                bbx = max(8.0, min(float(self.width() - btw - 8), win_hover_rect.left() + 8.0))
+                bby = win_hover_rect.top() + 8.0
+                if bby < 62.0:
+                    bby = min(float(self.height() - bth - 8), max(62.0, win_hover_rect.top() + 8.0))
+                w_badge_rc = QRectF(bbx, bby, btw, bth)
+                draw_frutiger_glass_panel(painter, w_badge_rc, radius=bth / 2.0, frosted_pixmap=None, tint_style="aqua")
+                painter.setPen(QColor(255, 255, 255, 250))
+                painter.drawText(
+                    w_badge_rc.adjusted(14.0, 0.0, -10.0, 0.0),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    badge_str,
+                )
+                painter.restore()
+
+            # 4c. Draw Frutiger Aero glowing selection border, 3D Water-Droplet Orbs, and Frosted Badge
             if self.has_selection:
                 r = self.selection_rect.normalized()
+                inner_safe = r.adjusted(11.0, 11.0, -11.0, -11.0).toRect()
+                strictly_inside_selection = (
+                    inner_safe.width() > 0
+                    and inner_safe.height() > 0
+                    and inner_safe.contains(dirty_rc.topLeft())
+                    and inner_safe.contains(QPoint(dirty_rc.right(), dirty_rc.bottom()))
+                )
 
-                # Theme-aware Frutiger Aqua aura glow around crop box
-                theme_spec = get_aqua_theme_spec(getattr(self.config, "aqua_theme", "ocean_current"))
-                br_r, br_g, br_b = theme_spec["border_rgb"]
-                bi_r, bi_g, bi_b = theme_spec["border_inner_rgb"]
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.setPen(QPen(QColor(br_r, br_g, br_b, 75), 5.0, Qt.PenStyle.SolidLine))
-                painter.drawRect(r)
-                painter.setPen(QPen(QColor(bi_r, bi_g, bi_b, 185), 2.2, Qt.PenStyle.SolidLine))
-                painter.drawRect(r)
-                painter.setPen(QPen(QColor(255, 255, 255, 235), 1.0, Qt.PenStyle.SolidLine))
-                painter.drawRect(r)
+                if not strictly_inside_selection:
+                    # Theme-aware Frutiger Aqua aura glow around crop box
+                    theme_spec = get_aqua_theme_spec(getattr(self.config, "aqua_theme", "ocean_current"))
+                    br_r, br_g, br_b = theme_spec["border_rgb"]
+                    bi_r, bi_g, bi_b = theme_spec["border_inner_rgb"]
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.setPen(QPen(QColor(br_r, br_g, br_b, 75), 5.0, Qt.PenStyle.SolidLine))
+                    painter.drawRect(r)
+                    painter.setPen(QPen(QColor(bi_r, bi_g, bi_b, 185), 2.2, Qt.PenStyle.SolidLine))
+                    painter.drawRect(r)
+                    painter.setPen(QPen(QColor(255, 255, 255, 235), 1.0, Qt.PenStyle.SolidLine))
+                    painter.drawRect(r)
 
-                # 8 Glossy 3D Frutiger Aqua Water-Droplet / Pearl Resize Orbs
-                for hrect in self._get_handle_rects(r):
-                    center = hrect.center()
-                    rad = hrect.width() / 2.0
-                    # Drop shadow under orb
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QColor(0, 25, 55, 130))
-                    painter.drawEllipse(center + QPointF(0.0, 1.5), rad + 0.8, rad + 0.8)
+                    # 8 Glossy 3D Frutiger Aqua Water-Droplet / Pearl Resize Orbs
+                    for hrect in self._get_handle_rects(r):
+                        if not hrect.adjusted(-4.0, -4.0, 4.0, 4.0).toRect().intersects(dirty_rc):
+                            continue
+                        center = hrect.center()
+                        rad = hrect.width() / 2.0
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QColor(0, 25, 55, 130))
+                        painter.drawEllipse(center + QPointF(0.0, 1.5), rad + 0.8, rad + 0.8)
 
-                    # Radial aqua-pearl sphere gradient
-                    orb_grad = QRadialGradient(
-                        center - QPointF(rad * 0.3, rad * 0.3), rad * 1.35
-                    )
-                    orb_grad.setColorAt(0.0, QColor(255, 255, 255, 255))
-                    orb_grad.setColorAt(0.38, QColor(theme_spec["orb_mid_hex"]))
-                    orb_grad.setColorAt(0.78, QColor(theme_spec["orb_deep_hex"]))
-                    orb_grad.setColorAt(1.0, QColor(theme_spec["orb_dark_hex"]))
-                    painter.setBrush(QBrush(orb_grad))
-                    painter.setPen(QPen(QColor(255, 255, 255, 240), 1.3))
-                    painter.drawEllipse(center, rad, rad)
+                        orb_grad = QRadialGradient(
+                            center - QPointF(rad * 0.3, rad * 0.3), rad * 1.35
+                        )
+                        orb_grad.setColorAt(0.0, QColor(255, 255, 255, 255))
+                        orb_grad.setColorAt(0.38, QColor(theme_spec["orb_mid_hex"]))
+                        orb_grad.setColorAt(0.78, QColor(theme_spec["orb_deep_hex"]))
+                        orb_grad.setColorAt(1.0, QColor(theme_spec["orb_dark_hex"]))
+                        painter.setBrush(QBrush(orb_grad))
+                        painter.setPen(QPen(QColor(255, 255, 255, 240), 1.3))
+                        painter.drawEllipse(center, rad, rad)
 
-                    # Tiny top-left specular shine dot on each orb
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QColor(255, 255, 255, 235))
-                    painter.drawEllipse(
-                        center - QPointF(rad * 0.32, rad * 0.32), rad * 0.28, rad * 0.22
-                    )
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QColor(255, 255, 255, 235))
+                        painter.drawEllipse(
+                            center - QPointF(rad * 0.32, rad * 0.32), rad * 0.28, rad * 0.22
+                        )
 
                 # Top-left Frosted Acrylic Dimensions & HDR Status Capsule
-                self._sync_coordinate_scales()
-                _, _, phys_w, phys_h = self.coord_mapper.local_rect_to_image_crop_rect(
-                    (r.left(), r.top(), r.width(), r.height())
+                # Only compute/paint when dirty_rc could overlap the badge region!
+                approx_badge_band = QRect(
+                    max(0, int(r.left()) - 12),
+                    max(0, int(r.top()) - 52),
+                    min(self.width(), 560),
+                    104,
                 )
-                hdr_tag = (
-                    f"  •  HDR @ {int(round(self.current_white_scale * 80))} nits"
-                    if self.frame.is_hdr_surface
-                    else (
-                        "  •  DIAGNOSTIC SDR-ONLY (DXGI BYPASSED)"
-                        if self.config.disable_native_hdr_capture
-                        else "  •  SDR"
+                if approx_badge_band.intersects(dirty_rc):
+                    self._sync_coordinate_scales()
+                    _, _, phys_w, phys_h = self.coord_mapper.local_rect_to_image_crop_rect(
+                        (r.left(), r.top(), r.width(), r.height())
                     )
-                )
-                safe_tag = (
-                    "  •  [SAFE MODE]" if self.config.is_safe_mode_active else ""
-                )
-                tool_tag = (
-                    f"  •  Fill Tol: {self.fill_tolerance} ({self.fill_opacity}%)"
-                    if self.active_tool == "fill"
-                    else f"  •  Stroke: {self.stroke_width}px"
-                )
-                dim_text = f"{phys_w} × {phys_h} px{hdr_tag}{tool_tag}{safe_tag}" 
-                font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-                painter.setFont(font)
-                fm = painter.fontMetrics()
-                tw = fm.horizontalAdvance(dim_text) + 34
-                th = fm.height() + 12
-                bx = max(6.0, min(float(self.width() - tw - 6), r.left()))
-                by = r.top() - th - 9.0
-                if by < 6.0:
-                    by = r.top() + 9.0
-                badge_rect = QRectF(bx, by, tw, th)
-                badge_int_rect = badge_rect.toRect()
+                    hdr_tag = (
+                        f"  •  HDR @ {int(round(self.current_white_scale * 80))} nits"
+                        if self.frame.is_hdr_surface
+                        else (
+                            "  •  DIAGNOSTIC SDR-ONLY (DXGI BYPASSED)"
+                            if self.config.disable_native_hdr_capture
+                            else "  •  SDR"
+                        )
+                    )
+                    safe_tag = (
+                        "  •  [SAFE MODE]" if self.config.is_safe_mode_active else ""
+                    )
+                    wf_mode_now = getattr(self, "capture_workflow_mode", "region")
+                    locked_w = (
+                        self.window_capture_controller.locked_window
+                        if (wf_mode_now == "window" and hasattr(self, "window_capture_controller"))
+                        else None
+                    )
+                    tool_tag = (
+                        "  •  Text Capture (Auto-OCR on release)"
+                        if wf_mode_now == "ocr"
+                        else (
+                            f"  •  Window: {(locked_w.title or locked_w.class_name)[:36]}"
+                            if locked_w is not None
+                            else (
+                                f"  •  Fill Tol: {self.fill_tolerance} ({self.fill_opacity}%)"
+                                if self.active_tool == "fill"
+                                else f"  •  Stroke: {self.stroke_width}px"
+                            )
+                        )
+                    )
+                    dim_text = f"{phys_w} × {phys_h} px{hdr_tag}{tool_tag}{safe_tag}"
+                    font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+                    painter.setFont(font)
+                    fm = painter.fontMetrics()
+                    tw = fm.horizontalAdvance(dim_text) + 34
+                    th = fm.height() + 12
+                    bx = max(6.0, min(float(self.width() - tw - 6), r.left()))
+                    by = r.top() - th - 9.0
+                    if by < 6.0:
+                        by = r.top() + 9.0
+                    badge_rect = QRectF(bx, by, tw, th)
+                    badge_int_rect = badge_rect.toRect()
 
-                if (
-                    self._badge_cached_rect != badge_int_rect
-                    or self._badge_frosted_pix is None
-                ):
-                    self._badge_cached_rect = QRect(badge_int_rect)
-                    self._badge_frosted_pix = self._sample_frosted_region(badge_int_rect)
+                    if badge_int_rect.adjusted(-4, -4, 4, 4).intersects(dirty_rc):
+                        if (
+                            self._badge_cached_rect != badge_int_rect
+                            or self._badge_frosted_pix is None
+                        ):
+                            self._badge_cached_rect = QRect(badge_int_rect)
+                            self._badge_frosted_pix = self._sample_frosted_region(badge_int_rect)
 
-                draw_frutiger_glass_panel(
-                    painter,
-                    badge_rect,
-                    radius=th / 2.0,
-                    frosted_pixmap=self._badge_frosted_pix,
-                    tint_style="aqua",
-                )
+                        draw_frutiger_glass_panel(
+                            painter,
+                            badge_rect,
+                            radius=th / 2.0,
+                            frosted_pixmap=self._badge_frosted_pix,
+                            tint_style="aqua",
+                        )
 
-                # Glowing emerald/aqua status orb inside the left of the capsule
-                orb_c = QPointF(badge_rect.left() + 14.0, badge_rect.center().y())
-                orb_g = QRadialGradient(orb_c - QPointF(1.5, 1.5), 6.0)
-                orb_g.setColorAt(0.0, QColor("#FFFFFF"))
-                orb_g.setColorAt(0.45, QColor("#69F0AE"))
-                orb_g.setColorAt(1.0, QColor("#00C853"))
-                painter.setPen(QPen(QColor(255, 255, 255, 220), 1.0))
-                painter.setBrush(QBrush(orb_g))
-                painter.drawEllipse(orb_c, 4.8, 4.8)
+                        orb_c = QPointF(badge_rect.left() + 14.0, badge_rect.center().y())
+                        orb_g = QRadialGradient(orb_c - QPointF(1.5, 1.5), 6.0)
+                        orb_g.setColorAt(0.0, QColor("#FFFFFF"))
+                        orb_g.setColorAt(0.45, QColor("#69F0AE"))
+                        orb_g.setColorAt(1.0, QColor("#00C853"))
+                        painter.setPen(QPen(QColor(255, 255, 255, 220), 1.0))
+                        painter.setBrush(QBrush(orb_g))
+                        painter.drawEllipse(orb_c, 4.8, 4.8)
 
-                text_area = badge_rect.adjusted(22.0, 0.0, -6.0, 0.0)
-                painter.setFont(font)
-                painter.setPen(QColor(0, 25, 55, 200))
-                painter.drawText(
-                    text_area.translated(0.0, 1.2),
-                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                    dim_text,
-                )
-                painter.setPen(QColor(255, 255, 255, 252))
-                painter.drawText(
-                    text_area,
-                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                    dim_text,
-                )
+                        text_area = badge_rect.adjusted(22.0, 0.0, -6.0, 0.0)
+                        painter.setFont(font)
+                        painter.setPen(QColor(0, 25, 55, 200))
+                        painter.drawText(
+                            text_area.translated(0.0, 1.2),
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                            dim_text,
+                        )
+                        painter.setPen(QColor(255, 255, 255, 252))
+                        painter.drawText(
+                            text_area,
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                            dim_text,
+                        )
 
                 # Unobtrusive live circular brush-thickness cursor preview inside selection
-                # (Rendered only on the interactive overlay widget, NEVER in saved/copied exports)
                 is_brush_tool = (
                     self.active_tool in STROKE_DRAWING_TOOLS
                     or (self.active_tool in REGION_FILTER_TOOLS and self.filter_shape_mode == "brush")
@@ -11925,6 +13120,14 @@ if HAS_QT:
                 or self.show_magnifier_always
             ):
                 self._draw_pixel_magnifier_bubble(painter, self._cursor_pos_local)
+
+            painter.end()
+            t_paint_ms = (time.perf_counter() - t_paint_0) * 1000.0
+            PERF_TELEMETRY.record_annotation_paint(
+                t_paint_ms,
+                dirty_rc.width() * dirty_rc.height(),
+                max(1, self.width() * self.height()),
+            )
 
         def _get_or_render_filter_qimage(
             self, item: AnnotationItem
@@ -12006,10 +13209,14 @@ if HAS_QT:
                 else None
             )
             scale_avg = 0.5 * (sx + sy)
+            is_live_drag = (
+                self.interaction_mode == "drawing"
+                and item is getattr(self, "current_annotation", None)
+            )
             if family == "blur":
                 rad_px = max(1, int(round(clamp_blur_radius(item.blur_radius) * scale_avg)))
                 patch_rgb = apply_region_blur_rgb(
-                    src_rgb, cx0, cy0, cx1, cy1, rad_px, mask=None
+                    src_rgb, cx0, cy0, cx1, cy1, rad_px, mask=None, fast_preview=is_live_drag
                 )
             else:
                 blk_px = max(2, int(round(clamp_pixelate_size(item.pixel_size) * scale_avg)))
@@ -12047,8 +13254,8 @@ if HAS_QT:
             target_rc = QRectF(
                 float(cx0) / sx,
                 float(cy0) / sy,
-                float(pw) / sx,
-                float(ph) / sy,
+                float(cx1 - cx0) / sx,
+                float(cy1 - cy0) / sy,
             )
             result = (target_rc, qimg)
             item._cached_qimage = result
@@ -12231,182 +13438,191 @@ if HAS_QT:
             items = filter_items + fill_items + overlay_items
 
             for item in items:
-                family, mode = item.effective_tool_kind()
-
-                if family == "fill":
-                    if only_vector_strokes:
-                        continue
-                    qimg = item.get_or_create_qimage()
-                    if qimg is None:
-                        continue
-                    if item.logical_bbox is not None:
-                        target_rc = QRectF(*item.logical_bbox)
-                    elif item.fill_bbox is not None:
-                        bx, by, bw, bh = item.fill_bbox
-                        target_rc = QRectF(
-                            float(bx) / max(1e-4, float(self._px_scale_x)),
-                            float(by) / max(1e-4, float(self._px_scale_y)),
-                            float(bw) / max(1e-4, float(self._px_scale_x)),
-                            float(bh) / max(1e-4, float(self._px_scale_y)),
-                        )
-                    else:
-                        continue
-                    painter.drawImage(target_rc, qimg)
-                    continue
-
-                if family in ("blur", "pixelate"):
-                    if only_vector_strokes or skip_region_filters:
-                        continue
-                    cached = self._get_or_render_filter_qimage(item)
-                    if cached is not None:
-                        target_rc, qimg = cached
-                        painter.save()
-                        if family == "pixelate":
-                            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-                        painter.drawImage(target_rc, qimg)
-                        painter.restore()
-                    continue
-
-                if family == "redact":
-                    r_col = QColor(item.color or DEFAULT_REDACT_COLOR)
-                    r_col.setAlpha(255)
-                    painter.save()
-                    # Disable antialiasing for rectangular redaction so edges are 100% solid opaque
-                    if mode == "rect" and len(item.points) >= 2:
-                        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                        p1 = QPointF(*item.points[0])
-                        p2 = QPointF(*item.points[-1])
-                        painter.setPen(Qt.PenStyle.NoPen)
-                        painter.setBrush(QBrush(r_col))
-                        painter.drawRect(QRectF(p1, p2).normalized())
-                    elif mode == "brush" and item.points:
-                        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                        sw = float(max(4, clamp_stroke_thickness(item.thickness)))
-                        if len(item.points) == 1:
-                            pt = QPointF(*item.points[0])
-                            painter.setPen(Qt.PenStyle.NoPen)
-                            painter.setBrush(QBrush(r_col))
-                            painter.drawEllipse(pt, sw / 2.0, sw / 2.0)
-                        else:
-                            pen = QPen(
-                                r_col,
-                                sw,
-                                Qt.PenStyle.SolidLine,
-                                Qt.PenCapStyle.RoundCap,
-                                Qt.PenJoinStyle.RoundJoin,
-                            )
-                            painter.setPen(pen)
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            path = QPainterPath(QPointF(*item.points[0]))
-                            for pt in item.points[1:]:
-                                path.lineTo(QPointF(*pt))
-                            painter.drawPath(path)
-                    painter.restore()
-                    continue
-
-                if family == "callout" and item.points:
-                    pt = QPointF(*item.points[0])
-                    rad = float(clamp_callout_radius(item.callout_radius))
-                    fill_col = QColor(item.color)
-                    out_col = QColor(getattr(item, "outline_color", "#FFFFFF") or "#FFFFFF")
-                    tx_rgb = choose_high_contrast_text_rgb(parse_hex_rgb(item.color))
-                    painter.save()
-                    # Drop shadow
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QColor(0, 18, 38, 145))
-                    painter.drawEllipse(pt + QPointF(0.0, 2.0), rad + 1.0, rad + 1.0)
-                    # Main badge disc
-                    painter.setBrush(QBrush(fill_col))
-                    painter.setPen(QPen(out_col, 2.2))
-                    painter.drawEllipse(pt, rad, rad)
-                    # Subtle top Frutiger Aqua gloss crescent
-                    gloss_rc = QRectF(pt.x() - rad * 0.68, pt.y() - rad * 0.82, rad * 1.36, rad * 0.82)
-                    gloss_grad = QLinearGradient(gloss_rc.topLeft(), gloss_rc.bottomLeft())
-                    gloss_grad.setColorAt(0.0, QColor(255, 255, 255, 165))
-                    gloss_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QBrush(gloss_grad))
-                    painter.drawEllipse(gloss_rc)
-                    # Centered sequential number
-                    num_str = str(max(1, int(getattr(item, "callout_number", 1))))
-                    f_px = max(9, int(round(rad * (0.95 if len(num_str) <= 2 else 0.76))))
-                    font = QFont("Segoe UI", f_px, QFont.Weight.Bold)
-                    painter.setFont(font)
-                    painter.setPen(QColor(*tx_rgb))
-                    text_rc = QRectF(pt.x() - rad, pt.y() - rad, rad * 2.0, rad * 2.0)
-                    painter.drawText(text_rc, Qt.AlignmentFlag.AlignCenter, num_str)
-                    painter.restore()
-                    continue
-
-                col = QColor(item.color)
-                sw = float(clamp_stroke_thickness(item.thickness))
-                pen = QPen(
-                    col,
-                    sw,
-                    Qt.PenStyle.SolidLine,
-                    Qt.PenCapStyle.RoundCap,
-                    Qt.PenJoinStyle.RoundJoin,
+                self._draw_single_annotation(
+                    painter,
+                    item,
+                    only_vector_strokes=only_vector_strokes,
+                    skip_region_filters=skip_region_filters,
                 )
-                painter.setPen(pen)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
 
-                if item.tool == "pen":
+        def _draw_single_annotation(
+            self,
+            painter: QPainter,
+            item: AnnotationItem,
+            *,
+            only_vector_strokes: bool = False,
+            skip_region_filters: bool = False,
+        ) -> None:
+            """Renders a single `AnnotationItem` onto `painter` using cached paths and filter QImages."""
+            family, mode = item.effective_tool_kind()
+
+            if family == "fill":
+                if only_vector_strokes:
+                    return
+                qimg = item.get_or_create_qimage()
+                if qimg is None:
+                    return
+                if item.logical_bbox is not None:
+                    target_rc = QRectF(*item.logical_bbox)
+                elif item.fill_bbox is not None:
+                    bx, by, bw, bh = item.fill_bbox
+                    target_rc = QRectF(
+                        float(bx) / max(1e-4, float(self._px_scale_x)),
+                        float(by) / max(1e-4, float(self._px_scale_y)),
+                        float(bw) / max(1e-4, float(self._px_scale_x)),
+                        float(bh) / max(1e-4, float(self._px_scale_y)),
+                    )
+                else:
+                    return
+                painter.drawImage(target_rc, qimg)
+                return
+
+            if family in ("blur", "pixelate"):
+                if only_vector_strokes or skip_region_filters:
+                    return
+                cached = self._get_or_render_filter_qimage(item)
+                if cached is not None:
+                    target_rc, qimg = cached
+                    painter.save()
+                    if family == "pixelate":
+                        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+                    painter.drawImage(target_rc, qimg)
+                    painter.restore()
+                return
+
+            if family == "redact":
+                r_col = QColor(item.color or DEFAULT_REDACT_COLOR)
+                r_col.setAlpha(255)
+                painter.save()
+                if mode == "rect" and len(item.points) >= 2:
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                    p1 = QPointF(*item.points[0])
+                    p2 = QPointF(*item.points[-1])
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(r_col))
+                    painter.drawRect(QRectF(p1, p2).normalized())
+                elif mode == "brush" and item.points:
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                    sw = float(max(4, clamp_stroke_thickness(item.thickness)))
                     if len(item.points) == 1:
                         pt = QPointF(*item.points[0])
                         painter.setPen(Qt.PenStyle.NoPen)
-                        painter.setBrush(QBrush(col))
+                        painter.setBrush(QBrush(r_col))
                         painter.drawEllipse(pt, sw / 2.0, sw / 2.0)
-                    elif len(item.points) >= 2:
-                        path = QPainterPath(QPointF(*item.points[0]))
-                        for pt in item.points[1:]:
-                            path.lineTo(QPointF(*pt))
-                        painter.drawPath(path)
-
-                elif item.tool == "rect" and len(item.points) >= 2:
-                    p1 = QPointF(*item.points[0])
-                    p2 = QPointF(*item.points[-1])
-                    painter.drawRect(QRectF(p1, p2).normalized())
-
-                elif item.tool == "ellipse" and len(item.points) >= 2:
-                    p1 = QPointF(*item.points[0])
-                    p2 = QPointF(*item.points[-1])
-                    painter.drawEllipse(QRectF(p1, p2).normalized())
-
-                elif item.tool == "line" and len(item.points) >= 2:
-                    painter.drawLine(
-                        QPointF(*item.points[0]), QPointF(*item.points[-1])
-                    )
-
-                elif item.tool == "arrow" and len(item.points) >= 2:
-                    p1_t = item.points[0]
-                    p2_t = item.points[-1]
-                    shaft_end, head_pts = compute_arrow_head_points(p1_t, p2_t, sw)
-                    painter.drawLine(QPointF(*p1_t), QPointF(*shaft_end))
-                    painter.setPen(
-                        QPen(
-                            col,
-                            max(1.0, min(4.0, sw * 0.22)),
+                    else:
+                        pen = QPen(
+                            r_col,
+                            sw,
                             Qt.PenStyle.SolidLine,
                             Qt.PenCapStyle.RoundCap,
                             Qt.PenJoinStyle.RoundJoin,
                         )
-                    )
-                    painter.setBrush(QBrush(col))
-                    painter.drawPolygon(QPolygonF([QPointF(*pt) for pt in head_pts]))
+                        painter.setPen(pen)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        path = item.get_or_build_pen_path()
+                        if path is not None:
+                            painter.drawPath(path)
+                painter.restore()
+                return
 
-                elif item.tool == "text" and item.points and item.text:
+            if family == "callout" and item.points:
+                pt = QPointF(*item.points[0])
+                rad = float(clamp_callout_radius(item.callout_radius))
+                fill_col = QColor(item.color)
+                out_col = QColor(getattr(item, "outline_color", "#FFFFFF") or "#FFFFFF")
+                tx_rgb = choose_high_contrast_text_rgb(parse_hex_rgb(item.color))
+                painter.save()
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(0, 18, 38, 145))
+                painter.drawEllipse(pt + QPointF(0.0, 2.0), rad + 1.0, rad + 1.0)
+                painter.setBrush(QBrush(fill_col))
+                painter.setPen(QPen(out_col, 2.2))
+                painter.drawEllipse(pt, rad, rad)
+                gloss_rc = QRectF(pt.x() - rad * 0.68, pt.y() - rad * 0.82, rad * 1.36, rad * 0.82)
+                gloss_grad = QLinearGradient(gloss_rc.topLeft(), gloss_rc.bottomLeft())
+                gloss_grad.setColorAt(0.0, QColor(255, 255, 255, 165))
+                gloss_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(gloss_grad))
+                painter.drawEllipse(gloss_rc)
+                num_str = str(max(1, int(getattr(item, "callout_number", 1))))
+                f_px = max(9, int(round(rad * (0.95 if len(num_str) <= 2 else 0.76))))
+                font = QFont("Segoe UI", f_px, QFont.Weight.Bold)
+                painter.setFont(font)
+                painter.setPen(QColor(*tx_rgb))
+                text_rc = QRectF(pt.x() - rad, pt.y() - rad, rad * 2.0, rad * 2.0)
+                painter.drawText(text_rc, Qt.AlignmentFlag.AlignCenter, num_str)
+                painter.restore()
+                return
+
+            col = QColor(item.color)
+            sw = float(clamp_stroke_thickness(item.thickness))
+            pen = QPen(
+                col,
+                sw,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+            if item.tool == "pen":
+                if len(item.points) == 1:
                     pt = QPointF(*item.points[0])
-                    fsize = (
-                        int(item.font_size)
-                        if getattr(item, "font_size", 0) and int(item.font_size) > 0
-                        else DEFAULT_TEXT_FONT_SIZE
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(col))
+                    painter.drawEllipse(pt, sw / 2.0, sw / 2.0)
+                elif len(item.points) >= 2:
+                    path = item.get_or_build_pen_path()
+                    if path is not None:
+                        painter.drawPath(path)
+
+            elif item.tool == "rect" and len(item.points) >= 2:
+                p1 = QPointF(*item.points[0])
+                p2 = QPointF(*item.points[-1])
+                painter.drawRect(QRectF(p1, p2).normalized())
+
+            elif item.tool == "ellipse" and len(item.points) >= 2:
+                p1 = QPointF(*item.points[0])
+                p2 = QPointF(*item.points[-1])
+                painter.drawEllipse(QRectF(p1, p2).normalized())
+
+            elif item.tool == "line" and len(item.points) >= 2:
+                painter.drawLine(
+                    QPointF(*item.points[0]), QPointF(*item.points[-1])
+                )
+
+            elif item.tool == "arrow" and len(item.points) >= 2:
+                p1_t = item.points[0]
+                p2_t = item.points[-1]
+                shaft_end, head_pts = compute_arrow_head_points(p1_t, p2_t, sw)
+                painter.drawLine(QPointF(*p1_t), QPointF(*shaft_end))
+                painter.setPen(
+                    QPen(
+                        col,
+                        max(1.0, min(4.0, sw * 0.22)),
+                        Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap,
+                        Qt.PenJoinStyle.RoundJoin,
                     )
-                    font = QFont("Segoe UI", max(10, min(72, fsize)), QFont.Weight.Bold)
-                    painter.setFont(font)
-                    painter.setPen(QColor(0, 0, 0, 200))
-                    painter.drawText(QPointF(pt.x() + 1.5, pt.y() + 1.5), item.text)
-                    painter.setPen(col)
-                    painter.drawText(pt, item.text)
+                )
+                painter.setBrush(QBrush(col))
+                painter.drawPolygon(QPolygonF([QPointF(*pt) for pt in head_pts]))
+
+            elif item.tool == "text" and item.points and item.text:
+                pt = QPointF(*item.points[0])
+                fsize = (
+                    int(item.font_size)
+                    if getattr(item, "font_size", 0) and int(item.font_size) > 0
+                    else DEFAULT_TEXT_FONT_SIZE
+                )
+                font = QFont("Segoe UI", max(10, min(72, fsize)), QFont.Weight.Bold)
+                painter.setFont(font)
+                painter.setPen(QColor(0, 0, 0, 200))
+                painter.drawText(QPointF(pt.x() + 1.5, pt.y() + 1.5), item.text)
+                painter.setPen(col)
+                painter.drawText(pt, item.text)
 
         # ---------------------------------------------------------------------
         # Mouse & Keyboard Interaction
@@ -12421,7 +13637,18 @@ if HAS_QT:
             pos = event.position()
             self._cursor_pos_local = pos
 
-            # 1. Always allow grabbing the 8 resize handles of the selection box
+            # Window mode always selects the *clicked* desktop window. Do this before
+            # resize handles or selection movement can steal the mouse event.
+            if getattr(self, "capture_workflow_mode", "region") == "window":
+                self.cancel_active_flood_fill()
+                clicked_win = self.click_window_at(pos.x(), pos.y())
+                if clicked_win is not None:
+                    self.interaction_mode = "none"
+                    self.active_handle = -1
+                    self.setFocus()
+                return
+
+            # 1. Allow grabbing selection resize handles for Region/Monitor/OCR modes.
             h_idx = self._hit_test_handles(pos)
             if h_idx != -1:
                 self.cancel_active_flood_fill()
@@ -12434,7 +13661,7 @@ if HAS_QT:
                     self.context_toolbar.hide()
                 return
 
-            # 2. If no selection yet, drag creates the selection box
+            # 2b. If no selection yet (Region / OCR mode), drag creates the selection box
             if not self.has_selection:
                 self.cancel_active_flood_fill()
                 self.has_selection = True
@@ -12514,42 +13741,51 @@ if HAS_QT:
                             self.update()
                             return
                     c_num = self.next_callout_number
-                    self.annotations.append(
-                        AnnotationItem(
-                            tool="callout",
-                            color=self.stroke_color.name(),
-                            thickness=self.stroke_width,
-                            points=[(pos.x(), pos.y())],
-                            callout_number=c_num,
-                            callout_radius=self.callout_radius,
-                            outline_color="#FFFFFF",
-                        )
+                    callout_item = AnnotationItem(
+                        tool="callout",
+                        color=self.stroke_color.name(),
+                        thickness=self.stroke_width,
+                        points=[(pos.x(), pos.y())],
+                        callout_number=c_num,
+                        callout_radius=self.callout_radius,
+                        outline_color="#FFFFFF",
                     )
+                    self.annotations.append(callout_item)
                     self.redo_stack.clear()
                     self.set_next_callout_number(c_num + 1)
-                    self._invalidate_all_toolbars()
-                    self.update()
+                    dirty_co = self._compute_annotation_dirty_rect(callout_item)
+                    self._commit_single_annotation_to_cache(callout_item)
+                    self._invalidate_toolbars_intersecting(dirty_co)
+                    self.update(dirty_co if not dirty_co.isEmpty() else self.rect())
                     self.setFocus()
                 elif self.active_tool == "text":
                     text, ok = QInputDialog.getText(
                         self, "Add Text Annotation", "Enter text:"
                     )
                     if ok and text.strip():
-                        self.annotations.append(
-                            AnnotationItem(
-                                tool="text",
-                                color=self.stroke_color.name(),
-                                thickness=self.stroke_width,
-                                points=[(pos.x(), pos.y())],
-                                text=text.strip(),
-                                font_size=self.text_font_size,
-                            )
+                        txt_item = AnnotationItem(
+                            tool="text",
+                            color=self.stroke_color.name(),
+                            thickness=self.stroke_width,
+                            points=[(pos.x(), pos.y())],
+                            text=text.strip(),
+                            font_size=self.text_font_size,
                         )
+                        self.annotations.append(txt_item)
                         self.redo_stack.clear()
-                        self._invalidate_all_toolbars()
-                        self.update()
+                        dirty_tx = self._compute_annotation_dirty_rect(txt_item)
+                        self._commit_single_annotation_to_cache(txt_item)
+                        self._invalidate_toolbars_intersecting(dirty_tx)
+                        self.update(dirty_tx if not dirty_tx.isEmpty() else self.rect())
                     self.setFocus()
                 else:
+                    # Ensure Layer 2 committed cache is ready before interactive stroke begins
+                    if (
+                        getattr(self, "_committed_cache_dirty", True)
+                        or getattr(self, "_composite_committed_pixmap", None) is None
+                        or self._composite_committed_pixmap.size() != self.size()
+                    ):
+                        self._rebuild_committed_annotations_cache()
                     self.interaction_mode = "drawing"
                     eff_color = (
                         (DEFAULT_REDACT_COLOR if self.redact_use_black else self.stroke_color.name())
@@ -12560,12 +13796,16 @@ if HAS_QT:
                         tool=self.active_tool,
                         color=eff_color,
                         thickness=self.stroke_width,
-                        points=[(pos.x(), pos.y())],
+                        points=[],
                         blur_radius=self.blur_radius,
                         pixel_size=self.pixelate_size,
                         shape_mode=self.filter_shape_mode,
                     )
-                    self.update()
+                    self.current_annotation.append_stroke_point(pos.x(), pos.y())
+                    dirty_start = self._compute_annotation_dirty_rect(self.current_annotation).united(
+                        self._compute_cursor_ring_dirty_rect(pos)
+                    )
+                    self.update(dirty_start if not dirty_start.isEmpty() else self.rect())
             else:
                 self.cancel_active_flood_fill()
                 self.interaction_mode = "creating"
@@ -12577,11 +13817,20 @@ if HAS_QT:
                 self.update()
 
         def mouseMoveEvent(self, event) -> None:
+            t_move_0 = time.perf_counter()
             pos = event.position()
             prev_pos = self._cursor_pos_local
             self._cursor_pos_local = pos
 
             if self.interaction_mode == "none":
+                if getattr(self, "capture_workflow_mode", "region") == "window":
+                    hov_w = self.hover_window_at(pos.x(), pos.y())
+                    self.setCursor(
+                        Qt.CursorShape.PointingHandCursor
+                        if hov_w is not None
+                        else Qt.CursorShape.ArrowCursor
+                    )
+                    return
                 h_idx = self._hit_test_handles(pos)
                 if h_idx != -1:
                     self.setCursor(self.HANDLE_CURSORS[h_idx])
@@ -12601,28 +13850,31 @@ if HAS_QT:
                     self.setCursor(Qt.CursorShape.CrossCursor)
 
                 if self.active_tool == "eyedropper" or self.show_magnifier_always:
-                    self.update()
+                    mag_pad = 310
+                    dirty_mag = QRect(
+                        int(pos.x()) - mag_pad,
+                        int(pos.y()) - mag_pad,
+                        mag_pad * 2,
+                        mag_pad * 2,
+                    ).intersected(self.rect())
+                    if prev_pos is not None:
+                        dirty_mag = dirty_mag.united(
+                            QRect(
+                                int(prev_pos.x()) - mag_pad,
+                                int(prev_pos.y()) - mag_pad,
+                                mag_pad * 2,
+                                mag_pad * 2,
+                            ).intersected(self.rect())
+                        )
+                    self.update(dirty_mag)
                     return
                 if self.has_selection and (
                     self.active_tool in STROKE_DRAWING_TOOLS
                     or (self.active_tool in REGION_FILTER_TOOLS and self.filter_shape_mode == "brush")
                 ):
-                    r_pad = int(self.stroke_width) + 14
-                    dirty = QRect(
-                        int(pos.x()) - r_pad,
-                        int(pos.y()) - r_pad,
-                        r_pad * 2,
-                        r_pad * 2,
-                    )
+                    dirty = self._compute_cursor_ring_dirty_rect(pos)
                     if prev_pos is not None:
-                        dirty = dirty.united(
-                            QRect(
-                                int(prev_pos.x()) - r_pad,
-                                int(prev_pos.y()) - r_pad,
-                                r_pad * 2,
-                                r_pad * 2,
-                            )
-                        )
+                        dirty = dirty.united(self._compute_cursor_ring_dirty_rect(prev_pos))
                     self.update(dirty)
                 return
 
@@ -12664,12 +13916,16 @@ if HAS_QT:
                 self.interaction_mode == "moving_annotation"
                 and self.dragging_annotation is not None
             ):
+                old_dirty = self._compute_annotation_dirty_rect(self.dragging_annotation)
                 dx = pos.x() - self.annotation_drag_last_pos.x()
                 dy = pos.y() - self.annotation_drag_last_pos.y()
                 self.dragging_annotation.translate(dx, dy)
                 self.annotation_drag_last_pos = pos
-                self._invalidate_all_toolbars()
-                self.update()
+                new_dirty = self._compute_annotation_dirty_rect(self.dragging_annotation)
+                self._rebuild_committed_annotations_cache()
+                comb_dirty = old_dirty.united(new_dirty)
+                self.update(comb_dirty if not comb_dirty.isEmpty() else self.rect())
+                PERF_TELEMETRY.record_annotation_move((time.perf_counter() - t_move_0) * 1000.0)
 
             elif (
                 self.interaction_mode == "drawing"
@@ -12677,10 +13933,32 @@ if HAS_QT:
             ):
                 target_pt = (pos.x(), pos.y())
                 family, mode = self.current_annotation.effective_tool_kind()
-                if self.current_annotation.tool == "pen" or mode == "brush":
-                    self.current_annotation.points.append(target_pt)
-                    self.current_annotation.invalidate_render_cache()
+                cursor_dirty = self._compute_cursor_ring_dirty_rect(pos)
+                if prev_pos is not None:
+                    cursor_dirty = cursor_dirty.united(self._compute_cursor_ring_dirty_rect(prev_pos))
+
+                if self.current_annotation.tool == "pen" or (family == "redact" and mode == "brush"):
+                    # O(1) incremental path extension + tight segment dirty rectangle!
+                    s_x0, s_y0, s_x1, s_y1 = self.current_annotation.append_stroke_point(
+                        target_pt[0], target_pt[1]
+                    )
+                    pad = int(max(18, self.stroke_width + 14))
+                    seg_dirty = QRect(
+                        int(math.floor(s_x0)) - pad,
+                        int(math.floor(s_y0)) - pad,
+                        int(math.ceil(s_x1 - s_x0)) + pad * 2,
+                        int(math.ceil(s_y1 - s_y0)) + pad * 2,
+                    ).intersected(self.rect())
+                    self.update(seg_dirty.united(cursor_dirty))
+                elif mode == "brush":
+                    # Blur / Pixelate brush mode
+                    self.current_annotation.append_stroke_point(target_pt[0], target_pt[1])
+                    self.current_annotation.invalidate_render_cache(clear_path=False)
+                    ann_dirty = self._compute_annotation_dirty_rect(self.current_annotation)
+                    self.update(ann_dirty.united(cursor_dirty))
                 else:
+                    # 2-point shape or rectangular filter (line, arrow, rect, ellipse, blur/pixelate/redact rect)
+                    old_dirty = self._compute_annotation_dirty_rect(self.current_annotation)
                     if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                         target_pt = self._apply_shift_constraint(
                             self.current_annotation.tool,
@@ -12691,32 +13969,74 @@ if HAS_QT:
                         self.current_annotation.points.append(target_pt)
                     else:
                         self.current_annotation.points[-1] = target_pt
-                    self.current_annotation.invalidate_render_cache()
-                self.update()
+                    self.current_annotation.invalidate_render_cache(clear_path=True)
+                    new_dirty = self._compute_annotation_dirty_rect(self.current_annotation)
+                    self.update(old_dirty.united(new_dirty).united(cursor_dirty))
+                PERF_TELEMETRY.record_annotation_move((time.perf_counter() - t_move_0) * 1000.0)
 
         def mouseReleaseEvent(self, event) -> None:
             if event.button() != Qt.MouseButton.LeftButton:
                 return
 
+            prev_interaction = self.interaction_mode
+            release_dirty: Optional[QRect] = None
             if (
                 self.interaction_mode == "drawing"
                 and self.current_annotation is not None
             ):
-                _, mode = self.current_annotation.effective_tool_kind()
+                committed_item = self.current_annotation
+                self.current_annotation = None
+                _, mode = committed_item.effective_tool_kind()
                 if (
-                    len(self.current_annotation.points) >= 2
-                    or self.current_annotation.tool == "pen"
+                    len(committed_item.points) >= 2
+                    or committed_item.tool == "pen"
                     or mode == "brush"
                 ):
-                    self.annotations.append(self.current_annotation)
+                    self.annotations.append(committed_item)
                     self.redo_stack.clear()
-                self.current_annotation = None
+                    release_dirty = self._compute_annotation_dirty_rect(committed_item)
+                    self._commit_single_annotation_to_cache(committed_item)
+                    self._invalidate_toolbars_intersecting(release_dirty)
+            elif (
+                self.interaction_mode == "moving_annotation"
+                and self.dragging_annotation is not None
+            ):
+                release_dirty = self._compute_annotation_dirty_rect(self.dragging_annotation)
+                self._rebuild_committed_annotations_cache()
+                self._invalidate_toolbars_intersecting(release_dirty)
 
             self.dragging_annotation = None
             self.interaction_mode = "none"
             self.active_handle = -1
-            self._reposition_toolbar()
-            self.update()
+
+            # When Text Capture mode ("ocr") is active, completing a valid region selection
+            # automatically launches offline OCR without requiring a second button click.
+            if (
+                prev_interaction == "creating"
+                and getattr(self, "capture_workflow_mode", "region") == "ocr"
+                and self.has_selection
+            ):
+                sel_norm = self.selection_rect.normalized()
+                if sel_norm.width() >= 6.0 and sel_norm.height() >= 6.0:
+                    self.update()
+                    QTimer.singleShot(0, self.ocr_snip)
+                    return
+                else:
+                    self.has_selection = False
+                    self.selection_rect = QRectF()
+                    self.update()
+                    return
+
+            if prev_interaction in ("creating", "moving", "resizing"):
+                self._reposition_toolbar()
+                self.update()
+            else:
+                if not self.toolbar.isVisible():
+                    self._reposition_toolbar()
+                if release_dirty is not None and not release_dirty.isEmpty():
+                    self.update(release_dirty)
+                else:
+                    self.update()
 
         def wheelEvent(self, event) -> None:
             delta = event.angleDelta().y()
@@ -12796,6 +14116,26 @@ if HAS_QT:
                 self.update()
             elif key == Qt.Key.Key_T:
                 self.set_tool("text")
+            elif key == Qt.Key.Key_P and (mods & Qt.KeyboardModifier.ControlModifier):
+                self.pin_snip()
+            elif key == Qt.Key.Key_O:
+                self.ocr_snip()
+            elif key == Qt.Key.Key_1 and not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+                self.set_capture_workflow_mode("region")
+            elif key == Qt.Key.Key_2 and not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+                self.set_capture_workflow_mode("window")
+            elif key == Qt.Key.Key_3 and not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+                self.request_monitor_picker("fullscreen")
+            elif key == Qt.Key.Key_4 and not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+                # Text recognition is now a contextual action on the bottom capture toolbar.
+                self.ocr_snip()
+            elif key == Qt.Key.Key_5 and not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+                self.request_delayed_capture(3)
+            elif key == Qt.Key.Key_W and not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+                if getattr(self, "capture_workflow_mode", "region") == "window":
+                    self.toggle_window_client_area_mode()
+                else:
+                    self.set_capture_workflow_mode("window")
 
         def keyReleaseEvent(self, event) -> None:
             if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
@@ -12931,9 +14271,97 @@ if HAS_QT:
 
             return out_canvas
 
+        def pin_snip(self) -> bool:
+            """Pin the current selection + annotations as an independent floating window without recapturing."""
+            if getattr(self, "_closed", False):
+                return False
+            sel_norm = self.selection_rect.normalized() if self.has_selection else QRectF()
+            if not self.has_selection or sel_norm.width() < 4.0 or sel_norm.height() < 4.0:
+                QMessageBox.information(
+                    self,
+                    f"{APP_NAME} — Select a Region to Pin",
+                    "Please drag a selection box around the area you want to pin first.",
+                )
+                self.setFocus()
+                return False
+            pix = self.render_final_cropped_pixmap().copy()
+            gx = self.geometry().x() + int(sel_norm.left())
+            gy = self.geometry().y() + int(sel_norm.top())
+            wf_mode = getattr(self, "capture_workflow_mode", "region")
+            try:
+                self.releaseMouse()
+            except Exception:
+                pass
+            try:
+                self.releaseKeyboard()
+            except Exception:
+                pass
+            self.hide()
+            self.close()
+            self.pin_requested.emit(pix, gx, gy)
+            self.capture_completed.emit(pix, wf_mode, "")
+            return True
+
+        def ocr_snip(self) -> bool:
+            """
+            Run offline OCR on the current selection:
+              1. Validate that a region is selected (show actionable prompt if not).
+              2. Obtain the selected screenshot pixels (`pix`).
+              3. Safely hide and close the fullscreen screenshot overlay & release input state first.
+              4. Emit `capture_completed` and `ocr_requested` so the OCR results window opens on top.
+            """
+            if getattr(self, "_closed", False):
+                return False
+            sel_norm = self.selection_rect.normalized() if self.has_selection else QRectF()
+            if not self.has_selection or sel_norm.width() < 4.0 or sel_norm.height() < 4.0:
+                DIAG_LOG.warning("OCR_SNIP", "User clicked Text (OCR) without an active selection region.")
+                QMessageBox.information(
+                    self,
+                    f"{APP_NAME} — Select a Region for OCR",
+                    "Please drag a selection box around the text you want to recognize first.",
+                )
+                self.setFocus()
+                return False
+
+            pix = self.render_final_cropped_pixmap().copy()
+            try:
+                gx = int(round(self.geometry().x() + sel_norm.left()))
+                gy = int(round(self.geometry().y() + sel_norm.top()))
+                gw = max(1, int(round(sel_norm.width())))
+                gh = max(1, int(round(sel_norm.height())))
+                self._last_ocr_selection_rect = (gx, gy, gw, gh)
+            except Exception:
+                self._last_ocr_selection_rect = None
+            try:
+                if getattr(self, "target_screen", None) is not None:
+                    ag = self.target_screen.availableGeometry()
+                    self._last_ocr_screen_available_rect = (ag.x(), ag.y(), ag.width(), ag.height())
+                else:
+                    self._last_ocr_screen_available_rect = None
+            except Exception:
+                self._last_ocr_screen_available_rect = None
+            try:
+                self.releaseMouse()
+            except Exception:
+                pass
+            try:
+                self.releaseKeyboard()
+            except Exception:
+                pass
+            if hasattr(self, "toolbar") and self.toolbar is not None:
+                self.toolbar.hide()
+            if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
+                self.context_toolbar.hide()
+            self.hide()
+            self.close()
+            self.capture_completed.emit(pix, "ocr", "")
+            self.ocr_requested.emit(pix)
+            return True
+
         def copy_snip(self) -> None:
             pix = self.render_final_cropped_pixmap()
             copy_pixmap_to_clipboard_safely(pix)
+            self.capture_completed.emit(pix, getattr(self, "capture_workflow_mode", "region"), "")
             self.close()
 
         def _handle_save_error(
@@ -12993,6 +14421,11 @@ if HAS_QT:
                         "SAVE_SNIP",
                         f"Saved full-resolution screenshot to '{out_path}' "
                         f"(copy_to_clipboard={copy_to_clipboard})",
+                    )
+                    self.capture_completed.emit(
+                        pix,
+                        getattr(self, "capture_workflow_mode", "region"),
+                        str(out_path),
                     )
                     self.close()
                     return out_path
@@ -13065,6 +14498,11 @@ if HAS_QT:
                         "SAVE_SNIP_AS",
                         f"Saved screenshot via Save As dialog to '{saved_path}'",
                     )
+                    self.capture_completed.emit(
+                        pix,
+                        getattr(self, "capture_workflow_mode", "region"),
+                        str(saved_path),
+                    )
                     self.close()
                     return saved_path
                 except Exception as exc:
@@ -13117,9 +14555,17 @@ if HAS_QT:
             if hasattr(self, "context_toolbar") and self.context_toolbar is not None:
                 self.context_toolbar.hide()
                 self.context_toolbar.cleanup_resources()
+            if hasattr(self, "mode_hud_bar") and self.mode_hud_bar is not None:
+                self.mode_hud_bar.hide()
+                self.mode_hud_bar.cleanup_resources()
 
             self._badge_frosted_pix = None
             self._badge_cached_rect = None
+            self._scaled_bg_pixmap = None
+            self._committed_annotations_pixmap = None
+            self._committed_vectors_pixmap = None
+            self._composite_committed_pixmap = None
+            self._committed_cache_dirty = True
             self.bg_pixmap = QPixmap()
             self.target_screen = None
             self.annotations.clear()
@@ -13670,16 +15116,11 @@ def resolve_preferred_release_asset_names(
     installed_exe_path: Optional[Path] = None,
 ) -> Tuple[str, ...]:
     """
-    Determines the preferred release asset search order based on the installed executable name.
-    Supports both `Prismwake.exe` and `HDRSnipFusion.exe` across v0.1.2 -> v0.1.3+ transitions.
+    In Prismwake v0.2.0+, `Prismwake.exe` is the sole supported release executable.
+    Does not fall back to retired old-name executables.
     """
-    try:
-        exe_name = Path(installed_exe_path or get_current_executable_path()).name.strip().lower()
-    except Exception:
-        exe_name = ""
-    if exe_name == LEGACY_RELEASE_ASSET_NAME.lower():
-        return (LEGACY_RELEASE_ASSET_NAME, PRIMARY_RELEASE_ASSET_NAME)
-    return (PRIMARY_RELEASE_ASSET_NAME, LEGACY_RELEASE_ASSET_NAME)
+    _ = installed_exe_path
+    return (PRIMARY_RELEASE_ASSET_NAME,)
 
 
 def parse_github_release_payload(
@@ -13779,7 +15220,7 @@ def parse_github_release_payload(
             published_at=published_at,
             message=(
                 f"Release v{clean_latest} is published, but Windows executable assets "
-                f"({PRIMARY_RELEASE_ASSET_NAME} / {LEGACY_RELEASE_ASSET_NAME}) are still being attached."
+                f"({PRIMARY_RELEASE_ASSET_NAME}) are still being attached."
             ),
         )
 
@@ -13877,7 +15318,7 @@ def fetch_latest_github_release(
         api_url,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": f"HDRSnipFusion/{current_version} (Windows; +https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME})",
+            "User-Agent": f"Prismwake/{current_version} (Windows; +https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME})",
             "X-GitHub-Api-Version": "2022-11-28",
         },
         method="GET",
@@ -13993,7 +15434,7 @@ def download_and_stage_release_asset(
         check_result.download_url,
         headers={
             "Accept": "application/octet-stream",
-            "User-Agent": f"HDRSnipFusion/{APP_VERSION} (+https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME})",
+            "User-Agent": f"Prismwake/{APP_VERSION} (+https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME})",
         },
         method="GET",
     )
@@ -16340,7 +17781,7 @@ if HAS_QT:
                 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     height: 0px;
                 }
-                QKeySequenceEdit, QComboBox, QDoubleSpinBox, QLineEdit#SavePathEdit {
+                QKeySequenceEdit, QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit#SavePathEdit {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba(255, 255, 255, 244),
                         stop:0.48 rgba(226, 249, 255, 236),
@@ -16355,14 +17796,14 @@ if HAS_QT:
                     font-size: 12px;
                     font-weight: bold;
                 }
-                QKeySequenceEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QLineEdit#SavePathEdit:hover {
+                QKeySequenceEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QSpinBox:hover, QLineEdit#SavePathEdit:hover {
                     border: 1.5px solid #88FAFF;
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba(255, 255, 255, 252),
                         stop:0.5 rgba(235, 252, 255, 246),
                         stop:1 rgba(246, 255, 255, 254));
                 }
-                QKeySequenceEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QLineEdit#SavePathEdit:focus {
+                QKeySequenceEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit#SavePathEdit:focus {
                     border: 2px solid #00E5FF;
                 }
                 QDoubleSpinBox {
@@ -16476,13 +17917,34 @@ if HAS_QT:
             cards_layout.setContentsMargins(0, 0, 6, 0)
             cards_layout.setSpacing(9)
 
+            self.focused_section: str = "general"
+
             # Helper for aligned label + expanding control rows (with optional wrapping subtitle)
             def _add_labeled_row(
                 parent_vbox: QVBoxLayout,
-                label_text: str,
-                field_widget: QWidget,
-                helper_label: Optional[QLabel] = None,
+                label_or_card: Any,
+                field_or_label: Any,
+                helper_or_field: Optional[Any] = None,
+                *,
+                helper_label: Optional[QWidget] = None,
             ) -> None:
+                # Accept three supported signatures without losing subtitle labels:
+                #   _add_labeled_row(layout, label, control)
+                #   _add_labeled_row(layout, label, control, helper_label=widget)
+                #   _add_labeled_row(layout, card, label, control)  [legacy]
+                if isinstance(label_or_card, QWidget) and isinstance(field_or_label, str):
+                    label_text = field_or_label
+                    field_widget = helper_or_field
+                else:
+                    label_text = str(label_or_card)
+                    field_widget = field_or_label
+                    if helper_label is None:
+                        helper_label = helper_or_field
+                if not isinstance(field_widget, QWidget):
+                    raise TypeError(
+                        f"Settings row {label_text!r} expected a QWidget control, "
+                        f"got {type(field_widget).__name__}"
+                    )
                 row = QHBoxLayout()
                 row.setContentsMargins(0, 0, 0, 0)
                 row.setSpacing(12)
@@ -16531,6 +17993,7 @@ if HAS_QT:
             # -----------------------------------------------------------------
             capture_card = QFrame(self.scroll_contents)
             capture_card.setObjectName("AquaSectionCard")
+            self.capture_card = capture_card
             cap_vbox = QVBoxLayout(capture_card)
             cap_vbox.setContentsMargins(14, 9, 14, 10)
             cap_vbox.setSpacing(7)
@@ -16576,6 +18039,7 @@ if HAS_QT:
             # -----------------------------------------------------------------
             saving_card = QFrame(self.scroll_contents)
             saving_card.setObjectName("AquaSectionCard")
+            self.saving_card = saving_card
             sav_vbox = QVBoxLayout(saving_card)
             sav_vbox.setContentsMargins(14, 9, 14, 10)
             sav_vbox.setSpacing(7)
@@ -16623,6 +18087,7 @@ if HAS_QT:
             # -----------------------------------------------------------------
             visuals_card = QFrame(self.scroll_contents)
             visuals_card.setObjectName("AquaSectionCard")
+            self.visuals_card = visuals_card
             vis_vbox = QVBoxLayout(visuals_card)
             vis_vbox.setContentsMargins(14, 9, 14, 10)
             vis_vbox.setSpacing(7)
@@ -16708,6 +18173,7 @@ if HAS_QT:
             # -----------------------------------------------------------------
             hdr_card = QFrame(self.scroll_contents)
             hdr_card.setObjectName("AquaSectionCard")
+            self.hdr_card = hdr_card
             hdr_vbox = QVBoxLayout(hdr_card)
             hdr_vbox.setContentsMargins(14, 9, 14, 10)
             hdr_vbox.setSpacing(7)
@@ -16790,6 +18256,7 @@ if HAS_QT:
             # -----------------------------------------------------------------
             updates_card = QFrame(self.scroll_contents)
             updates_card.setObjectName("AquaSectionCard")
+            self.updates_card = updates_card
             upd_vbox = QVBoxLayout(updates_card)
             upd_vbox.setContentsMargins(14, 9, 14, 10)
             upd_vbox.setSpacing(7)
@@ -16868,6 +18335,7 @@ if HAS_QT:
             # -----------------------------------------------------------------
             diag_card = QFrame(self.scroll_contents)
             diag_card.setObjectName("AquaDiagCard")
+            self.diag_card = diag_card
             diag_vbox = QVBoxLayout(diag_card)
             diag_vbox.setContentsMargins(14, 8, 14, 9)
             diag_vbox.setSpacing(6)
@@ -16978,6 +18446,194 @@ if HAS_QT:
 
             self._update_safe_mode_banner()
             cards_layout.addWidget(diag_card)
+
+            # -----------------------------------------------------------------
+            # CARD 6: SMART CAPTURE MODES, DELAYS & SHORTCUTS (v0.2.0)
+            # -----------------------------------------------------------------
+            cap_card = QFrame(self.scroll_contents)
+            cap_card.setObjectName("AquaSectionCard")
+            self.cap_modes_card = cap_card
+            cap_vbox = QVBoxLayout(cap_card)
+            cap_vbox.setContentsMargins(14, 12, 14, 12)
+            cap_vbox.setSpacing(8)
+            cap_hdr = QLabel("◆  CAPTURE MODES, DELAYS & GLOBAL SHORTCUTS", cap_card)
+            cap_hdr.setObjectName("SectionHeader")
+            cap_vbox.addWidget(cap_hdr)
+
+            self.default_cap_mode_combo = QComboBox(cap_card)
+            for m_code, m_lbl in (
+                ("region", "Region Capture (Interactive Crop + Annotate)"),
+                ("window", "Window Capture (Intelligent Win32 / DWM Window Detection)"),
+                ("fullscreen", "Fullscreen / Monitor Capture (Single-Action Display Capture)"),
+                ("delayed", "Delayed Capture (Non-Blocking Countdown)"),
+                ("ocr", "Text Capture (Offline OCR Region)"),
+            ):
+                self.default_cap_mode_combo.addItem(m_lbl, m_code)
+            idx_cm = self.default_cap_mode_combo.findData(getattr(config, "default_capture_mode", "region"))
+            if idx_cm >= 0:
+                self.default_cap_mode_combo.setCurrentIndex(idx_cm)
+            _add_labeled_row(cap_vbox, "Default Mode:", self.default_cap_mode_combo)
+
+            self.delay_combo = QComboBox(cap_card)
+            for d_sec, d_lbl in (
+                (0, "No Delay (0s — Instant Capture)"),
+                (3, "3 Seconds (Capture Hover Menus / Tooltips)"),
+                (5, "5 Seconds"),
+                (10, "10 Seconds"),
+            ):
+                self.delay_combo.addItem(d_lbl, d_sec)
+            idx_dl = self.delay_combo.findData(int(getattr(config, "capture_delay_seconds", 0)))
+            if idx_dl >= 0:
+                self.delay_combo.setCurrentIndex(idx_dl)
+            _add_labeled_row(cap_vbox, "Capture Delay:", self.delay_combo)
+
+            self.win_dwm_chk = QCheckBox(
+                "Use DWM Extended Frame Bounds for Window Capture (excludes invisible drop shadows)",
+                cap_card,
+            )
+            self.win_dwm_chk.setChecked(bool(getattr(config, "window_capture_use_dwm_bounds", True)))
+            cap_vbox.addWidget(self.win_dwm_chk)
+            cards_layout.addWidget(cap_card)
+
+            # -----------------------------------------------------------------
+            # CARD 7: SCREENSHOT HISTORY & PRIVACY CONTROLS (v0.2.0)
+            # -----------------------------------------------------------------
+            hist_card = QFrame(self.scroll_contents)
+            hist_card.setObjectName("AquaSectionCard")
+            self.hist_card = hist_card
+            hist_vbox = QVBoxLayout(hist_card)
+            hist_vbox.setContentsMargins(14, 12, 14, 12)
+            hist_vbox.setSpacing(8)
+            hist_hdr = QLabel("◆  SCREENSHOT HISTORY & STORAGE PRIVACY", hist_card)
+            hist_hdr.setObjectName("SectionHeader")
+            hist_vbox.addWidget(hist_hdr)
+
+            self.history_mode_combo = QComboBox(hist_card)
+            for h_code, h_lbl in (
+                ("saved_or_copied", "Record Saved, Copied, Pinned, or OCR Captures Only (Recommended)"),
+                ("all_completed", "Record All Completed Captures (Never Records Canceled Captures)"),
+                ("off", "History Off (Do Not Record Captures)"),
+            ):
+                self.history_mode_combo.addItem(h_lbl, h_code)
+            idx_hm = self.history_mode_combo.findData(getattr(config, "history_mode", "saved_or_copied"))
+            if idx_hm >= 0:
+                self.history_mode_combo.setCurrentIndex(idx_hm)
+            _add_labeled_row(hist_vbox, "Privacy Mode:", self.history_mode_combo)
+
+            self.history_max_items_spin = QSpinBox(hist_card)
+            self.history_max_items_spin.setRange(10, 10000)
+            self.history_max_items_spin.setSingleStep(50)
+            self.history_max_items_spin.setSuffix(" captures")
+            self.history_max_items_spin.setValue(max(10, int(getattr(config, "history_max_items", 500))))
+            _add_labeled_row(hist_vbox, "Max History Items:", self.history_max_items_spin)
+
+            self.history_max_mb_spin = QSpinBox(hist_card)
+            self.history_max_mb_spin.setRange(25, 50000)
+            self.history_max_mb_spin.setSingleStep(128)
+            self.history_max_mb_spin.setSuffix(" MB")
+            self.history_max_mb_spin.setValue(max(25, int(getattr(config, "history_max_storage_mb", 1024))))
+            _add_labeled_row(hist_vbox, "Max Storage Size:", self.history_max_mb_spin)
+
+            self.history_retention_days_spin = QSpinBox(hist_card)
+            self.history_retention_days_spin.setRange(0, 3650)
+            self.history_retention_days_spin.setSingleStep(15)
+            self.history_retention_days_spin.setSpecialValueText("Keep Forever (No Age Limit)")
+            self.history_retention_days_spin.setSuffix(" days")
+            self.history_retention_days_spin.setValue(max(0, int(getattr(config, "history_retention_days", 90))))
+            _add_labeled_row(hist_vbox, "Retention Period:", self.history_retention_days_spin)
+
+            self.history_ocr_chk = QCheckBox(
+                "Automatically index recognized OCR text in SQLite FTS5 for instant history search",
+                hist_card,
+            )
+            self.history_ocr_chk.setChecked(bool(getattr(config, "history_index_ocr", True)))
+            hist_vbox.addWidget(self.history_ocr_chk)
+            cards_layout.addWidget(hist_card)
+
+            # -----------------------------------------------------------------
+            # CARD 8: OFFLINE TEXT RECOGNITION / OCR (v0.2.0)
+            # -----------------------------------------------------------------
+            ocr_card = QFrame(self.scroll_contents)
+            ocr_card.setObjectName("AquaSectionCard")
+            self.ocr_card = ocr_card
+            ocr_vbox = QVBoxLayout(ocr_card)
+            ocr_vbox.setContentsMargins(14, 12, 14, 12)
+            ocr_vbox.setSpacing(8)
+            ocr_hdr = QLabel("◆  TEXT RECOGNITION (OFFLINE OCR)", ocr_card)
+            ocr_hdr.setObjectName("SectionHeader")
+            ocr_vbox.addWidget(ocr_hdr)
+
+            ocr_status = query_ocr_engine_status()
+            self.ocr_status_lbl = QLabel(ocr_status.status_summary, ocr_card)
+            self.ocr_status_lbl.setWordWrap(True)
+            ocr_vbox.addWidget(self.ocr_status_lbl)
+
+            self.ocr_auto_opt_lbl = QLabel(AUTOMATIC_OCR_STATUS_TEXT, ocr_card)
+            self.ocr_auto_opt_lbl.setWordWrap(True)
+            ocr_vbox.addWidget(self.ocr_auto_opt_lbl)
+
+            self.ocr_lang_combo = QComboBox(ocr_card)
+            for l_code, l_lbl in SUPPORTED_OCR_LANGUAGES.items():
+                self.ocr_lang_combo.addItem(l_lbl, l_code)
+            idx_ol = self.ocr_lang_combo.findData(getattr(config, "ocr_language", "eng"))
+            if idx_ol >= 0:
+                self.ocr_lang_combo.setCurrentIndex(idx_ol)
+            _add_labeled_row(ocr_vbox, "OCR Language:", self.ocr_lang_combo)
+
+            self.ocr_quality_mode_combo = QComboBox(ocr_card)
+            for q_code, q_lbl in OCR_QUALITY_MODE_LABELS.items():
+                self.ocr_quality_mode_combo.addItem(q_lbl, q_code)
+            idx_qm = self.ocr_quality_mode_combo.findData(getattr(config, "ocr_quality_mode", "auto"))
+            if idx_qm >= 0:
+                self.ocr_quality_mode_combo.setCurrentIndex(idx_qm)
+            _add_labeled_row(ocr_vbox, "Optimization Mode:", self.ocr_quality_mode_combo)
+
+            self.ocr_auto_copy_chk = QCheckBox(
+                "Automatically copy recognized text",
+                ocr_card,
+            )
+            self.ocr_auto_copy_chk.setChecked(bool(getattr(config, "ocr_auto_copy_text", False)))
+            ocr_vbox.addWidget(self.ocr_auto_copy_chk)
+
+            self.ocr_show_panel_after_copy_chk = QCheckBox(
+                "Show Quick OCR panel after automatic copy",
+                ocr_card,
+            )
+            self.ocr_show_panel_after_copy_chk.setChecked(
+                bool(getattr(config, "ocr_show_panel_after_auto_copy", True))
+            )
+            ocr_vbox.addWidget(self.ocr_show_panel_after_copy_chk)
+            cards_layout.addWidget(ocr_card)
+
+            # -----------------------------------------------------------------
+            # CARD 9: PINNED FLOATING SCREENSHOTS (v0.2.0)
+            # -----------------------------------------------------------------
+            pin_card = QFrame(self.scroll_contents)
+            pin_card.setObjectName("AquaSectionCard")
+            self.pin_card = pin_card
+            pin_vbox = QVBoxLayout(pin_card)
+            pin_vbox.setContentsMargins(14, 12, 14, 12)
+            pin_vbox.setSpacing(8)
+            pin_hdr = QLabel("◆  PINNED FLOATING SCREENSHOTS", pin_card)
+            pin_hdr.setObjectName("SectionHeader")
+            pin_vbox.addWidget(pin_hdr)
+
+            self.pin_aot_chk = QCheckBox("Keep pinned screenshots Always-on-Top by default", pin_card)
+            self.pin_aot_chk.setChecked(bool(getattr(config, "pin_always_on_top", True)))
+            pin_vbox.addWidget(self.pin_aot_chk)
+
+            self.pin_border_chk = QCheckBox("Show thin Frutiger Aqua cyan border on pinned windows", pin_card)
+            self.pin_border_chk.setChecked(bool(getattr(config, "pin_show_border", True)))
+            pin_vbox.addWidget(self.pin_border_chk)
+
+            self.pin_exclude_chk = QCheckBox(
+                "Exclude existing pinned screenshots when taking new captures",
+                pin_card,
+            )
+            self.pin_exclude_chk.setChecked(bool(getattr(config, "pin_exclude_from_capture", True)))
+            pin_vbox.addWidget(self.pin_exclude_chk)
+            cards_layout.addWidget(pin_card)
+
             cards_layout.addStretch(1)
 
             self.scroll_area.setWidget(self.scroll_contents)
@@ -16998,6 +18654,11 @@ if HAS_QT:
             self.save_btn.clicked.connect(self.accept)
             self.cancel_btn = AeroGelButton("Cancel", variant="glass", parent=self)
             self.cancel_btn.clicked.connect(self.reject)
+            # Frameless dialogs have no native Windows X; keep independent keyboard escape hatches.
+            self.close_shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+            self.close_shortcut.activated.connect(self.reject)
+            self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+            self.escape_shortcut.activated.connect(self.reject)
             self.resize_grip = AquaResizeGripWidget(self)
             self.resize_grip.setToolTip("Drag any window edge or corner to resize Settings")
 
@@ -17205,6 +18866,35 @@ if HAS_QT:
             self.setMinimumSize(min_sz)
             self.setGeometry(target_rect)
             return target_rect
+
+        def focus_section(self, section: Optional[str] = None) -> str:
+            """Scroll directly to and focus a specific settings section (e.g. 'storage_privacy')."""
+            norm = str(section or "general").strip().lower()
+            self.focused_section = norm
+            section_map = {
+                "general": getattr(self, "capture_card", None),
+                "saving": getattr(self, "saving_card", None),
+                "visuals": getattr(self, "visuals_card", None),
+                "hdr": getattr(self, "hdr_card", None),
+                "updates": getattr(self, "updates_card", None),
+                "diagnostics": getattr(self, "diag_card", None),
+                "capture": getattr(self, "cap_modes_card", None),
+                "history": getattr(self, "hist_card", None),
+                "storage": getattr(self, "hist_card", None),
+                "privacy": getattr(self, "hist_card", None),
+                "storage_privacy": getattr(self, "hist_card", None),
+                "ocr": getattr(self, "ocr_card", None),
+                "pinning": getattr(self, "pin_card", None),
+            }
+            target_card = section_map.get(norm)
+            if target_card is not None and hasattr(self, "scroll_area"):
+                QTimer.singleShot(
+                    0,
+                    lambda w=target_card: self.scroll_area.ensureWidgetVisible(w, 0, 24),
+                )
+                if norm in ("history", "storage", "privacy", "storage_privacy") and hasattr(self, "history_mode_combo"):
+                    self.history_mode_combo.setFocus()
+            return self.focused_section
 
         def set_selected_save_directory(self, folder_path: str) -> None:
             """Updates the pending save directory in the dialog without committing to AppConfig until Save & Apply."""
@@ -17505,20 +19195,23 @@ if HAS_QT:
             super().accept()
 
         def reject(self) -> None:
-            # Restore original animation intensity, transparency, theme & Safe Mode flags if user cancels;
-            # persist window size if the user resized the dialog so they don't have to resize again.
-            if self._user_resized:
-                self._persist_window_dimensions_if_resized()
-                try:
-                    self.config.save()
-                except Exception:
-                    pass
-            director = AeroAnimationDirector.instance()
-            director.apply_config_flags(self.config)
-            director.set_intensity(self._original_intensity)
-            director.set_transparency(self._original_transparency)
-            director.set_theme(self._original_theme)
-            super().reject()
+            # Close must always succeed even if live preview/animation cleanup throws.
+            try:
+                if self._user_resized:
+                    self._persist_window_dimensions_if_resized()
+                    try:
+                        self.config.save()
+                    except Exception:
+                        pass
+                director = AeroAnimationDirector.instance()
+                director.apply_config_flags(self.config)
+                director.set_intensity(self._original_intensity)
+                director.set_transparency(self._original_transparency)
+                director.set_theme(self._original_theme)
+            except Exception as exc:
+                DIAG_LOG.error("SETTINGS_CLOSE", "Failed to restore settings preview", exc)
+            finally:
+                QDialog.reject(self)
 
         def paintEvent(self, event) -> None:
             painter = QPainter(self)
@@ -17794,6 +19487,39 @@ if HAS_QT:
                 self.disable_hdr_dxgi_chk.isChecked()
             )
             self.config.enable_diagnostic_logging = bool(self.diag_log_chk.isChecked())
+            if hasattr(self, "default_cap_mode_combo"):
+                self.config.default_capture_mode = normalize_capture_mode(self.default_cap_mode_combo.currentData())
+            if hasattr(self, "delay_combo"):
+                self.config.capture_delay_seconds = clamp_capture_delay_seconds(self.delay_combo.currentData())
+            if hasattr(self, "win_dwm_chk"):
+                self.config.window_capture_use_dwm_bounds = bool(self.win_dwm_chk.isChecked())
+            if hasattr(self, "history_mode_combo"):
+                self.config.history_mode = str(self.history_mode_combo.currentData() or "saved_or_copied")
+            if hasattr(self, "history_max_items_spin"):
+                self.config.history_max_items = max(10, int(self.history_max_items_spin.value()))
+            if hasattr(self, "history_max_mb_spin"):
+                self.config.history_max_storage_mb = max(25, int(self.history_max_mb_spin.value()))
+            if hasattr(self, "history_retention_days_spin"):
+                self.config.history_retention_days = max(0, int(self.history_retention_days_spin.value()))
+            if hasattr(self, "history_ocr_chk"):
+                self.config.history_index_ocr = bool(self.history_ocr_chk.isChecked())
+            if hasattr(self, "ocr_lang_combo"):
+                self.config.ocr_language = str(self.ocr_lang_combo.currentData() or "eng")
+            if hasattr(self, "ocr_quality_mode_combo"):
+                qm_val = str(self.ocr_quality_mode_combo.currentData() or "auto")
+                self.config.ocr_quality_mode = qm_val if qm_val in VALID_OCR_QUALITY_MODES else "auto"
+            if hasattr(self, "ocr_auto_copy_chk"):
+                self.config.ocr_auto_copy_text = bool(self.ocr_auto_copy_chk.isChecked())
+            if hasattr(self, "ocr_show_panel_after_copy_chk"):
+                self.config.ocr_show_panel_after_auto_copy = bool(
+                    self.ocr_show_panel_after_copy_chk.isChecked()
+                )
+            if hasattr(self, "pin_aot_chk"):
+                self.config.pin_always_on_top = bool(self.pin_aot_chk.isChecked())
+            if hasattr(self, "pin_border_chk"):
+                self.config.pin_show_border = bool(self.pin_border_chk.isChecked())
+            if hasattr(self, "pin_exclude_chk"):
+                self.config.pin_exclude_from_capture = bool(self.pin_exclude_chk.isChecked())
             self._persist_window_dimensions_if_resized()
             director.apply_config_flags(self.config)
             self.config.save()
@@ -18104,11 +19830,67 @@ if HAS_QT:
                 }
                 """
             )
+            # Initialize v0.2.0 Productivity Subsystems (Pinned Screenshots & Persistent History)
+            hist_root = (
+                Path(self.config.history_directory).expanduser()
+                if str(self.config.history_directory or "").strip()
+                else get_default_history_root()
+            )
+            self.history_store = ScreenshotHistoryStore(
+                hist_root,
+                privacy_mode=self.config.history_mode,
+                max_items=self.config.history_max_items,
+                max_storage_mb=self.config.history_max_storage_mb,
+                max_age_days=self.config.history_retention_days,
+                enable_ocr_indexing=self.config.history_index_ocr,
+            )
+            self.pin_manager = PinnedScreenshotManager(
+                default_opacity_pct=self.config.pin_default_opacity_pct,
+                default_zoom_pct=self.config.pin_default_zoom_pct,
+                default_always_on_top=self.config.pin_always_on_top,
+                default_show_border=self.config.pin_show_border,
+                exclude_pins_from_capture=self.config.pin_exclude_from_capture,
+                reopen_in_editor_callback=self._reopen_image_in_editor,
+            )
+            self._history_window = None
+            self._active_settings_dialog: Optional[SettingsDialog] = None
+            self._active_countdown_overlay = None
+            self._active_ocr_dialog = None
+            self._mock_candidate_windows: Optional[Sequence[DetectedWindowInfo]] = None
+            self._last_ocr_selection_rect: Optional[Tuple[int, int, int, int]] = None
+            self._last_ocr_available_geometry: Optional[Tuple[int, int, int, int]] = None
+            self._ocr_toast_log: List[str] = []
+            self._history_ocr_cancel_tokens: List[Any] = []
+            self._workflow_event_log: List[str] = []
+            self._message_box_log: List[Tuple[str, str, str]] = []
+            self.validate_ocr_subsystem_at_startup()
+
+            # Simplified, focused Tray Menu: ONE main Capture entry (mode selection happens inside
+            # the capture HUD), History, Settings, Open Screenshots Folder, Check for Updates,
+            # a compact Pinned & Diagnostics submenu for secondary utilities, and Exit.
             self.snip_action = QAction(
-                f"✦ Take HDR Snip ({self.config.hotkey_str})", self.menu
+                f"✦ Capture ({self.config.hotkey_str})", self.menu
             )
             self.snip_action.triggered.connect(self.trigger_snip)
             self.menu.addAction(self.snip_action)
+
+            # Retained as non-top-level action attributes for programmatic callers
+            self.window_snip_action = QAction(f"Window Capture ({self.config.window_hotkey_str})")
+            self.window_snip_action.triggered.connect(lambda: self.trigger_capture_mode("window"))
+            self.fullscreen_snip_action = QAction(f"Monitor Capture ({self.config.fullscreen_hotkey_str})")
+            self.fullscreen_snip_action.triggered.connect(lambda: self.trigger_capture_mode("fullscreen"))
+            self.ocr_snip_action = QAction(f"Text Capture ({self.config.ocr_hotkey_str})")
+            self.ocr_snip_action.triggered.connect(lambda: self.trigger_capture_mode("ocr"))
+
+            self.history_action = QAction(
+                f"🗂 History ({self.config.history_hotkey_str})", self.menu
+            )
+            self.history_action.triggered.connect(self.open_history_window)
+            self.menu.addAction(self.history_action)
+
+            self.settings_action = QAction("⚙ Settings...", self.menu)
+            self.settings_action.triggered.connect(lambda: self.open_settings())
+            self.menu.addAction(self.settings_action)
 
             self.folder_action = QAction("Open Screenshots Folder", self.menu)
             self.folder_action.triggered.connect(self.open_screenshots_folder)
@@ -18122,20 +19904,25 @@ if HAS_QT:
             )
             self.menu.addAction(self.check_updates_action)
 
-            self.diag_log_action = QAction("Open Diagnostic Log...", self.menu)
-            self.diag_log_action.triggered.connect(self.open_diagnostic_log)
-            self.menu.addAction(self.diag_log_action)
-
-            self.settings_action = QAction(
-                "Change Hotkey, Save Folder & HDR Settings...", self.menu
+            self.more_menu = self.menu.addMenu("Pinned & Diagnostics")
+            self.unlock_pins_action = QAction("🔓 Unlock All Click-Through Pins", self.more_menu)
+            self.unlock_pins_action.triggered.connect(
+                lambda: self.pin_manager.set_all_click_through(False)
             )
-            self.settings_action.triggered.connect(self.open_settings)
-            self.menu.addAction(self.settings_action)
+            self.more_menu.addAction(self.unlock_pins_action)
+
+            self.close_pins_action = QAction("📌 Close All Pinned Screenshots", self.more_menu)
+            self.close_pins_action.triggered.connect(lambda: self.pin_manager.close_all_pins())
+            self.more_menu.addAction(self.close_pins_action)
+
+            self.diag_log_action = QAction("Open Diagnostic Log...", self.more_menu)
+            self.diag_log_action.triggered.connect(self.open_diagnostic_log)
+            self.more_menu.addAction(self.diag_log_action)
 
             self.menu.addSeparator()
-            quit_action = QAction(f"Exit {APP_NAME}", self.menu)
-            quit_action.triggered.connect(self.quit_app)
-            self.menu.addAction(quit_action)
+            self.quit_action = QAction(f"Exit {APP_NAME}", self.menu)
+            self.quit_action.triggered.connect(self.quit_app)
+            self.menu.addAction(self.quit_action)
 
             self.tray.setContextMenu(self.menu)
             self.tray.activated.connect(self._on_tray_activated)
@@ -18608,6 +20395,8 @@ if HAS_QT:
 
         def _on_overlay_closed(self, closed_overlay: object) -> None:
             """Drops the controller reference to the closed overlay and reclaims 4K screenshot memory."""
+            if hasattr(self, "_workflow_event_log"):
+                self._workflow_event_log.append("overlay_closed")
             if self.overlay is closed_overlay:
                 self.overlay = None
             AeroAnimationDirector.instance().notify_visibility_changed()
@@ -18636,7 +20425,57 @@ if HAS_QT:
                     7500,
                 )
 
-        def trigger_snip(self, t_trigger: Any = None) -> None:
+        def validate_ocr_subsystem_at_startup(self) -> Tuple[bool, str]:
+            """Validate OCR module import and Tesseract runtime readiness at startup, logging any issues."""
+            if OCR_IMPORT_ERROR:
+                DIAG_LOG.error("OCR_STARTUP", f"Offline OCR module failed to import:\n{OCR_IMPORT_ERROR}")
+                return False, OCR_IMPORT_ERROR
+            try:
+                status = query_ocr_engine_status(allow_builtin_fallback=False)
+                if status.available:
+                    DIAG_LOG.milestone("OCR_STARTUP", status.status_summary)
+                    return True, status.status_summary
+                DIAG_LOG.warning("OCR_STARTUP", status.status_summary)
+                return False, status.status_summary
+            except Exception as exc:
+                DIAG_LOG.error("OCR_STARTUP", "Failed to query OCR engine status at startup", exc)
+                return False, str(exc)
+
+        def get_top_level_tray_menu_labels(self) -> List[str]:
+            """Return the visible non-separator top-level action and submenu labels in the system tray menu."""
+            labels: List[str] = []
+            for act in self.menu.actions():
+                if act.isSeparator():
+                    continue
+                txt_lbl = (act.text() or "").strip()
+                if txt_lbl:
+                    labels.append(txt_lbl)
+            return labels
+
+        def _wire_overlay_signals(self, overlay: Any) -> None:
+            """Connect all controller slots (`overlay_closed`, `pin_requested`, `ocr_requested`, `capture_completed`, `delayed_capture_requested`) once."""
+            if overlay is None or getattr(overlay, "_controller_signals_wired", False):
+                return
+            overlay._controller_signals_wired = True
+            overlay.overlay_closed.connect(self._on_overlay_closed)
+            overlay.pin_requested.connect(self._on_overlay_pin_requested)
+            overlay.ocr_requested.connect(self._on_overlay_ocr_requested)
+            overlay.capture_completed.connect(self._on_overlay_capture_completed)
+            if hasattr(overlay, "delayed_capture_requested"):
+                overlay.delayed_capture_requested.connect(self.trigger_delayed_capture)
+            if hasattr(overlay, "monitor_picker_requested"):
+                overlay.monitor_picker_requested.connect(
+                    lambda mode: QTimer.singleShot(0, lambda m=mode: self._show_monitor_capture_picker(m))
+                )
+
+        def trigger_snip(
+            self,
+            t_trigger: Any = None,
+            *,
+            workflow_mode: Optional[str] = None,
+            candidate_windows: Optional[Sequence[DetectedWindowInfo]] = None,
+            target_monitor_device_name: Optional[str] = None,
+        ) -> None:
             t_now = time.perf_counter()
             if isinstance(t_trigger, (int, float)):
                 t_hotkey_rx = float(t_trigger)
@@ -18664,17 +20503,41 @@ if HAS_QT:
 
             self._snip_in_progress = True
             captured_frame: Optional[CapturedFrame] = None
+            eff_mode = normalize_capture_mode(
+                workflow_mode or getattr(self.config, "default_capture_mode", "region")
+            )
+            hidden_pins = self.pin_manager.prepare_for_desktop_capture()
             try:
                 if self.config.overlay_delay_ms > 0:
                     time.sleep(min(2.0, float(self.config.overlay_delay_ms) / 1000.0))
-                captured_frame = capture_screen_dxgi_hdr(self.config)
+
+                # Snapshot candidate desktop windows in Z-order BEFORE showing the fullscreen overlay
+                eff_candidates = (
+                    candidate_windows
+                    if candidate_windows is not None
+                    else getattr(self, "_mock_candidate_windows", None)
+                )
+                pre_windows = enumerate_capturable_windows(
+                    exclude_pid=os.getpid(),
+                    mock_windows=eff_candidates,
+                    use_dwm_bounds=bool(getattr(self.config, "window_capture_use_dwm_bounds", True)),
+                )
+
+                captured_frame = capture_screen_dxgi_hdr(
+                    self.config, target_monitor_device_name=target_monitor_device_name
+                )
 
                 t_ov_start = time.perf_counter()
                 self.overlay = SnipOverlayWindow(
-                    captured_frame, self.config, t_trigger_start=t_hotkey_rx
+                    captured_frame,
+                    self.config,
+                    t_trigger_start=t_hotkey_rx,
+                    workflow_mode=eff_mode,
+                    candidate_windows=pre_windows,
                 )
-                self.overlay.overlay_closed.connect(self._on_overlay_closed)
+                self._wire_overlay_signals(self.overlay)
                 self.overlay.show_on_target_screen()
+                self._workflow_event_log.append(f"overlay_opened:{eff_mode}")
                 t_ov_ms = (time.perf_counter() - t_ov_start) * 1000.0
                 PERF_TELEMETRY.record_stage("overlay_init", t_ov_ms)
 
@@ -18687,14 +20550,14 @@ if HAS_QT:
                 )
                 DIAG_LOG.milestone(
                     "OVERLAY_OPEN",
-                    f"Overlay opened on screen '{scr_name}' "
+                    f"Overlay opened on screen {scr_name} mode={eff_mode} "
                     f"geom={self.overlay.geometry().getRect()} in {total_ms:.1f} ms "
                     f"(preview={captured_frame.is_preview})",
                 )
             except Exception as exc:
                 if captured_frame is not None and self.overlay is None:
                     captured_frame.release_buffers()
-                print(f"[HDRSnip Fusion] Capture error: {exc}")
+                print(f"[{APP_NAME}] Capture error: {exc}")
                 DIAG_LOG.error("TRIGGER_SNIP", "Failed to capture and open overlay", exc)
                 self.tray.showMessage(
                     f"{APP_NAME} Capture Failed",
@@ -18703,37 +20566,444 @@ if HAS_QT:
                     7500,
                 )
             finally:
+                self.pin_manager.restore_after_desktop_capture(hidden_pins)
                 self._snip_in_progress = False
 
-        def open_settings(self) -> None:
-            if getattr(self, "_shutting_down", False):
+        def _show_monitor_capture_picker(self, mode: str = "fullscreen") -> None:
+            """Choose a physical display and recapture its real DXGI surface before showing overlay."""
+            if self._shutting_down:
                 return
-            DIAG_LOG.log("SETTINGS", "Opening SettingsDialog")
+            try:
+                monitors = enumerate_win32_monitors()
+                if not monitors:
+                    raise RuntimeError("Windows did not report any available displays")
+                targets = [
+                    MonitorCaptureTarget(
+                        index=i, device_name=m.device_name,
+                        friendly_name=m.device_name,
+                        left=m.physical_rect[0], top=m.physical_rect[1],
+                        width=m.physical_rect[2], height=m.physical_rect[3],
+                        dpi_scale=m.dpi_scale, is_primary=m.is_primary,
+                    )
+                    for i, m in enumerate(monitors)
+                ]
+                desired_mode = "window" if mode == "window" else "fullscreen"
+                if len(targets) == 1:
+                    selected = targets[0]
+                else:
+                    if _MonitorSelectorDialog is None:
+                        raise RuntimeError("Monitor picker UI could not be loaded")
+                    picker = _MonitorSelectorDialog(targets)
+                    if picker.exec() != int(QDialog.DialogCode.Accepted):
+                        return
+                    selected = picker.selected_monitor
+                if selected is None:
+                    return
+                QTimer.singleShot(
+                    0, lambda name=selected.device_name, md=desired_mode: self.trigger_snip(
+                        workflow_mode=md, target_monitor_device_name=name
+                    ),
+                )
+            except Exception as exc:
+                DIAG_LOG.error("MONITOR_SELECT", "Failed to choose display for capture", exc)
+                QMessageBox.warning(None, "Prismwake Display Capture", str(exc))
+
+        def trigger_capture_mode(self, mode: str = "region") -> None:
+            """Entry point for v0.2.0 capture workflows."""
+            norm_mode = normalize_capture_mode(mode)
+            if norm_mode == "delayed" or self.config.capture_delay_seconds > 0:
+                delay_s = max(3, self.config.capture_delay_seconds) if norm_mode == "delayed" else self.config.capture_delay_seconds
+                target_m = "region" if norm_mode == "delayed" else norm_mode
+                self.trigger_delayed_capture(delay_s, target_m)
+                return
+            if norm_mode == "fullscreen":
+                self._show_monitor_capture_picker("fullscreen")
+                return
+            self._execute_immediate_capture(norm_mode)
+
+        def trigger_delayed_capture(self, delay_seconds: int, target_mode: str = "region") -> None:
+            if _DelayedCountdownOverlay is None:
+                self._execute_immediate_capture(target_mode)
+                return
+            if self._active_countdown_overlay is not None:
+                try:
+                    self._active_countdown_overlay.cancel_countdown()
+                except Exception:
+                    pass
+            ov = _DelayedCountdownOverlay(delay_seconds, target_mode=target_mode)
+            ov.captureReady.connect(self._execute_immediate_capture)
+            self._active_countdown_overlay = ov
+            ov.start_countdown()
+
+        def _execute_immediate_capture(self, mode: str = "region") -> None:
+            self.trigger_snip(workflow_mode=mode)
+
+        def _on_overlay_pin_requested(self, pixmap: QPixmap, gx: int, gy: int) -> None:
+            self.pin_manager.create_pin(pixmap, title="Pinned Screenshot", initial_x=gx, initial_y=gy)
+
+        def _show_ocr_auto_copy_acknowledgement(self, notice: str) -> None:
+            msg = str(notice or "Recognized text copied to clipboard.")
+            self._ocr_toast_log.append(msg)
+            DIAG_LOG.log("OCR_AUTO_COPY", msg)
+            if not getattr(self.config, "ocr_show_panel_after_auto_copy", True):
+                try:
+                    if hasattr(self, "tray") and self.tray is not None:
+                        self.tray.showMessage(
+                            f"{APP_NAME} — Text Copied",
+                            msg,
+                            QSystemTrayIcon.MessageIcon.Information,
+                            2200,
+                        )
+                except Exception:
+                    pass
+
+        def _on_overlay_ocr_requested(self, pixmap: Any) -> None:
+            """
+            Handle `ocr_requested` from `SnipOverlayWindow`:
+              1. Capture the selection global rect and screen work area before overlay teardown.
+              2. Ensure the fullscreen capture overlay is hidden and closed first.
+              3. Copy the image pixels so no reference to the closing overlay is retained.
+              4. Defer opening the non-modal Quick OCR panel via `QTimer.singleShot(0, ...)` on `self`
+                 so it opens in front of other windows near the selection after overlay teardown.
+            """
+            sel_rect = getattr(self.overlay, "_last_ocr_selection_rect", None) if self.overlay is not None else None
+            avail_rect = getattr(self.overlay, "_last_ocr_screen_available_rect", None) if self.overlay is not None else None
+            if sel_rect is not None:
+                self._last_ocr_selection_rect = sel_rect
+            if avail_rect is not None:
+                self._last_ocr_available_geometry = avail_rect
+            if self.overlay is not None and self.overlay.isVisible():
+                try:
+                    self.overlay.hide()
+                    self.overlay.close()
+                except Exception:
+                    pass
+            detached_img = pixmap.copy() if hasattr(pixmap, "copy") else pixmap
+            QTimer.singleShot(
+                0,
+                lambda img=detached_img, sr=self._last_ocr_selection_rect, ar=self._last_ocr_available_geometry: (
+                    self._open_ocr_results_dialog(img, selection_rect=sr, available_geometry=ar)
+                ),
+            )
+
+        def _open_ocr_results_dialog(
+            self,
+            image_source: Any,
+            *,
+            selection_rect: Optional[Tuple[int, int, int, int]] = None,
+            available_geometry: Optional[Tuple[int, int, int, int]] = None,
+        ) -> Any:
+            """Open and focus the non-modal Frutiger Aqua Quick OCR panel near the selection."""
+            if getattr(self, "_shutting_down", False):
+                return None
+            if OCR_IMPORT_ERROR or _OcrResultsDialog is None:
+                err_detail = OCR_IMPORT_ERROR or "OcrResultsDialog component is None."
+                DIAG_LOG.error("OCR_DIALOG", f"Failed to open OCR results window:\n{err_detail}")
+                QMessageBox.critical(
+                    None,
+                    f"{APP_NAME} — Offline OCR Error",
+                    f"The Offline Text Recognition (OCR) subsystem could not be initialized:\n\n{err_detail}",
+                )
+                return None
+
+            if self._active_ocr_dialog is not None:
+                try:
+                    self._active_ocr_dialog.cancel_recognition()
+                    self._active_ocr_dialog.close()
+                    self._active_ocr_dialog.deleteLater()
+                except Exception:
+                    pass
+                self._active_ocr_dialog = None
+
+            eff_sel = selection_rect if selection_rect is not None else self._last_ocr_selection_rect
+            eff_avail = available_geometry if available_geometry is not None else self._last_ocr_available_geometry
+
+            try:
+                dlg = _OcrResultsDialog(
+                    image_source,
+                    default_language=self.config.ocr_language,
+                    quality_mode=getattr(self.config, "ocr_quality_mode", "auto"),
+                    auto_copy_on_complete=self.config.ocr_auto_copy_text,
+                    show_panel_after_auto_copy=getattr(self.config, "ocr_show_panel_after_auto_copy", True),
+                    auto_invert_dark=self.config.ocr_auto_invert_dark,
+                    upscale_small_text=self.config.ocr_upscale_small_text,
+                    theme_spec=AQUA_THEMES.get(self.config.aqua_theme),
+                    aqua_theme=self.config.aqua_theme,
+                    animation_intensity=self.config.effective_animation_intensity,
+                    reduced_motion=self.config.effective_animations_disabled,
+                    selection_rect=eff_sel,
+                    available_geometry=eff_avail,
+                    on_auto_copy_toast=self._show_ocr_auto_copy_acknowledgement,
+                )
+                self._active_ocr_dialog = dlg
+                if hasattr(self, "_workflow_event_log"):
+                    self._workflow_event_log.append("ocr_dialog_opened")
+                dlg.finished.connect(lambda _res, d=dlg: self._on_ocr_dialog_closed(d))
+                if not getattr(dlg, "_is_closing", False):
+                    if hasattr(dlg, "present_in_front"):
+                        dlg.present_in_front()
+                    else:
+                        dlg.show()
+                        dlg.raise_()
+                        dlg.activateWindow()
+                return dlg
+            except Exception as exc:
+                DIAG_LOG.error("OCR_DIALOG", "Exception while constructing OcrResultsDialog", exc)
+                QMessageBox.critical(
+                    None,
+                    f"{APP_NAME} — Offline OCR Error",
+                    f"Could not open the OCR Results window:\n{exc}",
+                )
+                return None
+
+        def _on_ocr_dialog_closed(self, closed_dlg: Any) -> None:
+            if self._active_ocr_dialog is closed_dlg:
+                self._active_ocr_dialog = None
+            try:
+                closed_dlg.cancel_recognition()
+                closed_dlg.deleteLater()
+            except Exception:
+                pass
+
+        def _on_overlay_capture_completed(self, pixmap: QPixmap, capture_mode: str, saved_path_str: str) -> None:
+            """
+            Record completed capture in local SQLite history immediately WITHOUT blocking the GUI thread,
+            then enqueue background OCR indexing if `history_index_ocr` is enabled.
+            """
+            ext_path = Path(saved_path_str) if saved_path_str else None
+            entry = self.history_store.record_capture(
+                pixmap,
+                capture_mode=capture_mode,
+                external_save_path=ext_path,
+                was_saved_or_copied=True,
+                ocr_indexer=None,
+            )
+            if (
+                entry is not None
+                and self.config.history_index_ocr
+                and not getattr(self, "_shutting_down", False)
+            ):
+                tok = OcrCancellationToken()
+                self._history_ocr_cancel_tokens.append(tok)
+                lang = self.config.ocr_language
+
+                def _bg_ocr_runner(pil_im: Image.Image) -> str:
+                    try:
+                        if tok.is_cancelled or getattr(self, "_shutting_down", False):
+                            return ""
+                        res = recognize_production_ocr(
+                            pil_im,
+                            language=lang,
+                            quality_mode=getattr(self.config, "ocr_quality_mode", "auto"),
+                            allow_builtin_fallback=False,
+                            cancel_token=tok,
+                        )
+                        return res.text if res.ok else ""
+                    finally:
+                        try:
+                            self._history_ocr_cancel_tokens.remove(tok)
+                        except ValueError:
+                            pass
+
+                self.history_store.enqueue_async_ocr_indexing(
+                    entry.capture_id,
+                    pixmap,
+                    _bg_ocr_runner,
+                )
+
+        def _reopen_image_in_editor(self, pil_img: Image.Image, title: str = "") -> None:
+            rgb_arr = np.ascontiguousarray(np.asarray(pil_img.convert("RGB"), dtype=np.uint8))
+            h, w, _ = rgb_arr.shape
+            synthetic_frame = CapturedFrame(
+                srgb_image=rgb_arr,
+                raw_scrgb_float=None,
+                detected_white_scale=1.0,
+                virtual_rect=(0, 0, w, h),
+                is_hdr_surface=False,
+                full_width=w,
+                full_height=h,
+            )
+            self.overlay = SnipOverlayWindow(synthetic_frame, self.config)
+            self._wire_overlay_signals(self.overlay)
+            self.overlay.has_selection = True
+            self.overlay.selection_rect = QRectF(0.0, 0.0, float(w), float(h))
+            self.overlay.show_on_target_screen()
+            self.overlay._reposition_toolbar()
+
+        def _on_history_pin_entry_requested(self, pil_img: Image.Image, title: str, capture_id: str) -> None:
+            """
+            Pin a screenshot from History: if that exact History capture (`capture_id`) is already
+            pinned, bring the existing pin window to the front and unlock click-through so the user
+            can interact with it immediately; otherwise create a new pinned screenshot.
+            """
+            if capture_id:
+                self.pin_manager.pin_or_focus(pil_img, source_key=capture_id, title=title)
+            else:
+                self.pin_manager.create_pin(pil_img, title=title)
+
+        def _sync_history_aqua_toolkit(self) -> None:
+            if _register_history_aqua_toolkit is not None:
+                try:
+                    _register_history_aqua_toolkit(
+                        AeroGelButton=AeroGelButton,
+                        AeroAnimationDirector=AeroAnimationDirector,
+                        AquaOpticalFieldRenderer=AquaOpticalFieldRenderer,
+                        draw_frutiger_glass_base=draw_frutiger_glass_base,
+                        draw_frutiger_glass_Dynamic_Overlay=draw_frutiger_glass_Dynamic_Overlay,
+                        draw_frutiger_glass_panel=draw_frutiger_glass_panel,
+                        AQUA_THEMES=AQUA_THEMES,
+                    )
+                except Exception:
+                    pass
+
+        def open_history_window(self) -> Any:
+            if _HistoryWindow is None:
+                return None
+            self._sync_history_aqua_toolkit()
+            if self._history_window is not None and self._history_window.isVisible():
+                if hasattr(self._history_window, "apply_aqua_theme_and_config"):
+                    self._history_window.apply_aqua_theme_and_config(
+                        aqua_theme=getattr(self.config, "aqua_theme", "Bondi Blue"),
+                        animation_intensity=getattr(self.config, "animation_intensity", "high"),
+                        glass_transparency=float(getattr(self.config, "glass_transparency", 0.90)),
+                        safe_mode=bool(getattr(self.config, "is_safe_mode_active", False)),
+                        disable_continuous_animations=bool(getattr(self.config, "disable_continuous_animations", False)),
+                    )
+                self._history_window.refresh_gallery()
+                self._history_window.raise_()
+                self._history_window.activateWindow()
+                return self._history_window
+            dlg = _HistoryWindow(
+                self.history_store,
+                ocr_runner=lambda im: recognize_production_ocr(
+                    im,
+                    language=self.config.ocr_language,
+                    quality_mode=getattr(self.config, "ocr_quality_mode", "auto"),
+                    allow_builtin_fallback=False,
+                ).text,
+                aqua_theme=getattr(self.config, "aqua_theme", "Bondi Blue"),
+                animation_intensity=getattr(self.config, "animation_intensity", "high"),
+                glass_transparency=float(getattr(self.config, "glass_transparency", 0.90)),
+                safe_mode=bool(getattr(self.config, "is_safe_mode_active", False)),
+                disable_continuous_animations=bool(getattr(self.config, "disable_continuous_animations", False)),
+            )
+            dlg.reopenInEditorRequested.connect(self._reopen_image_in_editor)
+            if hasattr(dlg, "pinEntryRequested"):
+                dlg.pinEntryRequested.connect(self._on_history_pin_entry_requested)
+            else:
+                dlg.pinImageRequested.connect(lambda im, title: self.pin_manager.create_pin(im, title=title))
+            dlg.openSettingsRequested.connect(lambda: self.open_settings(section="storage_privacy"))
+            if hasattr(dlg, "newCaptureRequested"):
+                dlg.newCaptureRequested.connect(self.trigger_snip)
+            self._history_window = dlg
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            return dlg
+
+        def _apply_accepted_settings(self, dlg: SettingsDialog) -> None:
+            dlg.apply_to_config()
+            self.hotkey_listener.update_hotkey(self.config.hotkey_str)
+            self.snip_action.setText(f"✦ Capture ({self.config.hotkey_str})")
+            self._update_tray_tooltip()
+            # Synchronize history store & pin manager with updated settings
+            self.history_store.privacy_mode = self.config.history_mode
+            self.history_store.max_items = max(10, int(self.config.history_max_items))
+            self.history_store.max_storage_mb = max(25, int(self.config.history_max_storage_mb))
+            self.history_store.max_age_days = max(0, int(self.config.history_retention_days))
+            self.history_store.enable_ocr_indexing = bool(self.config.history_index_ocr)
+            self.pin_manager.default_always_on_top = bool(self.config.pin_always_on_top)
+            self.pin_manager.default_show_border = bool(self.config.pin_show_border)
+            self.pin_manager.exclude_pins_from_capture = bool(self.config.pin_exclude_from_capture)
+            if self._history_window is not None and self._history_window.isVisible():
+                if hasattr(self._history_window, "apply_aqua_theme_and_config"):
+                    self._history_window.apply_aqua_theme_and_config(
+                        aqua_theme=getattr(self.config, "aqua_theme", "Bondi Blue"),
+                        animation_intensity=getattr(self.config, "animation_intensity", "high"),
+                        glass_transparency=float(getattr(self.config, "glass_transparency", 0.90)),
+                        safe_mode=bool(getattr(self.config, "is_safe_mode_active", False)),
+                        disable_continuous_animations=bool(getattr(self.config, "disable_continuous_animations", False)),
+                    )
+                self._history_window.refresh_gallery()
+            if self.overlay is not None and not self.overlay._closed:
+                self.overlay.on_config_updated()
+
+        def _on_settings_dialog_finished(self, result_code: int, dlg: SettingsDialog) -> None:
+            try:
+                if result_code == int(QDialog.DialogCode.Accepted):
+                    self._apply_accepted_settings(dlg)
+                elif self.overlay is not None and not self.overlay._closed:
+                    self.overlay.setFocus()
+            except Exception as exc:
+                DIAG_LOG.error("SETTINGS_CLOSE", "Settings save or close callback failed", exc)
+                self._message_box_log.append(("warning", "Prismwake Settings", str(exc)))
+            finally:
+                if self._active_settings_dialog is dlg:
+                    self._active_settings_dialog = None
+                self._settings_check_callback = None
+                try:
+                    dlg.cleanup_resources()
+                    dlg.deleteLater()
+                except Exception as exc:
+                    DIAG_LOG.error("SETTINGS_CLOSE", "Settings widget cleanup failed", exc)
+                AeroAnimationDirector.instance().notify_visibility_changed()
+
+        def open_settings(self, section: Optional[str] = None, *, modal: bool = False) -> Optional[SettingsDialog]:
+            """
+            Reliably open Prismwake's main SettingsDialog (or focus an already-open instance).
+            When `section='storage_privacy'` is passed (e.g. from Screenshot History), scrolls
+            directly to the Screenshot History & Storage Privacy card.
+            Never silently swallows exceptions.
+            """
+            if getattr(self, "_shutting_down", False):
+                return None
+            if self._active_settings_dialog is not None and self._active_settings_dialog.isVisible():
+                if section:
+                    self._active_settings_dialog.focus_section(section)
+                self._active_settings_dialog.show()
+                self._active_settings_dialog.raise_()
+                self._active_settings_dialog.activateWindow()
+                self._workflow_event_log.append(f"settings_focused:{section or 'general'}")
+                return self._active_settings_dialog
+
+            DIAG_LOG.log("SETTINGS", f"Opening SettingsDialog (section={section or 'general'})")
             parent_w = (
                 self.overlay
                 if (self.overlay is not None and self.overlay.isVisible())
-                else None
+                else (
+                    self._history_window
+                    if (self._history_window is not None and self._history_window.isVisible())
+                    else None
+                )
             )
-            dlg = SettingsDialog(self.config, parent=parent_w, controller=self)
             try:
+                dlg = SettingsDialog(self.config, parent=parent_w, controller=self)
+                if section:
+                    dlg.focus_section(section)
+                self._active_settings_dialog = dlg
+                self._workflow_event_log.append(f"settings_opened:{dlg.focused_section}")
+                if modal:
+                    try:
+                        dlg.raise_()
+                        dlg.activateWindow()
+                        res_code = dlg.exec()
+                    finally:
+                        self._on_settings_dialog_finished(int(res_code), dlg)
+                    return dlg
+                dlg.finished.connect(lambda code, d=dlg: self._on_settings_dialog_finished(int(code), d))
+                dlg.show()
                 dlg.raise_()
                 dlg.activateWindow()
-                if dlg.exec() == QDialog.DialogCode.Accepted:
-                    dlg.apply_to_config()
-                    self.hotkey_listener.update_hotkey(self.config.hotkey_str)
-                    self.snip_action.setText(
-                        f"✦ Take HDR Snip ({self.config.hotkey_str})"
-                    )
-                    self._update_tray_tooltip()
-                    if self.overlay is not None and not self.overlay._closed:
-                        self.overlay.on_config_updated()
-                elif self.overlay is not None and not self.overlay._closed:
-                    self.overlay.setFocus()
-            finally:
-                self._settings_check_callback = None
-                dlg.cleanup_resources()
-                dlg.deleteLater()
-                AeroAnimationDirector.instance().notify_visibility_changed()
+                return dlg
+            except Exception as exc:
+                DIAG_LOG.error("SETTINGS", "Failed to create or display SettingsDialog", exc)
+                self._message_box_log.append(("critical", f"{APP_NAME} — Settings Error", str(exc)))
+                QMessageBox.critical(
+                    parent_w,
+                    f"{APP_NAME} — Settings Error",
+                    f"Could not open the Settings window:\n\n{exc}",
+                )
+                return None
 
         def quit_app(self, *, skip_auto_update_on_exit: bool = False) -> None:
             # Note: Unattended deferred installation on application exit is intentionally
@@ -18742,9 +21012,32 @@ if HAS_QT:
             _ = skip_auto_update_on_exit
             self._shutting_down = True
             self._update_cancel_event.set()
+            for tok in list(getattr(self, "_history_ocr_cancel_tokens", [])):
+                try:
+                    tok.cancel()
+                except Exception:
+                    pass
+            if getattr(self, "_active_settings_dialog", None) is not None:
+                try:
+                    self._active_settings_dialog.close()
+                except Exception:
+                    pass
+                self._active_settings_dialog = None
+            if getattr(self, "_active_ocr_dialog", None) is not None:
+                try:
+                    self._active_ocr_dialog.cancel_recognition()
+                    self._active_ocr_dialog.close()
+                except Exception:
+                    pass
+                self._active_ocr_dialog = None
+            if hasattr(self, "history_store") and self.history_store is not None:
+                try:
+                    self.history_store.shutdown(timeout=0.6)
+                except Exception:
+                    pass
             if hasattr(self, "_update_periodic_timer"):
                 self._update_periodic_timer.stop()
-            DIAG_LOG.milestone("APP_SHUTDOWN", "Shutting down HDRSnip Fusion cleanly")
+            DIAG_LOG.milestone("APP_SHUTDOWN", "Shutting down Prismwake cleanly")
             self.hotkey_listener.stop()
             if self.overlay is not None:
                 self.overlay.cleanup_resources()
@@ -18770,6 +21063,832 @@ if HAS_QT:
 
 
 if HAS_QT:
+    PrismwakeApplication = HDRSnipFusionApplication
+else:
+    class _HeadlessRectF:
+        def __init__(self, x: float = 0.0, y: float = 0.0, w: float = 0.0, h: float = 0.0) -> None:
+            self._x = float(x)
+            self._y = float(y)
+            self._w = float(w)
+            self._h = float(h)
+
+        def normalized(self) -> "_HeadlessRectF":
+            nx = self._x if self._w >= 0 else self._x + self._w
+            ny = self._y if self._h >= 0 else self._y + self._h
+            return _HeadlessRectF(nx, ny, abs(self._w), abs(self._h))
+
+        def left(self) -> float:
+            return self._x
+
+        def top(self) -> float:
+            return self._y
+
+        def width(self) -> float:
+            return self._w
+
+        def height(self) -> float:
+            return self._h
+
+    class _HeadlessQtSig:
+        def __init__(self) -> None:
+            self._cbs: List[Callable[..., Any]] = []
+
+        def connect(self, cb: Callable[..., Any]) -> None:
+            if cb not in self._cbs:
+                self._cbs.append(cb)
+
+        def disconnect(self, cb: Optional[Callable[..., Any]] = None) -> None:
+            if cb is None:
+                self._cbs.clear()
+            elif cb in self._cbs:
+                self._cbs.remove(cb)
+
+        def emit(self, *args: Any) -> None:
+            for cb in list(self._cbs):
+                cb(*args)
+
+    class SnipOverlayWindow:  # type: ignore[no-redef]
+        """Headless-compatible SnipOverlayWindow mirroring the exact Qt signal and teardown workflow."""
+
+        def __init__(
+            self,
+            frame: CapturedFrame,
+            config: AppConfig,
+            t_trigger_start: Optional[float] = None,
+            *,
+            workflow_mode: Optional[str] = None,
+            candidate_windows: Optional[Sequence[DetectedWindowInfo]] = None,
+        ) -> None:
+            self.frame = frame
+            self.config = config
+            self._t_trigger_start = float(t_trigger_start or time.perf_counter())
+            self.overlay_closed = _HeadlessQtSig()
+            self.pin_requested = _HeadlessQtSig()
+            self.ocr_requested = _HeadlessQtSig()
+            self.capture_completed = _HeadlessQtSig()
+            self.delayed_capture_requested = _HeadlessQtSig()
+
+            self.capture_workflow_mode: str = normalize_capture_mode(
+                workflow_mode or getattr(config, "default_capture_mode", "region")
+            )
+            self.window_capture_controller = WindowCaptureSessionController(
+                monitor_rect=frame.virtual_rect,
+                dpi_scale=float(frame.monitor_dpi_scale or 1.0),
+                px_scale_x=1.0,
+                px_scale_y=1.0,
+                client_only=False,
+                use_dwm_bounds=bool(getattr(config, "window_capture_use_dwm_bounds", True)),
+                candidate_windows=candidate_windows,
+                exclude_pid=os.getpid(),
+            )
+            self.has_selection: bool = False
+            self.selection_rect: _HeadlessRectF = _HeadlessRectF()
+            self.interaction_mode: str = "none"
+            self.drag_start_pos: Tuple[float, float] = (0.0, 0.0)
+            self.annotations: List[AnnotationItem] = []
+            self.redo_stack: List[AnnotationItem] = []
+            self.current_annotation: Optional[AnnotationItem] = None
+            self.dragging_annotation: Optional[AnnotationItem] = None
+            self.active_handle: int = -1
+            self.current_tool: str = "select"
+            self.current_color: Tuple[int, int, int, int] = (0, 210, 255, 255)
+            self.current_thickness: int = 3
+            self._committed_annotations_dirty: bool = True
+            self._committed_cache_rebuild_count: int = 0
+            self._incremental_commit_count: int = 0
+            self._last_dirty_rect: Optional[Tuple[int, int, int, int]] = None
+            self._visible: bool = False
+            self._closed: bool = False
+            self._resources_released: bool = False
+            self._mouse_grabbed: bool = False
+            self._keyboard_grabbed: bool = False
+            self.message_boxes: List[Tuple[str, str, str]] = []
+            _LIVE_OVERLAY_INSTANCES.add(self)
+
+        def width(self) -> int:
+            return int(self.frame.full_width or self.frame.srgb_image.shape[1])
+
+        def height(self) -> int:
+            return int(self.frame.full_height or self.frame.srgb_image.shape[0])
+
+        def show_on_target_screen(self) -> None:
+            self._visible = True
+            self._mouse_grabbed = True
+            self._keyboard_grabbed = True
+
+        def isVisible(self) -> bool:
+            return self._visible and not self._closed
+
+        def hide(self) -> None:
+            self._visible = False
+
+        def releaseMouse(self) -> None:
+            self._mouse_grabbed = False
+
+        def releaseKeyboard(self) -> None:
+            self._keyboard_grabbed = False
+
+        def setFocus(self) -> None:
+            pass
+
+        def update(self, *_a: Any) -> None:
+            pass
+
+        def _reposition_toolbar(self) -> None:
+            pass
+
+        def set_capture_workflow_mode(self, mode: str) -> str:
+            norm = normalize_capture_mode(mode)
+            if norm == "delayed":
+                self.request_delayed_capture(max(3, int(getattr(self.config, "capture_delay_seconds", 3) or 3)), "region")
+                return "delayed"
+            prev_mode = self.capture_workflow_mode
+            self.capture_workflow_mode = norm
+            if norm == "fullscreen":
+                self.window_capture_controller.clear_locked_selection()
+                self.select_region(0, 0, float(self.width()), float(self.height()))
+            elif norm == "window":
+                if prev_mode != "window":
+                    self.has_selection = False
+                    self.selection_rect = _HeadlessRectF()
+                    self.window_capture_controller.clear_locked_selection()
+            else:
+                if prev_mode in ("fullscreen", "window"):
+                    self.window_capture_controller.clear_locked_selection()
+                    if prev_mode == "fullscreen":
+                        self.has_selection = False
+                        self.selection_rect = _HeadlessRectF()
+            return norm
+
+        def toggle_window_client_area_mode(self, checked: Optional[bool] = None) -> bool:
+            new_val = (not self.window_capture_controller.client_only) if checked is None else bool(checked)
+            self.window_capture_controller.set_client_only(new_val)
+            if self.window_capture_controller.locked_local_rect is not None and self.has_selection:
+                lx, ly, lw, lh = self.window_capture_controller.locked_local_rect
+                self.select_region(lx, ly, lw, lh)
+            return new_val
+
+        def hover_window_at(self, local_x: float, local_y: float) -> Optional[DetectedWindowInfo]:
+            res = self.window_capture_controller.update_hover_local(local_x, local_y)
+            return res[0] if res is not None else None
+
+        def click_window_at(self, local_x: float, local_y: float) -> Optional[DetectedWindowInfo]:
+            res = self.window_capture_controller.click_select_local(local_x, local_y)
+            if res is None:
+                return None
+            win, (lx, ly, lw, lh) = res
+            self.select_region(lx, ly, lw, lh)
+            return win
+
+        def request_delayed_capture(self, delay_seconds: int = 3, target_mode: Optional[str] = None) -> None:
+            eff_target = normalize_capture_mode(target_mode or self.capture_workflow_mode)
+            if eff_target == "delayed":
+                eff_target = "region"
+            sec = max(1, clamp_capture_delay_seconds(delay_seconds or 3))
+            self.hide()
+            self.close()
+            self.delayed_capture_requested.emit(sec, eff_target)
+
+        def select_region(self, x: float, y: float, w: float, h: float) -> None:
+            self.has_selection = True
+            self.selection_rect = _HeadlessRectF(x, y, w, h).normalized()
+
+        def simulate_region_drag(self, x0: float, y0: float, x1: float, y1: float) -> None:
+            """Simulate left-button press -> drag -> release on the capture overlay."""
+            self.has_selection = True
+            self.interaction_mode = "creating"
+            self.drag_start_pos = (float(x0), float(y0))
+            self.selection_rect = _HeadlessRectF(x0, y0, x1 - x0, y1 - y0).normalized()
+            self.mouseReleaseEvent(None)
+
+        def mouseReleaseEvent(self, _event: Any = None) -> None:
+            prev_interaction = self.interaction_mode
+            self.dragging_annotation = None
+            self.interaction_mode = "none"
+            self.active_handle = -1
+
+            if (
+                prev_interaction == "creating"
+                and getattr(self, "capture_workflow_mode", "region") == "ocr"
+                and self.has_selection
+            ):
+                sel_norm = self.selection_rect.normalized()
+                if sel_norm.width() >= 6.0 and sel_norm.height() >= 6.0:
+                    self.ocr_snip()
+                    return
+                else:
+                    self.has_selection = False
+                    self.selection_rect = _HeadlessRectF()
+                    return
+            self._reposition_toolbar()
+
+        def set_tool(self, tool_id: str) -> None:
+            self.current_tool = tool_id
+
+        def set_stroke_thickness(self, val: int) -> None:
+            self.current_thickness = max(1, min(28, int(val)))
+
+        def _compute_annotation_dirty_rect(self, ann: Optional[AnnotationItem]) -> Tuple[int, int, int, int]:
+            if ann is None:
+                return (0, 0, self.width(), self.height())
+            x0, y0, x1, y1 = ann.get_bounding_box()
+            ix0 = max(0, int(math.floor(x0)) - 12)
+            iy0 = max(0, int(math.floor(y0)) - 12)
+            ix1 = min(self.width(), int(math.ceil(x1)) + 12)
+            iy1 = min(self.height(), int(math.ceil(y1)) + 12)
+            return (ix0, iy0, max(1, ix1 - ix0), max(1, iy1 - iy0))
+
+        def _rebuild_committed_annotations_cache(self) -> None:
+            self._committed_annotations_dirty = False
+            self._committed_cache_rebuild_count += 1
+            PERF_TELEMETRY.record_committed_cache_rebuild()
+
+        def _commit_single_annotation_to_cache(self, ann: AnnotationItem) -> None:
+            if self._committed_annotations_dirty:
+                self._rebuild_committed_annotations_cache()
+                return
+            self._incremental_commit_count += 1
+            PERF_TELEMETRY.record_incremental_annotation_commit()
+            self._last_dirty_rect = self._compute_annotation_dirty_rect(ann)
+
+        def undo_annotation(self) -> None:
+            if self.annotations:
+                ann = self.annotations.pop()
+                self.redo_stack.append(ann)
+                self._committed_annotations_dirty = True
+                self._rebuild_committed_annotations_cache()
+                self._last_dirty_rect = self._compute_annotation_dirty_rect(ann)
+
+        def redo_annotation(self) -> None:
+            if self.redo_stack:
+                ann = self.redo_stack.pop()
+                self.annotations.append(ann)
+                self._commit_single_annotation_to_cache(ann)
+                self._last_dirty_rect = self._compute_annotation_dirty_rect(ann)
+
+        def simulate_pen_stroke(
+            self,
+            points: Sequence[Tuple[float, float]],
+            *,
+            tool_type: str = "pen",
+            color: Any = "#00D2FF",
+            thickness: Optional[int] = None,
+        ) -> Optional[AnnotationItem]:
+            pts = list(points)
+            if not pts:
+                return None
+            if self._committed_annotations_dirty:
+                self._rebuild_committed_annotations_cache()
+            th = int(thickness if thickness is not None else self.current_thickness)
+            if isinstance(color, (tuple, list)) and len(color) >= 3:
+                col_hex = f"#{int(color[0]):02X}{int(color[1]):02X}{int(color[2]):02X}"
+            else:
+                col_hex = str(color or "#00D2FF")
+            p0 = (float(pts[0][0]), float(pts[0][1]))
+            ann = AnnotationItem(
+                tool=tool_type if tool_type != "highlighter" else "pen",
+                color=col_hex,
+                thickness=th,
+                points=[p0],
+                blur_radius=12,
+                pixel_size=max(6, th * 3),
+            )
+            ann._cached_pts_bounds = (p0[0], p0[1], p0[0], p0[1])
+            ann._cached_pts_bounds_len = 1
+            self.current_annotation = ann
+            prev_pt = p0
+            for pt in pts[1:]:
+                t0 = time.perf_counter()
+                ann.append_stroke_point(pt[0], pt[1])
+                _ = ann.get_or_build_pen_path()
+                pad = max(20, int(th * 3) + 14)
+                sx0 = max(0, int(min(prev_pt[0], pt[0])) - pad)
+                sy0 = max(0, int(min(prev_pt[1], pt[1])) - pad)
+                sx1 = min(self.width(), int(max(prev_pt[0], pt[0])) + pad)
+                sy1 = min(self.height(), int(max(prev_pt[1], pt[1])) + pad)
+                dw = max(1, sx1 - sx0)
+                dh = max(1, sy1 - sy0)
+                self._last_dirty_rect = (sx0, sy0, dw, dh)
+                PERF_TELEMETRY.record_annotation_move(
+                    (time.perf_counter() - t0) * 1000.0,
+                    dirty_area_px=dw * dh,
+                    total_area_px=max(1, self.width() * self.height()),
+                )
+                prev_pt = (float(pt[0]), float(pt[1]))
+            self.annotations.append(ann)
+            self.redo_stack.clear()
+            self._commit_single_annotation_to_cache(ann)
+            self.current_annotation = None
+            return ann
+
+        def render_final_cropped_pixmap(self) -> Image.Image:
+            arr = self.frame.srgb_image
+            ih, iw = arr.shape[:2]
+            full_sub = np.ascontiguousarray(arr[:, :, :3].copy())
+            if self.has_selection and self.selection_rect.normalized().width() > 2:
+                r = self.selection_rect.normalized()
+                x0 = max(0, min(iw - 1, int(round(r.left()))))
+                y0 = max(0, min(ih - 1, int(round(r.top()))))
+                x1 = max(x0 + 1, min(iw, int(round(r.left() + r.width()))))
+                y1 = max(y0 + 1, min(ih, int(round(r.top() + r.height()))))
+                crop_rc = (x0, y0, x1 - x0, y1 - y0)
+            else:
+                crop_rc = (0, 0, iw, ih)
+            if self.annotations:
+                comp_rgb, _alpha = composite_annotations_pil(
+                    full_sub,
+                    self.annotations,
+                    crop_rect=crop_rc,
+                    px_scale_x=1.0,
+                    px_scale_y=1.0,
+                )
+                return Image.fromarray(comp_rgb, mode="RGB")
+            cx, cy, cw, ch = crop_rc
+            sub = np.ascontiguousarray(full_sub[cy : cy + ch, cx : cx + cw, :3].copy())
+            return Image.fromarray(sub, mode="RGB")
+
+        def pin_snip(self) -> bool:
+            if self._closed:
+                return False
+            sel_norm = self.selection_rect.normalized() if self.has_selection else _HeadlessRectF()
+            if not self.has_selection or sel_norm.width() < 4.0 or sel_norm.height() < 4.0:
+                self.message_boxes.append((
+                    "information",
+                    f"{APP_NAME} — Select a Region to Pin",
+                    "Please drag a selection box around the area you want to pin first.",
+                ))
+                return False
+            pix = self.render_final_cropped_pixmap().copy()
+            gx = int(sel_norm.left())
+            gy = int(sel_norm.top())
+            wf_mode = getattr(self, "capture_workflow_mode", "region")
+            self.releaseMouse()
+            self.releaseKeyboard()
+            self.hide()
+            self.close()
+            self.pin_requested.emit(pix, gx, gy)
+            self.capture_completed.emit(pix, wf_mode, "")
+            return True
+
+        def ocr_snip(self) -> bool:
+            if self._closed:
+                return False
+            sel_norm = self.selection_rect.normalized() if self.has_selection else _HeadlessRectF()
+            if not self.has_selection or sel_norm.width() < 4.0 or sel_norm.height() < 4.0:
+                DIAG_LOG.warning("OCR_SNIP", "User clicked Text (OCR) without an active selection region.")
+                self.message_boxes.append((
+                    "information",
+                    f"{APP_NAME} — Select a Region for OCR",
+                    "Please drag a selection box around the text you want to recognize first.",
+                ))
+                return False
+            pix = self.render_final_cropped_pixmap().copy()
+            gx = int(round(sel_norm.left()))
+            gy = int(round(sel_norm.top()))
+            gw = max(1, int(round(sel_norm.width())))
+            gh = max(1, int(round(sel_norm.height())))
+            self._last_ocr_selection_rect = (gx, gy, gw, gh)
+            vx, vy, vw, vh = self.frame.virtual_rect
+            self._last_ocr_screen_available_rect = (int(vx), int(vy), max(1, int(vw)), max(1, int(vh)))
+            self.releaseMouse()
+            self.releaseKeyboard()
+            self.hide()
+            self.close()
+            self.capture_completed.emit(pix, "ocr", "")
+            self.ocr_requested.emit(pix)
+            return True
+
+        def cleanup_resources(self) -> int:
+            if self._resources_released:
+                return 0
+            self._closed = True
+            self._visible = False
+            self._resources_released = True
+            self.annotations.clear()
+            self.redo_stack.clear()
+            return self.frame.release_buffers()
+
+        def close(self) -> None:
+            self._visible = False
+            self.cleanup_resources()
+            self.overlay_closed.emit(self)
+
+    class HDRSnipFusionApplication:  # type: ignore[no-redef]
+        """Headless-compatible Prismwake application controller for automated workflow & OCR verification."""
+
+        def __init__(
+            self,
+            *,
+            config: Optional[AppConfig] = None,
+            history_root: Optional[Path] = None,
+            synthetic_screen_image: Optional[Any] = None,
+        ) -> None:
+            self.config = config or AppConfig.load()
+            self.overlay: Optional[SnipOverlayWindow] = None
+            self._snip_in_progress: bool = False
+            self._shutting_down: bool = False
+            self._active_ocr_dialog: Optional[Any] = None
+            self._last_ocr_selection_rect: Optional[Tuple[int, int, int, int]] = None
+            self._last_ocr_available_geometry: Optional[Tuple[int, int, int, int]] = None
+            self._ocr_toast_log: List[str] = []
+            self._history_window: Optional[Any] = None
+            self._active_countdown_overlay: Optional[Any] = None
+            self._history_ocr_cancel_tokens: List[Any] = []
+            self._workflow_event_log: List[str] = []
+            self._message_box_log: List[Tuple[str, str, str]] = []
+            self._synthetic_screen_image = synthetic_screen_image
+
+            hist_root = (
+                Path(history_root)
+                if history_root is not None
+                else (
+                    Path(self.config.history_directory).expanduser()
+                    if str(self.config.history_directory or "").strip()
+                    else get_default_history_root()
+                )
+            )
+            self.history_store = ScreenshotHistoryStore(
+                hist_root,
+                privacy_mode=self.config.history_mode,
+                max_items=self.config.history_max_items,
+                max_storage_mb=self.config.history_max_storage_mb,
+                max_age_days=self.config.history_retention_days,
+                enable_ocr_indexing=self.config.history_index_ocr,
+            )
+            self.pin_manager = PinnedScreenshotManager(
+                default_opacity_pct=self.config.pin_default_opacity_pct,
+                default_zoom_pct=self.config.pin_default_zoom_pct,
+                default_always_on_top=self.config.pin_always_on_top,
+                default_show_border=self.config.pin_show_border,
+                exclude_pins_from_capture=self.config.pin_exclude_from_capture,
+                reopen_in_editor_callback=self._reopen_image_in_editor,
+            )
+            self.validate_ocr_subsystem_at_startup()
+
+        def validate_ocr_subsystem_at_startup(self) -> Tuple[bool, str]:
+            if OCR_IMPORT_ERROR:
+                DIAG_LOG.error("OCR_STARTUP", f"Offline OCR module failed to import:\n{OCR_IMPORT_ERROR}")
+                return False, OCR_IMPORT_ERROR
+            try:
+                status = query_ocr_engine_status(allow_builtin_fallback=False)
+                if status.available:
+                    DIAG_LOG.milestone("OCR_STARTUP", status.status_summary)
+                    return True, status.status_summary
+                DIAG_LOG.warning("OCR_STARTUP", status.status_summary)
+                return False, status.status_summary
+            except Exception as exc:
+                DIAG_LOG.error("OCR_STARTUP", "Failed to query OCR engine status at startup", exc)
+                return False, str(exc)
+
+        def get_top_level_tray_menu_labels(self) -> List[str]:
+            return [
+                f"✦ Capture ({self.config.hotkey_str})",
+                f"🗂 History ({self.config.history_hotkey_str})",
+                "⚙ Settings...",
+                "Open Screenshots Folder",
+                f"Check for Updates... (v{APP_VERSION})",
+                "Pinned & Diagnostics",
+                f"Exit {APP_NAME}",
+            ]
+
+        def _wire_overlay_signals(self, overlay: Any) -> None:
+            if overlay is None or getattr(overlay, "_controller_signals_wired", False):
+                return
+            overlay._controller_signals_wired = True
+            overlay.overlay_closed.connect(self._on_overlay_closed)
+            overlay.pin_requested.connect(self._on_overlay_pin_requested)
+            overlay.ocr_requested.connect(self._on_overlay_ocr_requested)
+            overlay.capture_completed.connect(self._on_overlay_capture_completed)
+            if hasattr(overlay, "delayed_capture_requested"):
+                overlay.delayed_capture_requested.connect(self.trigger_delayed_capture)
+
+        def _on_overlay_closed(self, closed_overlay: object) -> None:
+            self._workflow_event_log.append("overlay_closed")
+            sel_rect = getattr(closed_overlay, "_last_ocr_selection_rect", None)
+            avail_rect = getattr(closed_overlay, "_last_ocr_screen_available_rect", None)
+            if sel_rect is not None:
+                self._last_ocr_selection_rect = sel_rect
+            if avail_rect is not None:
+                self._last_ocr_available_geometry = avail_rect
+            if self.overlay is closed_overlay:
+                self.overlay = None
+
+        def _build_captured_frame(self) -> CapturedFrame:
+            if self._synthetic_screen_image is not None:
+                if isinstance(self._synthetic_screen_image, Image.Image):
+                    arr = np.ascontiguousarray(np.asarray(self._synthetic_screen_image.convert("RGB"), dtype=np.uint8))
+                else:
+                    arr = np.ascontiguousarray(np.asarray(self._synthetic_screen_image, dtype=np.uint8)[:, :, :3])
+            else:
+                arr = np.full((360, 640, 3), 255, dtype=np.uint8)
+            h, w, _ = arr.shape
+            return CapturedFrame(
+                srgb_image=arr,
+                raw_scrgb_float=None,
+                detected_white_scale=1.0,
+                virtual_rect=(0, 0, w, h),
+                is_hdr_surface=False,
+                full_width=w,
+                full_height=h,
+            )
+
+        def trigger_snip(
+            self,
+            t_trigger: Any = None,
+            *,
+            workflow_mode: Optional[str] = None,
+            candidate_windows: Optional[Sequence[DetectedWindowInfo]] = None,
+        ) -> None:
+            if self._shutting_down or self._snip_in_progress:
+                return
+            if self.overlay is not None:
+                if self.overlay.isVisible():
+                    return
+                self.overlay.cleanup_resources()
+                self.overlay = None
+            self._snip_in_progress = True
+            eff_mode = normalize_capture_mode(
+                workflow_mode or getattr(self.config, "default_capture_mode", "region")
+            )
+            hidden_pins = self.pin_manager.prepare_for_desktop_capture()
+            try:
+                eff_candidates = (
+                    candidate_windows
+                    if candidate_windows is not None
+                    else getattr(self, "_mock_candidate_windows", None)
+                )
+                pre_windows = enumerate_capturable_windows(
+                    exclude_pid=os.getpid(),
+                    mock_windows=eff_candidates,
+                    use_dwm_bounds=bool(getattr(self.config, "window_capture_use_dwm_bounds", True)),
+                )
+                frame = self._build_captured_frame()
+                self.overlay = SnipOverlayWindow(
+                    frame,
+                    self.config,
+                    t_trigger_start=t_trigger,
+                    workflow_mode=eff_mode,
+                    candidate_windows=pre_windows,
+                )
+                self.overlay.set_capture_workflow_mode(eff_mode)
+                self._wire_overlay_signals(self.overlay)
+                self.overlay.show_on_target_screen()
+                self._workflow_event_log.append(f"overlay_opened:{eff_mode}")
+            finally:
+                self.pin_manager.restore_after_desktop_capture(hidden_pins)
+                self._snip_in_progress = False
+
+        def trigger_capture_mode(self, mode: str = "region") -> None:
+            norm_mode = normalize_capture_mode(mode)
+            self._execute_immediate_capture(norm_mode)
+
+        def trigger_delayed_capture(self, delay_seconds: int, target_mode: str = "region") -> None:
+            self._workflow_event_log.append(f"delayed_capture:{delay_seconds}:{target_mode}")
+            self._execute_immediate_capture(target_mode)
+
+        def _execute_immediate_capture(self, mode: str = "region") -> None:
+            self.trigger_snip(workflow_mode=mode)
+
+        def _on_overlay_pin_requested(self, pixmap: Any, gx: int, gy: int) -> None:
+            self.pin_manager.create_pin(pixmap, title="Pinned Screenshot", initial_x=gx, initial_y=gy)
+
+        def _show_ocr_auto_copy_acknowledgement(self, notice: str) -> None:
+            msg = str(notice or "Recognized text copied to clipboard.")
+            self._ocr_toast_log.append(msg)
+            DIAG_LOG.log("OCR_AUTO_COPY", msg)
+
+        def _on_overlay_ocr_requested(self, pixmap: Any) -> None:
+            sel_rect = getattr(self.overlay, "_last_ocr_selection_rect", None) if self.overlay is not None else None
+            avail_rect = getattr(self.overlay, "_last_ocr_screen_available_rect", None) if self.overlay is not None else None
+            if sel_rect is not None:
+                self._last_ocr_selection_rect = sel_rect
+            if avail_rect is not None:
+                self._last_ocr_available_geometry = avail_rect
+            # Verify overlay is already hidden & closed before opening OCR dialog
+            if self.overlay is not None and self.overlay.isVisible():
+                self.overlay.hide()
+                self.overlay.close()
+            detached_img = pixmap.copy() if hasattr(pixmap, "copy") else pixmap
+            self._open_ocr_results_dialog(
+                detached_img,
+                selection_rect=self._last_ocr_selection_rect,
+                available_geometry=self._last_ocr_available_geometry,
+            )
+
+        def _open_ocr_results_dialog(
+            self,
+            image_source: Any,
+            *,
+            selection_rect: Optional[Tuple[int, int, int, int]] = None,
+            available_geometry: Optional[Tuple[int, int, int, int]] = None,
+        ) -> Any:
+            if self._shutting_down:
+                return None
+            if OCR_IMPORT_ERROR or _OcrResultsDialog is None:
+                err_detail = OCR_IMPORT_ERROR or "OcrResultsDialog component is None."
+                DIAG_LOG.error("OCR_DIALOG", f"Failed to open OCR results window:\n{err_detail}")
+                self._message_box_log.append((
+                    "critical",
+                    f"{APP_NAME} — Offline OCR Error",
+                    f"The Offline Text Recognition (OCR) subsystem could not be initialized:\n\n{err_detail}",
+                ))
+                return None
+
+            if self._active_ocr_dialog is not None:
+                try:
+                    self._active_ocr_dialog.cancel_recognition()
+                    self._active_ocr_dialog.close()
+                    self._active_ocr_dialog.deleteLater()
+                except Exception:
+                    pass
+                self._active_ocr_dialog = None
+
+            eff_sel = selection_rect if selection_rect is not None else self._last_ocr_selection_rect
+            eff_avail = available_geometry if available_geometry is not None else self._last_ocr_available_geometry
+
+            dlg = _OcrResultsDialog(
+                image_source,
+                default_language=self.config.ocr_language,
+                quality_mode=getattr(self.config, "ocr_quality_mode", "auto"),
+                auto_copy_on_complete=self.config.ocr_auto_copy_text,
+                show_panel_after_auto_copy=getattr(self.config, "ocr_show_panel_after_auto_copy", True),
+                auto_invert_dark=self.config.ocr_auto_invert_dark,
+                upscale_small_text=self.config.ocr_upscale_small_text,
+                theme_spec=AQUA_THEMES.get(self.config.aqua_theme),
+                aqua_theme=self.config.aqua_theme,
+                animation_intensity=self.config.effective_animation_intensity,
+                reduced_motion=self.config.effective_animations_disabled,
+                selection_rect=eff_sel,
+                available_geometry=eff_avail,
+                on_auto_copy_toast=self._show_ocr_auto_copy_acknowledgement,
+            )
+            dlg.finished.connect(lambda _res, d=dlg: self._on_ocr_dialog_closed(d))
+            self._workflow_event_log.append("ocr_dialog_opened")
+            if not getattr(dlg, "_is_closing", False):
+                self._active_ocr_dialog = dlg
+                dlg.present_in_front()
+            else:
+                self._active_ocr_dialog = None
+            return dlg
+
+        def _on_ocr_dialog_closed(self, closed_dlg: Any) -> None:
+            if self._active_ocr_dialog is closed_dlg:
+                self._active_ocr_dialog = None
+            try:
+                closed_dlg.cancel_recognition()
+                closed_dlg.deleteLater()
+            except Exception:
+                pass
+
+        def _on_overlay_capture_completed(self, pixmap: Any, capture_mode: str, saved_path_str: str) -> None:
+            ext_path = Path(saved_path_str) if saved_path_str else None
+            entry = self.history_store.record_capture(
+                pixmap,
+                capture_mode=capture_mode,
+                external_save_path=ext_path,
+                was_saved_or_copied=True,
+                ocr_indexer=None,
+            )
+            if (
+                entry is not None
+                and self.config.history_index_ocr
+                and not self._shutting_down
+            ):
+                tok = OcrCancellationToken()
+                self._history_ocr_cancel_tokens.append(tok)
+                lang = self.config.ocr_language
+
+                def _bg_ocr_runner(pil_im: Image.Image) -> str:
+                    try:
+                        if tok.is_cancelled or self._shutting_down:
+                            return ""
+                        res = recognize_production_ocr(
+                            pil_im,
+                            language=lang,
+                            quality_mode=getattr(self.config, "ocr_quality_mode", "auto"),
+                            allow_builtin_fallback=False,
+                            cancel_token=tok,
+                        )
+                        return res.text if res.ok else ""
+                    finally:
+                        try:
+                            self._history_ocr_cancel_tokens.remove(tok)
+                        except ValueError:
+                            pass
+
+                self.history_store.enqueue_async_ocr_indexing(
+                    entry.capture_id,
+                    pixmap,
+                    _bg_ocr_runner,
+                )
+
+        def _reopen_image_in_editor(self, pil_img: Image.Image, title: str = "") -> None:
+            rgb_arr = np.ascontiguousarray(np.asarray(pil_img.convert("RGB"), dtype=np.uint8))
+            h, w, _ = rgb_arr.shape
+            synthetic_frame = CapturedFrame(
+                srgb_image=rgb_arr,
+                raw_scrgb_float=None,
+                detected_white_scale=1.0,
+                virtual_rect=(0, 0, w, h),
+                is_hdr_surface=False,
+                full_width=w,
+                full_height=h,
+            )
+            self.overlay = SnipOverlayWindow(synthetic_frame, self.config)
+            self._wire_overlay_signals(self.overlay)
+            self.overlay.select_region(0.0, 0.0, float(w), float(h))
+            self.overlay.show_on_target_screen()
+
+        def _on_history_pin_entry_requested(self, pil_img: Image.Image, title: str, capture_id: str) -> None:
+            if capture_id:
+                self.pin_manager.pin_or_focus(pil_img, source_key=capture_id, title=title)
+            else:
+                self.pin_manager.create_pin(pil_img, title=title)
+
+        def open_history_window(self) -> Any:
+            if _HistoryWindow is None:
+                return None
+            if self._history_window is not None and self._history_window.isVisible():
+                if hasattr(self._history_window, "apply_aqua_theme_and_config"):
+                    self._history_window.apply_aqua_theme_and_config(
+                        aqua_theme=getattr(self.config, "aqua_theme", "Bondi Blue"),
+                        animation_intensity=getattr(self.config, "animation_intensity", "high"),
+                        glass_transparency=float(getattr(self.config, "glass_transparency", 0.90)),
+                        safe_mode=bool(getattr(self.config, "is_safe_mode_active", False)),
+                        disable_continuous_animations=bool(getattr(self.config, "disable_continuous_animations", False)),
+                    )
+                self._history_window.refresh_gallery()
+                return self._history_window
+            dlg = _HistoryWindow(
+                self.history_store,
+                ocr_runner=lambda im: recognize_production_ocr(
+                    im,
+                    language=self.config.ocr_language,
+                    quality_mode=getattr(self.config, "ocr_quality_mode", "auto"),
+                    allow_builtin_fallback=False,
+                ).text,
+                aqua_theme=getattr(self.config, "aqua_theme", "Bondi Blue"),
+                animation_intensity=getattr(self.config, "animation_intensity", "high"),
+                glass_transparency=float(getattr(self.config, "glass_transparency", 0.90)),
+                safe_mode=bool(getattr(self.config, "is_safe_mode_active", False)),
+                disable_continuous_animations=bool(getattr(self.config, "disable_continuous_animations", False)),
+            )
+            dlg.reopenInEditorRequested.connect(self._reopen_image_in_editor)
+            if hasattr(dlg, "pinEntryRequested"):
+                dlg.pinEntryRequested.connect(self._on_history_pin_entry_requested)
+            else:
+                dlg.pinImageRequested.connect(lambda im, title: self.pin_manager.create_pin(im, title=title))
+            dlg.openSettingsRequested.connect(lambda: self.open_settings(section="storage_privacy"))
+            if hasattr(dlg, "newCaptureRequested"):
+                dlg.newCaptureRequested.connect(self.trigger_snip)
+            self._history_window = dlg
+            dlg.show()
+            return dlg
+
+        def open_settings(self, section: Optional[str] = None, *, modal: bool = False) -> Any:
+            _ = modal
+            norm = str(section or "general").strip().lower()
+            existing = getattr(self, "_active_settings_dialog", None)
+            if existing is not None and getattr(existing, "is_visible", False):
+                existing.focused_section = norm
+                self._workflow_event_log.append(f"settings_focused:{norm}")
+                return existing
+            dlg = type(
+                "HeadlessSettingsDialog",
+                (),
+                {
+                    "config": self.config,
+                    "focused_section": norm,
+                    "is_visible": True,
+                    "isVisible": lambda s: s.is_visible,
+                    "focus_section": lambda s, sec: setattr(s, "focused_section", str(sec or "general")) or s.focused_section,
+                    "close": lambda s: setattr(s, "is_visible", False),
+                },
+            )()
+            self._active_settings_dialog = dlg
+            self._workflow_event_log.append(f"settings_opened:{norm}")
+            return dlg
+
+        def quit_app(self, *, skip_auto_update_on_exit: bool = False) -> None:
+            _ = skip_auto_update_on_exit
+            self._shutting_down = True
+            for tok in list(self._history_ocr_cancel_tokens):
+                try:
+                    tok.cancel()
+                except Exception:
+                    pass
+            if self._active_ocr_dialog is not None:
+                try:
+                    self._active_ocr_dialog.cancel_recognition()
+                    self._active_ocr_dialog.close()
+                except Exception:
+                    pass
+                self._active_ocr_dialog = None
+            if self.overlay is not None:
+                self.overlay.cleanup_resources()
+                self.overlay = None
+            self.history_store.shutdown(timeout=0.6)
+
     PrismwakeApplication = HDRSnipFusionApplication
 
 
@@ -18830,6 +21949,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return 2
         print(f"{APP_NAME} v{APP_VERSION} (formerly {LEGACY_APP_NAME})")
         return 0
+
+    # 2b. Offline OCR bundle verification (`--verify-ocr-bundle` / `--write-ocr-verify-file <path>`)
+    #     Executes the production OCR self-test (RapidOCR neural + Tesseract fallback + cache-cleared offline check).
+    ocr_verify_file_arg = _extract_cli_option_value(args, "--write-ocr-verify-file")
+    if "--verify-ocr-bundle" in args or "--verify-neural-ocr" in args or ocr_verify_file_arg is not None:
+        require_neural = (
+            "--require-neural" in args
+            or "--verify-neural-ocr" in args
+            or os.environ.get("PRISMWAKE_REQUIRE_NEURAL_OCR", "").strip().lower() in ("1", "true", "yes")
+        )
+        full_report = verify_packaged_ocr_launch(require_neural=require_neural)
+        if not require_neural:
+            ok_legacy, msg_legacy = verify_packaged_tesseract_launch()
+            ok_ocr = bool(ok_legacy and full_report.get("ok", True))
+            msg_ocr = f"{msg_legacy} | {full_report.get('message', '')}"
+        else:
+            ok_ocr = bool(full_report.get("ok", False))
+            msg_ocr = str(full_report.get("message", ""))
+        if ocr_verify_file_arg:
+            try:
+                payload = dict(full_report)
+                payload.update(
+                    {
+                        "ok": bool(ok_ocr),
+                        "message": str(msg_ocr),
+                        "version": APP_VERSION,
+                        "packaged": is_packaged_exe(),
+                    }
+                )
+                write_atomic_json_file(Path(ocr_verify_file_arg), payload)
+            except Exception as exc:
+                DIAG_LOG.error("OCR_BUNDLE_CHECK", f"Failed to write OCR verify file {ocr_verify_file_arg}", exc)
+                return 3
+        print(msg_ocr)
+        return 0 if ok_ocr else 3
 
     # 3. Early out-of-process staged updater helper mode (exits before Qt/hotkey/mutex init)
     if len(args) >= 2 and args[0] == "--apply-staged-update":

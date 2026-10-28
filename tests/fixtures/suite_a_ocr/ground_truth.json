@@ -1,0 +1,86 @@
+[
+  {
+    "fixture_id": "windows_light_ui",
+    "file": "windows_light_ui.png",
+    "category": "Ordinary Windows UI (Light)",
+    "description": "Dark text on light background, multiline with punctuation and numbers.",
+    "ground_truth": "Prismwake v0.2.0: Catch the light!\nHDR Framebuffer: 3840x2160 @ 280 nits"
+  },
+  {
+    "fixture_id": "windows_dark_ui",
+    "file": "windows_dark_ui.png",
+    "category": "Dark Theme UI",
+    "description": "Light text on dark background with underscores and hex code.",
+    "ground_truth": "DXGI_ERROR_DEVICE_REMOVED (0x887A0005)"
+  },
+  {
+    "fixture_id": "small_antialiased_code",
+    "file": "small_antialiased_code.png",
+    "category": "Small Antialiased Code (Upscaling)",
+    "description": "Downscaled 8-9px antialiased code line where adaptive upscaling improves accuracy.",
+    "ground_truth": "def capture_hdr(nits=203): return True"
+  },
+  {
+    "fixture_id": "game_menu_with_icons",
+    "file": "game_menu_with_icons.png",
+    "category": "Game Menu with Icons (Pattern A)",
+    "description": "Vertical game menu with left-side icons next to labels.",
+    "ground_truth": "Invite Friends\nPeople\nSettings\nReport\nSwitch avatar\nShop\nFriends chat"
+  },
+  {
+    "fixture_id": "stylized_sign_sell_logs",
+    "file": "stylized_sign_sell_logs.png",
+    "category": "Stylized Sign with Decorations (Pattern B)",
+    "description": "Stylized bold SELL LOGS sign with left/right decorative marks that caused 'I SELLLOGS @'.",
+    "ground_truth": "SELL LOGS"
+  },
+  {
+    "fixture_id": "usernames_mixed_case",
+    "file": "usernames_mixed_case.png",
+    "category": "Usernames & Mixed Case",
+    "description": "CamelCase username on dark background preserved without dictionary mangling.",
+    "ground_truth": "All From CallMeCarsonLIVE"
+  },
+  {
+    "fixture_id": "gradient_antialiased_banner",
+    "file": "gradient_antialiased_banner.png",
+    "category": "Gradient Background",
+    "description": "Thin antialiased text across a steep horizontal background gradient.",
+    "ground_truth": "Subtle gradient preserves antialiased strokes"
+  },
+  {
+    "fixture_id": "faint_low_contrast_watermark",
+    "file": "faint_low_contrast_watermark.png",
+    "category": "Low-Contrast Faint Text",
+    "description": "Faint text only 14 levels darker than an uneven illumination gradient.",
+    "ground_truth": "Faint serial key: PW-9042-X7B"
+  },
+  {
+    "fixture_id": "threshold_harm_antialiased",
+    "file": "threshold_harm_antialiased.png",
+    "category": "Threshold Harm Prevention",
+    "description": "Soft gray antialiased label beside a dark sidebar where global thresholding erases text.",
+    "ground_truth": "Antialiased secondary label 2026"
+  },
+  {
+    "fixture_id": "inversion_harm_slate_surface",
+    "file": "inversion_harm_slate_surface.png",
+    "category": "Inversion Harm Prevention",
+    "description": "Dark text on medium-slate card (median < 118) with bright frame where naive global inversion fails.",
+    "ground_truth": "Surface Polarity: Dark Ink On Slate"
+  },
+  {
+    "fixture_id": "inversion_help_dark_pill_in_light",
+    "file": "inversion_help_dark_pill_in_light.png",
+    "category": "Selective Local Inversion",
+    "description": "Light text on dark HUD badge inside bright surround (median > 118).",
+    "ground_truth": "FPS: 144 | GPU: 68C | HDR ON"
+  },
+  {
+    "fixture_id": "isoluminant_rgb_alert",
+    "file": "isoluminant_rgb_alert.png",
+    "category": "Original RGB / Chromatic Contrast",
+    "description": "Red text on green-teal background of identical Rec.709 luminance.",
+    "ground_truth": "Chroma Alert: Shield Critical 15%"
+  }
+]

@@ -1,0 +1,67 @@
+{
+  "real_win11_explorer_search": {
+    "category": "Real Screenshot Crop (Win11 Explorer)",
+    "description": "Unmodified pixel crop of Windows 11 File Explorer search input from image_3490dc.png.",
+    "ground_truth": "Search Downloads"
+  },
+  "real_win11_preview_warning": {
+    "category": "Real Screenshot Crop (Win11 Preview Banner)",
+    "description": "Unmodified pixel crop of Windows 11 preview banner from image_3490dc.png (50KB vs 5OKB).",
+    "ground_truth": "This file is too big to preview.\nMax file size: 50KB"
+  },
+  "real_code_python_imports": {
+    "category": "Real Screenshot Crop (Syntax-Highlighted Code)",
+    "description": "Unmodified pixel crop of 5-line Python import block from image_da5e16.png.",
+    "ground_truth": "from __future__ import annotations\nimport ctypes\nfrom ctypes import wintypes\nfrom datetime import datetime\nimport gc"
+  },
+  "real_dark_titlebar_compressed": {
+    "category": "Real Screenshot Crop (Compressed Dark Titlebar)",
+    "description": "Unmodified pixel crop of low-resolution compressed window titlebar from image_da5e16.png.",
+    "ground_truth": "Hdrsnipfusion Gemini Safer"
+  },
+  "unseen_prose_leading_I_A_O": {
+    "category": "Held-Out Prose (Leading I / A / O)",
+    "description": "Multi-line prose beginning with legitimate single-letter words I, A, and O.",
+    "ground_truth": "I agree to the terms\nA wooden sign ahead\nO Captain My Captain"
+  },
+  "unseen_markdown_pipe_table": {
+    "category": "Held-Out Table (Leading & Interior Pipes)",
+    "description": "Monospace table rows with leading, interior, and trailing pipe delimiters.",
+    "ground_truth": "| Player | Ping | Status |\n| Shadow | 18ms | READY |"
+  },
+  "unseen_bordered_icon_menu": {
+    "category": "Held-Out Bordered Menu with Circular Icons",
+    "description": "3-row bordered dark-theme menu with circular left-margin icons and Open/Audio/Quit labels.",
+    "ground_truth": "Open Folder\nAudio Options\nQuit Match"
+  },
+  "unseen_shell_and_metadata": {
+    "category": "Held-Out Shell Pipe & Bracket Metadata",
+    "description": "Shell command pipe, email address, and version bracket tag.",
+    "ground_truth": "cat app.log | grep ERROR\ncontact: dev@prismwake.io [v0.2.0]"
+  },
+  "unseen_cyan_five_buttons_menu": {
+    "category": "Held-Out Cyan 5-Button Menu (Native Scale)",
+    "description": "Native-resolution 5-button bright-cyan rounded pill menu with left icons over 3D scene background (modeled on unoccluded native geometry in Screenshot B).",
+    "ground_truth": "Report Bug / Request Feature\nJoin us on Discord\nSteam Workshop\nVideo Tutorials\nMerch Store"
+  },
+  "unseen_tall_sidebar_game_list": {
+    "category": "Held-Out Tall Multi-Entry Sidebar Menu (15 Lines)",
+    "description": "Tall, narrow 15-line game library sidebar with 16x16 colored left icons, highlighted active row, and right-hand 3D viewport strip.",
+    "ground_truth": "FAVORITES (14)\nHollow Knight\nCeleste\nStardew Valley\nSubnautica\nTerraria\nDead Cells\nHades II\nPortal 2\nFactorio\nOuter Wilds\nSlay the Spire\nBalatro\nRisk of Rain 2\nDeep Rock Galactic"
+  },
+  "unseen_vivid_colored_pills_menu": {
+    "category": "Held-Out Multi-Color Vivid Pills with Icons",
+    "description": "Four vivid colored rounded buttons (emerald, royal blue, crimson, amber) with left white icons and white labels.",
+    "ground_truth": "Quick Match\nCustom Server\nLoadout Editor\nQuit to Desktop"
+  },
+  "unseen_tiny_colored_badges_hud": {
+    "category": "Held-Out Tiny Text on Colored Background",
+    "description": "Small 11px HUD status bar with pipe separators on deep blue background.",
+    "ground_truth": "PING: 24ms | LOSS: 0% | REGION: EU-WEST"
+  },
+  "unseen_four_pill_game_hud": {
+    "category": "Held-Out 4-Pill Game HUD (2x2 Colored Pills + Icons)",
+    "description": "Four labeled HUD pills ($3,020, +75% NEXT CUSTOMER, CLOSED, 3 days) on mixed colored gradient backgrounds with icons and dark outlines over a 3D game scene.",
+    "ground_truth": "$3,020\n+75% NEXT CUSTOMER\nCLOSED\n3 days"
+  }
+}

@@ -1,225 +1,297 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="google-site-verification" content="iuPKEcffbqYl1JJVl-o-oTPcG6KzTISQYFHipFWzvV4">
-  <title>Prismwake | HDR screenshots with a splash of Aqua</title>
-  <meta name="description" content="Meet Prismwake, a free Windows HDR screenshot tool with region capture, annotations, and retro-futuristic Aqua style. Try the live capture demo and HDR comparison.">
-  <meta name="theme-color" content="#064679">
-  <meta name="robots" content="index,follow,max-image-preview:large">
-  <link rel="icon" href="assets/prismwake-mark.svg" type="image/svg+xml">
-  <link rel="alternate icon" href="favicon.png" type="image/png">
-  <link rel="canonical" href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
-  <link rel="sitemap" type="application/xml" href="sitemap.xml">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="Prismwake | Catch the light. Keep the detail.">
-  <meta property="og:description" content="HDR-aware screenshots, a glossy Aqua interface and powerful annotation tools. Free and open-source for Windows.">
-  <meta property="og:url" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">
-  <meta property="og:site_name" content="Prismwake">
-  <meta property="og:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Prismwake | Catch the light. Keep the detail.">
-  <meta name="twitter:image" content="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp">
-  <link rel="preload" href="assets/hdrsnip-capture-overlay.webp" as="image" type="image/webp">
-  <link rel="stylesheet" href="prismwake.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prismwake v0.2.0 — Catch the light. Keep the detail.</title>
+  <meta name="description" content="Prismwake v0.2.0: Open-source HDR-aware Windows 10/11 screenshot & productivity suite with floating pinned screenshots, offline OCR text extraction, searchable SQLite history, and smart window capture." />
+  <link rel="icon" href="assets/prismwake-mark.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="prismwake.css" />
   <script type="application/ld+json">
   {
-    "@context":"https://schema.org",
-    "@type":"SoftwareApplication",
-    "name":"Prismwake",
-    "alternateName":"HDRSnip Fusion",
-    "description":"Free Windows HDR-aware screenshot and annotation tool with a Frutiger Aqua-inspired interface.",
-    "url":"https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/",
-    "codeRepository":"https://github.com/shadow728270/HDRScreenshot-FrutigerAqua",
-    "image":"https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/assets/hdrsnip-capture-overlay.webp",
-    "downloadUrl":"https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe",
-    "softwareVersion":"0.1.4",
-    "operatingSystem":"Windows 10, Windows 11",
-    "applicationCategory":"UtilitiesApplication",
-    "license":"https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/blob/main/LICENSE",
-    "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Prismwake",
+    "operatingSystem": "Windows 10, Windows 11 (x64)",
+    "applicationCategory": "UtilitiesApplication",
+    "softwareVersion": "0.2.0",
+    "license": "https://opensource.org/licenses/MIT",
+    "url": "https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/",
+    "downloadUrl": "https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
   }
   </script>
-  <script src="prismwake.js" defer></script>
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a><div class="top-water" aria-hidden="true"></div>
-  <div class="wrap">
-    <header class="nav">
-      <a class="brand" href="./" aria-label="Prismwake home"><img src="assets/prismwake-mark.svg" alt="" width="41" height="41"><span class="brandword"><b>PRISM</b>WAKE</span></a>
-      <nav class="links" aria-label="Main navigation">
-        <a href="#features">Features</a><a href="#playground">The lab</a><a href="#roadmap">Roadmap</a><a href="#faq">FAQ</a>
-        <a class="nav-download" href="#download">Download ↗</a>
-      </nav>
-    </header>
-    <main id="main">
-      <section class="hero" aria-labelledby="hero-heading">
+  <header class="site-header">
+    <div class="container nav-row">
+      <a href="#top" class="brand-link">
+        <img src="assets/prismwake-mark.svg" alt="Prismwake" class="brand-logo" width="38" height="38" />
         <div>
-          <div class="pill"><span class="dot"></span> FREE · OPEN SOURCE · WINDOWS 10/11</div>
-          <h1 id="hero-heading">Catch the<br><em>light.</em></h1><p class="hero-promise">Keep the detail.</p>
-          <p>HDR-aware screenshots without washed-out skies. Capture, annotate, fill, and save with a Windows utility dressed in glorious liquid-glass Aqua.</p>
-          <div class="actions">
-            <a class="btn btn-main" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/download/v0.1.4/Prismwake.exe" aria-label="Download Prismwake current Windows executable version 0.1.4">↓ Download v0.1.4</a>
-            <a class="btn btn-alt" href="#playground">✦ Try the interactive lab</a>
-          </div>
-          <p class="fine">64-bit Windows · MIT licensed · No Python required · v0.1.2 users update automatically</p>
+          <span class="brand-name">Prismwake</span>
+          <span class="brand-tag">v0.2.0 Productivity Suite</span>
         </div>
-        <div class="hero-visual">
-          <div class="gem" aria-hidden="true"></div>
-          <div class="preview-frame">
-            <div class="preview-screen">
-              <div class="window-bar"><span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span><span>Prismwake · HDR capture preview</span><span>HDR ◈</span></div>
-              <img src="assets/hdrsnip-capture-overlay.webp" width="1600" height="757" alt="Real screenshot of the current Aqua screenshot editor interface with a region selected, before the upcoming desktop application rebrand">
-              <div class="screen-foot"><span>REAL APP SCREENSHOT · PRE-REBRAND INTERFACE</span><span>Capture &amp; annotate</span></div>
-            </div>
-          </div>
-          <div class="bubble">✧ A whole new wave of screenshots</div>
-        </div>
-      </section>
-      <div class="ribbon" aria-label="Software highlights">
-        <div><b>HDR</b> scRGB-aware capture</div>
-        <div><b>1–40</b> px stroke size</div>
-        <div><b>F</b> Paint Bucket</div>
-        <div><b>$0</b> Always free</div>
-      </div>
-      <section class="section" id="features" aria-labelledby="features-heading">
-        <div class="section-light">
-          <div class="eyebrow">✧ NOT YOUR STANDARD SNIPPING TOOL</div>
-          <h2 class="section-title" id="features-heading">Brighter capture.<br>Sharper ideas.</h2>
-          <p class="section-lead">Capture the screen you actually wanted, not a blown-out version of it. Prismwake combines DXGI HDR capture with a flexible annotation workflow.</p>
-          <div class="feature-tiles">
-            <article class="feature focus">
-              <span class="tag">HDR &amp; AUTO HDR</span>
-              <h3>Keep the sky. Keep the shadows.</h3>
-              <p>Capture through a floating-point scRGB pipeline and export adjustable HDR-to-SDR PNGs. Actual results vary with drivers and displays.</p>
-            </article>
-            <article class="feature">
-              <span class="tag">EDITOR TOOLS</span>
-              <h3>Draw attention.</h3>
-              <p>Pen, arrows, rectangles, ellipses, text, and 1–40 px stroke widths. No more microscopic annotations.</p>
-            </article>
-            <article class="feature">
-              <span class="tag">NEW IN V0.1.4</span>
-              <h3>Properly polished for Windows.</h3>
-              <p>Resizable settings, a real Windows EXE icon, refined clipboard handling and stability fixes. Blur, pixelate, redact and callouts remain built in.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-      <section class="section" id="playground" aria-labelledby="lab-heading">
-        <div class="lab-intro">
-          <div class="eyebrow">FOUR WAYS TO EXPLORE</div>
-          <h2 class="section-title" id="lab-heading">The Prismwake Lab.</h2>
-          <p class="section-lead">Actually useful interactive demos. No continuous canvas animation, no idle GPU hogging. Everything responds only when you interact.</p>
-        </div>
-        <div class="lab-grid">
-          <article class="lab-card" aria-labelledby="compare-title">
-            <span class="lab-label">01 / COMPARE</span>
-            <h3 id="compare-title">See the difference.</h3>
-            <p>Drag the divider to preview how clipped highlights can change a capture. This is a visual simulation, not a measured comparison.</p>
-            <div class="compare" id="compare" data-real="false" tabindex="0" role="group" aria-label="Comparison preview. Drag, or use the comparison slider below." style="--split:50%">
-              <img id="compareRight" draggable="false" src="assets/hdrsnip-capture-overlay.webp" alt="Actual Aqua capture interface screenshot showing original image" width="1600" height="757">
-              <div class="compare-top"><img id="compareLeft" draggable="false" src="assets/hdrsnip-capture-overlay.webp" alt="" width="1600" height="757"></div>
-              <span class="compare-badge left" id="compareLabelLeft">Simulated blown-out capture</span>
-              <span class="compare-badge right" id="compareLabelRight">Original screenshot</span>
-              <span class="compare-line" aria-hidden="true"></span>
-            </div>
-            <label class="compare-help" for="compareRange">Move comparison divider</label>
-            <input class="compare-range" id="compareRange" type="range" min="0" max="100" value="50" aria-label="Move before and after comparison divider">
-            <p class="compare-help">Illustrative overexposure effect only, not a measured HDR-versus-SDR comparison.</p>
-            <button class="tool" type="button" id="compareReset" style="margin-top:10px">Reset preview</button>
-          </article>
-          <article class="lab-card" aria-labelledby="demo-title">
-            <span class="lab-label">02 / EXPERIENCE</span>
-            <h3 id="demo-title">Try a mini screenshot editor.</h3>
-            <p>Drag a region, draw a closed shape, and use the Paint Bucket to fill the area inside your lines. The background photo is never used for fill detection.</p>
-            <div class="toolbar" role="toolbar" aria-label="Interactive screenshot demo annotation tools">
-              <button type="button" class="tool" data-tool="select" aria-pressed="true">▣ Select</button>
-              <button type="button" class="tool" data-tool="pen" aria-pressed="false">✎ Pen</button>
-              <button type="button" class="tool" data-tool="rect" aria-pressed="false">▢ Rect</button>
-              <button type="button" class="tool" data-tool="arrow" aria-pressed="false">↗ Arrow</button>
-              <button type="button" class="tool" data-tool="fill" aria-pressed="false" title="Paint Bucket: fill areas enclosed by your drawings">◉ Fill</button>
-              <button type="button" class="tool" data-tool="text" aria-pressed="false">T Text</button>
-              <button type="button" class="tool" id="demoUndo" disabled>↶</button>
-              <button type="button" class="tool" id="demoReset">Reset</button>
-            </div>
-            <div class="demo-fill-settings" id="demoFillSettings" hidden>
-              <label for="demoFillColor">Fill color</label><input id="demoFillColor" type="color" value="#35f2c8" aria-label="Paint Bucket fill color">
-              <span>Draw a closed outline, then click inside it.</span>
-            </div>
-            <div class="demo-stage" id="demoStage" aria-label="Interactive capture editor demo; use the toolbar then drag or tap inside">
-              <img src="assets/demo-landscape.webp" alt="Clear Frutiger Aqua waterscape with grass, sparkling water, clouds, bubbles and colorful glass architecture, used as the interactive editor canvas" width="750" height="408" draggable="false">
-              <svg id="demoSvg" class="demo-svg" viewBox="0 0 1000 615" preserveAspectRatio="none" aria-hidden="true"></svg>
-              <span class="demo-hint" id="demoHint">Drag to choose a capture region</span>
-            </div>
-            <p class="demo-note">All edits stay inside your selection. Paint Bucket fills only closed regions formed by your own drawings, ignoring the background image entirely. Undo is supported.</p>
-          </article>
-          <article class="lab-card" aria-labelledby="theme-title">
-            <span class="lab-label">03 / CUSTOMIZE</span>
-            <h3 id="theme-title">Choose your Aqua.</h3>
-            <p>Preview an interface palette, adjust glass opacity, and select a small animation level. These four palettes are available in Prismwake, with a more usable resizable Settings window in v0.1.4.</p>
-            <div class="theme-preview" id="themePreview" data-theme="ocean">
-              <div class="theme-window">
-                <div class="theme-window-title"><span id="themeName">Ocean Current</span> · Prismwake</div>
-                <p>Capture the light. Shape the moment.</p>
-                <div class="theme-controls" aria-hidden="true"><span>✎</span><span>▢</span><span>◉</span><span>↗</span><span>✓</span></div>
-              </div>
-              <span class="theme-bubble" aria-hidden="true"></span>
-            </div>
-            <div class="theme-buttons" role="group" aria-label="Aqua theme palettes">
-              <button type="button" class="theme-button" data-theme-choice="ocean" aria-pressed="true">Ocean</button>
-              <button type="button" class="theme-button" data-theme-choice="emerald" aria-pressed="false">Emerald</button>
-              <button type="button" class="theme-button" data-theme-choice="coral" aria-pressed="false">Coral</button>
-              <button type="button" class="theme-button" data-theme-choice="vista" aria-pressed="false">Vista</button>
-            </div>
-            <div class="theme-adjust"><label for="themeOpacity">Glass opacity: <span id="opacityValue">92%</span></label><input id="themeOpacity" type="range" min="30" max="100" value="92"></div>
-            
-            <p class="theme-warning">Preview-only controls here. Choose your preferred Aqua theme in the desktop app's Settings.</p>
-          </article>
-          <article class="lab-card" id="roadmap" aria-labelledby="roadmap-title">
-            <span class="lab-label">04 / FOLLOW ALONG</span>
-            <h3 id="roadmap-title">A living changelog.</h3>
-            <p>Published releases are loaded directly from GitHub when this card comes into view. Future features below are ideas, not promises.</p>
-            <div class="roadmap">
-              <div class="roadmap-list" id="releaseList" aria-live="polite">
-                <div class="roadmap-entry"><span><strong>v0.1.4 · Settings &amp; Windows polish</strong><small>Current official stable Windows release</small></span><span class="status">Shipped</span></div><div class="roadmap-entry"><span><strong>v0.1.3 · Rebrand &amp; editor upgrade</strong><small>Previous stable release</small></span><span class="status">Shipped</span></div>
-              </div>
-              <p class="roadmap-foot" id="releaseState" role="status">Verified release shown; live list will load on view.</p>
-              <button type="button" id="refreshReleases" class="tool" style="margin-top:10px">↻ Refresh GitHub releases</button>
-              <div class="roadmap-plan" aria-label="Future feature ideas">
-                <div><b>Next to explore</b><small>Pinned screenshots &amp; OCR extraction</small></div>
-                <div><b>Further out</b><small>True HDR file export &amp; scrolling capture</small></div>
-              </div>
-            </div>
-          </article>
-        </div>
-      </section>
+      </a>
+      <nav class="site-nav" aria-label="Primary Navigation">
+        <a href="#productivity">Productivity</a>
+        <a href="#demos">Interactive Demos</a>
+        <a href="#hdr-engine">HDR Engine</a>
+        <a href="#migration">Migration</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
 
-      <section class="download" id="download" aria-labelledby="download-title">
-        <div class="download-panel">
-          <div>
-            <span class="eyebrow" style="color:#0e6d84">FREE FOR WINDOWS</span>
-            <h2 id="download-title">Ready to catch the light?</h2>
-            <p>Prismwake v0.1.4 is officially available. It fixes settings-window clipping, improves resizing, adds proper Windows icons and strengthens clipboard handling. Existing installations can update automatically.</p>
+  <main id="top">
+    <!-- HERO SECTION -->
+    <section class="hero-section">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="version-pill">Prismwake v0.2.0 • The Productivity Update</div>
+          <h1>Catch the light.<br />Keep the detail.</h1>
+          <p class="hero-lead">
+            True 64-bit scRGB DXGI HDR capture meets a complete Frutiger Aqua desktop productivity workflow:
+            pin floating reference screenshots above any app, extract text 100% offline with OCR, search your local
+            SQLite capture history in milliseconds, and target windows with DWM precision.
+          </p>
+          <div class="hero-cta-row">
+            <a id="primary-download-btn"
+               href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe"
+               class="aqua-btn aqua-btn-primary">
+              Download Prismwake.exe (Windows x64)
+            </a>
+            <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases"
+               class="aqua-btn aqua-btn-glass" target="_blank" rel="noopener">
+              View Releases &amp; SHA-256 Checksums
+            </a>
           </div>
-          <a class="btn btn-main" href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/download/v0.1.4/Prismwake.exe">↓ Prismwake v0.1.4</a>
+          <p id="release-status-note" class="hero-subnote">
+            Single standalone Windows 10/11 executable (<code>Prismwake.exe</code>) • 100% Local &amp; Offline • Zero Telemetry
+          </p>
         </div>
-      </section>
-      <section class="faq" id="faq" aria-labelledby="faq-title">
-        <div class="eyebrow">STRAIGHT ANSWERS</div>
-        <h2 class="section-title" id="faq-title">Before you jump in.</h2>
-        <details><summary>Does the app capture native HDR image files?</summary><p>It uses HDR-aware DXGI capture and converts the captured data into tone-mapped SDR PNGs. True HDR file export is a future idea, not a current feature.</p></details>
-        <details><summary>Is Prismwake free, and is its source available?</summary><p>Yes. It is MIT licensed and free. The existing repository contains the current Python application source and historical releases.</p></details>
-        <details><summary>Will existing HDRSnip Fusion installations update?</summary><p>Yes. v0.1.4 publishes an identical executable under the legacy HDRSnipFusion.exe name for existing v0.1.2 and v0.1.3 installations, while new downloads use Prismwake.exe. Your original updater endpoints and saved settings remain compatible.</p></details>
-        <details><summary>Does the browser demo actually capture my screen?</summary><p>No. The mini editor is a local interactive prototype. Its Paint Bucket fills regions enclosed by your own drawings and ignores the background photograph. The comparison viewer is an illustrative effect, not a real HDR measurement. No screen capture or image upload is involved.</p></details>
-        <details><summary>Does Prismwake work with fullscreen games?</summary><p>It captures before opening the editor overlay. Borderless fullscreen tends to be more reliable; exclusive fullscreen can still minimize or behave differently depending on drivers and game settings.</p></details>
-      </section>
-    </main>
-    <footer class="footer">
-      <span>© Prismwake contributors · MIT License · An independent open-source project</span>
-      <span><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">Source code</a><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">All releases</a><a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Report an issue</a><a href="sitemap.xml">Sitemap</a></span>
-    </footer>
-  </div>
+        <div class="hero-card glass-panel">
+          <div class="card-header-bar">
+            <span class="orb-dot orb-cyan"></span>
+            <span class="card-title">Prismwake v0.2.0 Highlights</span>
+          </div>
+          <ul class="hero-feature-list">
+            <li><strong>Pinned Floating Screenshots:</strong> Keep multiple captures always-on-top, resize with locked aspect ratio, adjust opacity (15%–100%), or zoom 25%–300%.</li>
+            <li><strong>100% Offline OCR:</strong> Extract code, error dialogs, and UI text locally with word/line bounding boxes — no cloud uploads or Windows store package requirements.</li>
+            <li><strong>Persistent SQLite + FTS5 History:</strong> Local gallery with instant full-text search, favorites, privacy modes, and automatic storage retention limits.</li>
+            <li><strong>Smart Capture Modes:</strong> Region, DWM Window Capture, Multi-Monitor Fullscreen HDR Capture, Delayed Countdown (3s/5s/10s), and direct Text Capture.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- PART 7.2: NEW PRODUCTIVITY SECTION -->
+    <section id="productivity" class="section-block">
+      <div class="container">
+        <div class="section-heading">
+          <h2>More than a screenshot.</h2>
+          <p class="section-subtitle"><em>Capture it. Pin it. Read it. Find it again.</em></p>
+        </div>
+        <div class="feature-grid-4">
+          <article class="glass-panel feature-card">
+            <div class="feature-badge">01 • Pinning</div>
+            <h3>Pin Anything</h3>
+            <p>
+              Turn any cropped capture or history item into an independent floating desktop window.
+              Drag across multi-DPI monitors, resize sharply, adjust translucency, lock position, or press <code>Esc</code> to dismiss.
+            </p>
+          </article>
+          <article class="glass-panel feature-card">
+            <div class="feature-badge">02 • Offline OCR</div>
+            <h3>Extract Text</h3>
+            <p>
+              Select any region containing logs, stack traces, or tables and receive selectable text offline.
+              Preserves line breaks, punctuation, numbers, and code syntax with clickable line highlights.
+            </p>
+          </article>
+          <article class="glass-panel feature-card">
+            <div class="feature-badge">03 • Local SQLite + FTS5</div>
+            <h3>Never Lose a Capture</h3>
+            <p>
+              Browse your past captures in a Frutiger Aqua gallery. Search by title, filename, date, or recognized OCR text,
+              star favorites, and control privacy with configurable retention policies.
+            </p>
+          </article>
+          <article class="glass-panel feature-card">
+            <div class="feature-badge">04 • Smart Modes</div>
+            <h3>Capture Smarter</h3>
+            <p>
+              Choose Region, Window (using <code>DWMWA_EXTENDED_FRAME_BOUNDS</code>), Fullscreen Monitor, Delayed Countdown
+              for hover menus, or direct Text Capture — each with its own configurable global shortcut.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- PART 7.3, 7.4, 7.5: INTERACTIVE BROWSER DEMOS -->
+    <section id="demos" class="section-block">
+      <div class="container">
+        <div class="section-heading">
+          <h2>Interactive v0.2.0 Workflow Previews</h2>
+          <p class="section-subtitle">
+            Explore lightweight browser simulations of Prismwake v0.2.0's new desktop interfaces.
+            <span class="sim-badge">Browser Interface Simulation — No user data is uploaded</span>
+          </p>
+        </div>
+
+        <!-- 7.3 INTERACTIVE PINNED SCREENSHOT DEMO -->
+        <div class="glass-panel demo-box">
+          <div class="demo-header">
+            <div>
+              <h3>1. Pinned Floating Screenshot Demo <span class="sim-tag">Browser Simulation</span></h3>
+              <p>Drag the pinned window inside the workspace, drag its bottom-right corner to resize, adjust its opacity, or spawn a second pin.</p>
+            </div>
+            <div class="demo-controls">
+              <label for="pin-opacity-range">Opacity:</label>
+              <input id="pin-opacity-range" type="range" min="20" max="100" value="100" />
+              <span id="pin-opacity-label">100%</span>
+              <button id="spawn-second-pin-btn" type="button" class="aqua-btn aqua-btn-small">+ Create 2nd Example Pin</button>
+              <button id="reset-pins-btn" type="button" class="aqua-btn aqua-btn-small">Reset Pins</button>
+            </div>
+          </div>
+          <div id="pin-demo-stage" class="pin-stage" aria-label="Simulated Desktop Workspace">
+            <div class="pin-window" id="demo-pin-1" style="left: 28px; top: 24px; width: 300px; height: 176px;">
+              <div class="pin-hover-bar">
+                <span class="pin-zoom-pill">100% • Pin #1 (HDR Shader Spec)</span>
+                <button type="button" class="pin-close-btn" data-pin-close="demo-pin-1" title="Close Pin">✕</button>
+              </div>
+              <div class="pin-body">
+                <div class="pin-code-card">
+                  <div class="code-title">scRGB Tone-Mapper Reference</div>
+                  <code>white_scale = sdr_nits / 80.0</code>
+                  <code>knee_start  = 0.80  # linear 1:1</code>
+                  <code>headroom    = 6.0   # 1200 nits</code>
+                </div>
+              </div>
+              <div class="pin-resize-handle" data-pin-resize="demo-pin-1" title="Drag to resize"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7.4 INTERACTIVE OCR DEMO -->
+        <div class="glass-panel demo-box">
+          <div class="demo-header">
+            <div>
+              <h3>2. Offline Text Capture (OCR) Interface Demo <span class="sim-tag">Precomputed UI Preview</span></h3>
+              <p>Click <strong>Extract Text</strong> to preview how Prismwake's offline OCR dialog presents recognized lines and selectable text (note: this webpage displays precomputed recognition output; the desktop app runs real offline OCR locally).</p>
+            </div>
+            <div class="demo-controls">
+              <button id="run-ocr-demo-btn" type="button" class="aqua-btn aqua-btn-primary">Extract Text</button>
+              <button id="copy-ocr-demo-btn" type="button" class="aqua-btn aqua-btn-small">Copy Text</button>
+            </div>
+          </div>
+          <div class="ocr-demo-grid">
+            <div class="ocr-source-box">
+              <div class="ocr-sample-dialog">
+                <div class="ocr-sample-hdr">DXGI Capture Diagnostic</div>
+                <p>Adapter: NVIDIA GeForce RTX 4080 (scRGB FP16)</p>
+                <p>Monitor: \\.\DISPLAY1 • 3840x2160 @ 240Hz</p>
+                <p>SDR White Level: 280 nits (scale = 3.50)</p>
+                <p>Status: Frame acquired in 4.2 ms</p>
+              </div>
+            </div>
+            <div class="ocr-output-box">
+              <label for="ocr-demo-textarea" class="sr-only">Recognized OCR Text</label>
+              <textarea id="ocr-demo-textarea" rows="6" readonly placeholder="Click 'Extract Text' to view the recognized output..."></textarea>
+              <div id="ocr-demo-status" class="ocr-status-line">Ready — Offline Tesseract / Built-in Glyph Engine simulation.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7.5 INTERACTIVE HISTORY GALLERY DEMO -->
+        <div class="glass-panel demo-box">
+          <div class="demo-header">
+            <div>
+              <h3>3. Searchable Screenshot History Gallery Demo <span class="sim-tag">Bundled Demo Content</span></h3>
+              <p>Filter by Favorites or search by title, date, or indexed OCR text. Uses bundled sample records locally in your browser.</p>
+            </div>
+            <div class="demo-controls">
+              <input id="history-search-input" type="search" placeholder="Search title, date, or OCR text..." class="aqua-input" />
+              <button id="history-fav-filter-btn" type="button" class="aqua-btn aqua-btn-small" data-fav-only="false">★ Favorites Only</button>
+            </div>
+          </div>
+          <div class="history-demo-layout">
+            <div id="history-grid-container" class="history-thumb-grid"></div>
+            <div id="history-preview-panel" class="history-preview-card">
+              <h4 id="hist-prev-title">Select a capture</h4>
+              <p id="hist-prev-meta" class="hist-meta"></p>
+              <pre id="hist-prev-ocr" class="hist-ocr-box"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HDR ENGINE & SINGLE-EXE MIGRATION SECTION -->
+    <section id="hdr-engine" class="section-block">
+      <div class="container two-col-grid">
+        <div class="glass-panel info-panel">
+          <h3>Preserved 64-Bit scRGB HDR Pipeline</h3>
+          <p>
+            Prismwake v0.2.0 preserves every detail of the v0.1.4 DXGI Desktop Duplication pipeline
+            (<code>DXGI_FORMAT_R16G16B16A16_FLOAT</code>), per-monitor Windows <code>DISPLAYCONFIG_SDR_WHITE_LEVEL</code>
+            querying, and C1-continuous highlight roll-off. OCR and History operate on the tone-mapped display
+            representation without altering your original capture buffer.
+          </p>
+        </div>
+        <div id="migration" class="glass-panel info-panel">
+          <h3>Single-Executable Architecture &amp; Simple Upgrade</h3>
+          <p>
+            Starting in v0.2.0, <strong><code>Prismwake.exe</code> is the sole Windows executable built and published</strong>,
+            paired with <code>Prismwake.exe.sha256</code>. Existing installations running <code>Prismwake.exe</code> update
+            automatically with SHA-256 + PE64 verification and automatic rollback.
+          </p>
+          <ol class="migration-steps">
+            <li>Download the official <code>Prismwake.exe</code> release asset.</li>
+            <li>Close any older copy running under the retired pre-v0.1.3 filename.</li>
+            <li>Launch <code>Prismwake.exe</code> — your existing settings and screenshots are preserved automatically.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROADMAP & CHANGELOG -->
+    <section id="roadmap" class="section-block">
+      <div class="container two-col-grid">
+        <div class="glass-panel info-panel">
+          <h3>What's New in v0.2.0</h3>
+          <ul class="clean-list">
+            <li><strong>Pinned Floating Screenshots:</strong> Independent top-level Aqua windows with zoom presets (25%–300% + Fit), opacity (15%–100%), aspect-locked resize, lock mode, and multi-monitor recovery.</li>
+            <li><strong>Real Offline OCR:</strong> Bundled Tesseract + built-in offline glyph recognizer supporting English (<code>eng</code>) and Italian (<code>ita</code>) with word/line bounding boxes.</li>
+            <li><strong>Searchable SQLite + FTS5 History:</strong> Persistent gallery at <code>%LOCALAPPDATA%\Prismwake\History\</code> with privacy modes and automatic retention cleanup.</li>
+            <li><strong>Smart Capture Modes:</strong> Region, Window (DWM bounds), Fullscreen Monitor, Delayed (3s/5s/10s), and Text Capture with configurable global hotkeys.</li>
+            <li><strong>Single-EXE Release Pipeline:</strong> Publishes only <code>Prismwake.exe</code> and <code>Prismwake.exe.sha256</code>.</li>
+          </ul>
+        </div>
+        <div class="glass-panel info-panel">
+          <h3>Release Roadmap</h3>
+          <ul class="clean-list">
+            <li><strong>v0.1.3 – v0.1.4 (Completed):</strong> Prismwake rebrand, Blur/Pixelate/Redact/Callouts/Eyedropper, multi-resolution Windows icon, and Settings overhaul.</li>
+            <li><strong>v0.2.0 — The Productivity Update (Current):</strong> Pinned Screenshots, Offline OCR, Searchable SQLite History, Smart Capture Modes, and Single-EXE architecture.</li>
+            <li><strong>v0.3.0 (Planned):</strong> Native HDR container export (<code>.jxr</code> / 16-bit PNG / AVIF HDR) and optional scrolling capture.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <span><strong>Prismwake v0.2.0</strong> — Catch the light. Keep the detail.</span>
+      <span>MIT License • <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua">GitHub Repository</a></span>
+    </div>
+  </footer>
+
+  <script src="prismwake.js" defer></script>
 </body>
 </html>

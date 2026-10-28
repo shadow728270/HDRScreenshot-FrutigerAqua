@@ -1,0 +1,32 @@
+Prismwake v0.2.0 (9) - Windows test build
+=========================================
+
+This is the COMPLETE project ZIP. You do not need Gemini's separately attached
+Prismwake.py, test files, capture/smart_modes.py, or other individual files:
+they are already included in their correct project folders.
+
+WINDOWS TEST STEPS
+------------------
+1. Extract this ZIP into a new, empty folder (do not overwrite your known-good build).
+2. Exit Prismwake completely via the system tray to avoid running two versions.
+3. Double-click START_BUILD_KEEP_OPEN.cmd in the extracted project folder.
+4. If the build succeeds, launch dist\Prismwake.exe.
+5. Use the default capture hotkey Ctrl+Shift+X, then choose Region, Window,
+   Monitor, OCR or Delay from the in-capture mode HUD.
+6. Check tray Settings..., History > Storage & Privacy Settings, pinned-image
+   opacity and click-through (and its unlock pill), and cursor-hover window
+   outlining and click-to-snap window capture.
+7. In Advanced OCR, verify the backend is RapidOCR (ONNX CPU).
+
+If the build fails, leave the console open and collect Prismwake-build.log
+along with Prismwake-headless-tests.stderr.log, Prismwake-qt-smoke.stderr.log
+or Prismwake-side-by-side-eval.stderr.log when applicable.
+
+IMPORTANT: This is a developmental test build. Do not publish v0.2.0 to
+GitHub yet. The current release remains v0.1.4.
+
+REVIEW NOTE: Restored known-good 2.5s / 4.5s timeout test thresholds in
+TestPart11.test_02_subprocess_timeout_enforcement_and_orphan_reaping.
+The 0.35s / 0.90s values introduced in Gemini's (9) archive can kill the
+mock child before it writes its PID on a loaded system. This changes only
+the regression test, not OCR's production timeouts or implementation.

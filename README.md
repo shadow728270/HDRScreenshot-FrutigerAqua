@@ -1,76 +1,57 @@
-<p align="center"><img src="docs/assets/prismwake-mark.svg" width="104" alt="Prismwake logo"></p>
+# Prismwake — Catch the light. Keep the detail.
 
-<h1 align="center">PRISMWAKE</h1>
-<p align="center"><strong>Catch the light. Keep the detail.</strong></p>
-<p align="center">A free, open-source Windows screenshot utility with HDR-aware capture, annotation tools, and a wonderfully glossy Frutiger Aqua spirit.</p>
+**Version:** `v0.2.0` (*The Productivity Update*)  
+**Platform:** Windows 10 & Windows 11 (x64)  
+**Canonical Executable:** `Prismwake.exe`  
+**Repository:** [https://github.com/shadow728270/HDRScreenshot-FrutigerAqua](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua)  
+**Official Website:** [https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/](https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/)
 
-<p align="center">
-  <a href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/">🌊 Explore the website</a> ·
-  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe">⬇ Download the Windows EXE</a> ·
-  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases">Releases</a> ·
-  <a href="https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/issues">Issues</a>
-</p>
+---
 
-> **Prismwake v0.1.4 is released.** New Windows downloads use `Prismwake.exe`. The same release ships a byte-identical `HDRSnipFusion.exe` for existing v0.1.2 and v0.1.3 installations, preserving the original update endpoint and configuration.
+## Overview
 
-## See it in action
+**Prismwake v0.2.0** expands Prismwake from an HDR-aware screenshot and annotation utility into a desktop productivity suite while preserving its signature **Frutiger Aqua** liquid-glass design and 64-bit half-float (`DXGI_FORMAT_R16G16B16A16_FLOAT`) scRGB HDR capture pipeline.
 
-<img src="docs/assets/hdrsnip-capture-overlay.webp" alt="Real Aqua screenshot editor captured before the Prismwake desktop rebrand" width="850">
+### Four Major Productivity Systems in v0.2.0
 
-<img src="docs/assets/hdrsnip-settings.webp" alt="Historical v0.1.2 Aqua settings dialog; current v0.1.3 UI may differ" width="370">
+1. **Pinned Floating Screenshots (`pinning/`)**
+   - Pin any region selection, annotated screenshot, or history item as an independent top-level desktop window (`WindowStaysOnTopHint`).
+   - Freely draggable and 8-edge/corner resizable with aspect-ratio lock by default (`Shift` allows free resize).
+   - Hover toolbar & context menu with live **Opacity slider (`15%–100%`)** + presets (`Alt+Wheel`), **Click-Through toggle** (Win32 `WS_EX_TRANSPARENT` on Windows, with an independent interactive unlock control) with a top-right interactive **Click-Through Unlock Pill** (`👻 Click-Thru ON (Click to Control)`), `Alt+Shift` hover unlock, and tray **Unlock All Click-Through Pins**.
+   - Zoom presets (`25%`, `50%`, `75%`, `100%`, `150%`, `200%`, `300%`, `Fit`, `1:1` Reset Size, and `Ctrl+Wheel`), Lock Position, Toggle Always-on-Top (`📌 Top`), Duplicate Pin, Copy (`Ctrl+C`), Save As (`Ctrl+S`), Open Source in Editor, and `Esc` to close only the focused pin.
+   - Multi-monitor & mixed-DPI aware with automatic offscreen/disconnected-monitor recovery and capture exclusion (`SetWindowDisplayAffinity` + pre-capture hide/restore).
 
-The screenshots above are real captures of the current Windows application, not mockups of a future UI.
+2. **100% Offline Hybrid Neural + Region-Aware OCR (`ocr/`)**
+   - Extracts text from any screen region or saved screenshot 100% offline with zero cloud calls, zero telemetry, and no Windows Store package identity requirement.
+   - **Single Production Hybrid OCR Service (`HybridOcrOrchestrator` / `recognize_production_ocr`)**:
+     - **Primary Backend (`RapidOcrBackend`)**: Local CPU ONNX Runtime (`CPUExecutionProvider`) neural text detector + recognizer (`rapidocr` + `onnxruntime`) using bundled, SHA-256-verified PP-OCR ONNX models (`rapidocr_models/`) with native support for English and Italian (`eng`, `ita`, `eng+ita`) and zero runtime model downloads.
+     - **Automatic Fallback Backend (`TesseractOcrBackend`)**: Region-aware offline Tesseract (`tesseract.exe` + `eng.traineddata` & `ita.traineddata`) using connected-component white-core & Fisher linear discriminant text-island detection, single-pass stacked ROI recognition for multi-pill game HUDs and vivid colored buttons, bounded non-deadlocking subprocess pipe draining, and token/line-level partial-result salvage (`filter_and_salvage_partial_ocr_result`).
+   - **100% Automatic Image Optimization**: Quick OCR remains compact and uncluttered while Advanced OCR exposes the active backend (`Backend: RapidOCR (ONNX CPU)` vs `Backend: Tesseract fallback`), clickable line boxes in native screenshot coordinates, language/mode selection, and opt-in diagnostic bundle export.
 
-## What the desktop app can do
+3. **Persistent Searchable Screenshot History (`history/`)**
+   - Local-first SQLite + FTS5 database at `%LOCALAPPDATA%\Prismwake\History\` (`history.db`, `images/`, `thumbnails/`).
+   - Privacy-first default (`saved_or_copied`): records saved, copied, pinned, or OCR-extracted captures and never records canceled captures.
+   - Asynchronous background OCR indexing via `recognize_production_ocr`, configurable retention limits (`Max History Items`, `Max Storage Size MB`, `Retention Period Days`), **Storage & Privacy Settings** deep link, Re-pin focus, Clear History, Delete Selected, and corruption recovery.
 
-- **HDR-aware region screenshots.** Uses DXGI Desktop Duplication to read scRGB framebuffer data and tone-map it for shareable SDR PNG exports. True HDR file exports aren't implemented yet.
-- **Annotation tools.** Pen, rectangles, ellipses, lines, arrows, text, adjustable **1–40 px** stroke widths, and a non-destructive **Paint Bucket** (v0.1.2).
-- **New in v0.1.3.** Blur and pixelation brushes/regions, permanent redaction, numbered callouts, pixel magnifier, eyedropper, and four Aqua themes.
-- **New in v0.1.4.** Responsive, resizable Settings window with saved geometry, native multi-resolution Windows icons, executable metadata, clipboard improvements and additional regression tests.
-- **Capture workflow.** Move and resize the capture region, undo/redo annotations, copy to clipboard, save or quick-save to a configurable folder.
-- **Desktop integration.** Configurable global capture hotkey, Windows tray icon, single-instance guard, optional start with Windows, per-monitor/DPI awareness and diagnostic logging.
-- **Updater.** Optional GitHub Releases update checking with download verification, staged replacement and rollback safety.
-- **Aqua interface.** Refraction-inspired glass styling, animation intensity and transparency controls.
+4. **Unified Capture-Mode Flow & True Window Capture (`capture/`)**
+   - **Focused System Tray Menu**: Single primary **Capture** action (`Ctrl+Shift+X`), **History**, **Settings...**, **Open Screenshots Folder**, **Check for Updates...**, **Pinned & Diagnostics** submenu, and **Exit**.
+   - **In-Capture Mode HUD Bar**: Switch seamlessly between **Region (`1`)**, **Window (`2`)**, **Monitor (`3`)**, **OCR / Text (`4`)**, and **Delayed Capture (`5` — `3s` / `5s` / `10s`)** right inside the capture overlay.
+   - **True Window Capture**: Enumerates visible top-level windows in Z-order (`EnumWindows`, `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`, `GetClientRect` + `ClientToScreen`), highlights the topmost window under the cursor live as you move the mouse, snaps the selection to that window's exact bounds when clicked (or switches to another window when clicked), and supports a live **Client Area (`W`)** toggle.
 
-**Known limits:** Actual fullscreen behavior depends on the game, driver and presentation mode. Borderless fullscreen is generally safer. The EXE is unsigned, so Windows SmartScreen may show a warning.
+---
 
-## Try the new website lab
+## Building `Prismwake.exe` on Windows 10/11
 
-The <a href="https://shadow728270.github.io/HDRScreenshot-FrutigerAqua/#playground">Prismwake Lab</a> contains four lightweight, browser-side experiences:
-
-1. **HDR comparison:** drag the slider to explore a clearly labeled, illustrative overexposure effect. This is a simulation, not a measured HDR-versus-SDR comparison, and has no upload feature.
-2. **Interactive editor demo:** select a region, draw closed shapes, fill those drawings without sampling the background photograph, choose a fill color, add labels, and undo. Annotations are clipped to the selection. This is a browser sandbox, not an in-browser screen-capture engine.
-3. **Aqua theme preview:** try Ocean, Emerald, Coral, or Vista themes plus transparency and motion preferences. These are **concept previews**, not yet desktop app settings.
-4. **Live release history and roadmap:** recent published releases load from the GitHub API where available. Upcoming ideas are labeled as ideas, not committed shipping dates.
-
-The website intentionally avoids permanent canvas animations and expensive full-page blur effects.
-
-## Installation
-
-1. Download [the latest stable executable](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/latest/download/Prismwake.exe).
-2. Run it on 64-bit Windows 10/11. No Python installation is required.
-3. Find its tray icon and use **Ctrl + Shift + X** by default. A previously saved hotkey may override this.
-4. Choose your screenshot folder under Settings. Save with **Ctrl+S**, quick-save and copy with **Ctrl+Shift+S**, or open Save As with **Ctrl+Alt+S**.
-
-## Running from source
-
-Python 3.10+ on Windows:
+Run the one-click builder from PowerShell or Command Prompt (or double-click `START_BUILD_KEEP_OPEN.cmd` / `build_windows_oneclick.bat`):
 
 ```powershell
-py -m pip install -r requirements.txt
-py HDRSnipFusion.py
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_oneclick.ps1
 ```
 
-Builds and release automation live in [`.github/workflows/`](.github/workflows/). The Python source entry point is still `HDRSnipFusion.py` for compatibility. Both `Prismwake.exe` and the old-name `HDRSnipFusion.exe` are published with identical bytes for v0.1.4.
+- **Python Environment Note**: If your global Python installation is Python 3.14, `build_windows_oneclick.ps1` automatically locates or provisions a side-by-side Python 3.12 user-scope installation into a project-local `.venv_build` virtual environment (leaving your global Python 3.14 untouched), installs pinned `rapidocr` and `onnxruntime` CPU wheels, stages and hash-verifies the ONNX models into `rapidocr_models/`, builds `dist\Prismwake.exe`, and runs the release-blocking 5-gate neural + fallback self-test (`--write-ocr-verify-file dist\ocr_verify.json --require-neural`).
 
-## Official v0.1.4 release and migration
+---
 
-[Download Prismwake v0.1.4](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/releases/tag/v0.1.4). Both official executables have SHA-256 `f95de7d227b12f730b1f502f6439dc3120c6b5443c9ff044994b5496475058e6`.
+## Single-Executable Architecture & Upgrading to v0.2.0
 
-The [Windows build and rollback workflow](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/actions/runs/40147899554) passed both EXE tests, including the embedded icon and version metadata, and the [publication workflow](https://github.com/shadow728270/HDRScreenshot-FrutigerAqua/actions/runs/40148364043) verified the original v0.1.2 updater's ability to recognize the release. The legacy filename remains available for users upgrading from earlier versions.
-
-## Releases, security and contributing
-
-Read [the current release notes](RELEASE_NOTES_v0.1.4.md), [contributing guidelines](CONTRIBUTING.md) and [security policy](SECURITY.md). Downloads should come from the official GitHub Releases page only. Inspect diagnostic logs before sharing them publicly; paths, window titles and screenshots can contain private information.
-
-Prismwake is an independent project distributed under the [MIT License](LICENSE).
+Starting in **Prismwake v0.2.0**, `Prismwake.exe` is the sole Windows executable built and published alongside `Prismwake.exe.sha256` (`HDRSnipFusion.exe` is retired and never built).
