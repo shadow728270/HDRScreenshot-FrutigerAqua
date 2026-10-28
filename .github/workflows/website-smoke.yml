@@ -23,10 +23,19 @@ jobs:
           from pathlib import Path
           h=Path('docs/index.html').read_text(encoding='utf-8')
           assert 'Prismwake v0.2.0' in h
-          assert 'prismwake.css' in h and 'prismwake.js' in h
+          assert 'prismwake-aqua-v020.css' in h and 'prismwake-aqua-v020.js' in h
+          assert 'href="prismwake.css"' not in h
+          assert 'src="prismwake.js"' not in h
+          aqua_css=Path('docs/prismwake-aqua-v020.css')
+          assert aqua_css.is_file()
+          css=aqua_css.read_text(encoding='utf-8')
+          assert '.nav{display:flex' in css and '.hero{display:grid' in css
+          assert '--cyan:#6cffe5' in css
           assert Path('docs/prismwake.css').is_file()
+          assert Path('docs/prismwake-aqua-v020.js').is_file()
           assert Path('docs/prismwake.js').is_file()
           assert Path('docs/assets/prismwake-mark.svg').is_file()
           assert 'releases/latest/download/Prismwake.exe' in h
+          assert 'pin-demo-stage' not in h and 'ocr-demo-output' not in h
           print('Website v0.2.0 smoke: PASS')
           PYTEST
